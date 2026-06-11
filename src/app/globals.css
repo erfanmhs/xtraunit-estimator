@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/*
+  XtraUnit brand theme (dark).
+  All brand colors and fonts are defined ONCE here. Change a value in this file
+  and it updates everywhere in the app. Hex codes come from the official 2025
+  logo (garnet red #A01C2D) and brand guide.
+*/
+
+:root {
+  /* --- Brand palette (fixed brand colors) --- */
+  --xu-red: #a01c2d; /* signature garnet red — matches the logo exactly */
+  --xu-red-strong: #7e1623; /* darker red for pressed/active states */
+  --xu-red-soft: #c9485a; /* lighter red for hover/focus on dark */
+  --xu-charcoal: #48484a; /* secondary brand gray */
+  --xu-black: #000000;
+  --xu-white: #ffffff;
+
+  /* --- Dark theme surfaces (how the brand is applied in the app) --- */
+  --background: #0a0a0b; /* page background (near-black) */
+  --surface: #141416; /* cards, panels */
+  --border: #2a2a2e; /* hairline borders */
+  --foreground: #f4f4f5; /* primary text */
+  --muted: #a1a1aa; /* secondary / muted text */
+  --accent: var(--xu-red); /* interactive accent */
+}
+
+/*
+  Map the variables above to Tailwind utility classes so you can write things
+  like `bg-brand`, `text-foreground`, `border-border`, `font-heading`, etc.
+*/
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-brand: var(--xu-red);
+  --color-brand-strong: var(--xu-red-strong);
+  --color-brand-soft: var(--xu-red-soft);
+  --color-charcoal: var(--xu-charcoal);
+
+  --font-sans: var(--font-dm-sans); /* DM Sans — body & UI */
+  --font-heading: var(--font-outfit); /* Outfit — modern headings */
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/*
+  Interactive elements show the hand cursor on hover (Tailwind v4 no longer does
+  this for buttons by default). Disabled buttons show "not-allowed".
+  Placed in @layer base so Tailwind v4's compiler keeps it.
+*/
+@layer base {
+  button:not([disabled]),
+  [role="button"],
+  select,
+  summary {
+    cursor: pointer;
+  }
+  button[disabled] {
+    cursor: not-allowed;
+  }
+}
+
+/*
+  Liquid-glass surfaces — frosted, translucent panels in the brand palette.
+  Inspired by the iOS glass look, tuned for the dark garnet theme. Put `.glass`
+  on a panel for a smoked-glass card; `.glass-strong` for denser chrome (toolbars,
+  modals); `.glass-brand` for a garnet-tinted accent surface.
+*/
+.glass {
+  background: rgba(20, 20, 22, 0.55);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.glass-strong {
+  background: rgba(20, 20, 22, 0.78);
+  backdrop-filter: blur(26px) saturate(165%);
+  -webkit-backdrop-filter: blur(26px) saturate(165%);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow:
+    0 10px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+.glass-brand {
+  background: rgba(160, 28, 45, 0.24);
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid rgba(201, 72, 90, 0.4);
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Thin draggable divider used to resize side panels. */
+.resize-handle {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.resize-handle:hover,
+.resize-handle[data-active="true"] {
+  background: rgba(160, 28, 45, 0.55);
+}
+
+/* ── Proposal printing ──────────────────────────────────────────────────────
+   On screen: .print-only is hidden (live preview shows inputs instead).
+   In print: ONLY the proposal paper prints — app chrome, controls and inputs
+   disappear; the saved/preview text (.print-only) appears. Element selectors
+   live in @layer base (Tailwind v4 drops them when unlayered). */
+.print-only {
+  display: none;
+}
+@layer base {
+  @media print {
+    body * {
+      visibility: hidden;
+    }
+    .proposal-sheet,
+    .proposal-sheet * {
+      visibility: visible;
+    }
+    .proposal-sheet {
+      position: absolute;
+      inset: 0;
+      margin: 0;
+      max-width: none;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0.5in;
+    }
+    .print-hide {
+      display: none !important;
+    }
+    .print-only {
+      display: block;
+    }
+  }
+}

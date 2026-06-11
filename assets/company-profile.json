@@ -1,0 +1,50 @@
+{
+  "company_name": "XtraUnit",
+  "dba": "DOTZ",
+  "full_name": "XtraUnit by DOTZ",
+  "tagline": "Maximizing Space. Multiplying Value.",
+  "positioning": "Design · Build · Develop",
+  "established": "2016",
+  "license": "1033830",
+  "license_text": "Licensed & Bonded — CA LIC #1033830",
+  "address": "15500 Erwin St #2002, Van Nuys, CA 91411",
+  "phone": "+1 310 749 7999",
+  "email": "info@xtraunit.com",
+  "website": "https://xtraunit.com",
+  "map_url": "https://maps.app.goo.gl/SF98BbALXfJBwGjd7",
+  "contacts": [
+    {
+      "name": "Erfan Mirza",
+      "role": "Director & Project Manager",
+      "phone": "+1 818 312 0539",
+      "email": "erfan@xtraunit.com"
+    }
+  ],
+  "hours": {
+    "display": "Mon–Fri, 8:00 AM – 7:00 PM",
+    "monday": "08:00–19:00",
+    "tuesday": "08:00–19:00",
+    "wednesday": "08:00–19:00",
+    "thursday": "08:00–19:00",
+    "friday": "08:00–19:00",
+    "saturday": "Closed",
+    "sunday": "Closed"
+  },
+  "theme": "dark",
+  "primary_color": "#A01C2D",
+  "secondary_color": "#48484A",
+  "neutral_black": "#000000",
+  "neutral_white": "#FFFFFF",
+  "fonts": {
+    "heading": "Prata",
+    "body": "DM Sans"
+  },
+  "logo_file": "assets/logo-wordmark-white.png",
+  "logos": {
+    "wordmark_white": "assets/logo-wordmark-white.png",
+    "wordmark_red": "assets/logo-wordmark-red.png",
+    "mark_svg": "assets/logo-mark.svg",
+    "circle": "assets/logo-circle.png",
+    "stamp": "assets/logo-stamp.png"
+  }
+}
