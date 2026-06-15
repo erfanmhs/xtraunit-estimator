@@ -1,48 +1,32 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# XtraUnit Estimator — Render deployment blueprint (infrastructure-as-code)
+# XtraUnit Estimator — Render deployment blueprint.
 #
-# What this defines: ONE always-on Node web service that runs the Next.js app.
-# "Always-on" matters — the app's AI jobs (scope generation, pricing) run in the
+# ONE always-on Node web service running the Next.js app. "Always-on" is the
+# point: the app's AI jobs (scope generation, pricing) keep running in the
 # background for minutes after the request returns, so the server must stay up.
-# A serverless/edge host would kill those jobs; this does not.
 #
-# How to use it: in Render → New → Blueprint → connect this repo. Render reads
-# this file and creates the service. Then set the secret env vars (below) in the
-# dashboard — they are intentionally NOT in this file (secrets never live in git).
+# Secrets are set in the Render dashboard (Environment tab), never in git —
+# that's what `sync: false` means below: "a human fills this in."
 #
-# ── FUTURE (when paying customers arrive) ────────────────────────────────────
-# Today this is a single web instance: correct and cost-effective for now.
-# The one thing that must NOT change before then: keep numInstances = 1. The
-# background AI jobs live inside this one process (an in-memory job registry),
-# so a second instance wouldn't share them. The planned upgrade — a real job
-# queue + a separate Render "Background Worker" service — is what unlocks
-# numInstances > 1 and true horizontal scale. Database (Supabase) and file
-# storage already scale independently by tier. See DEPLOY.md.
-# ─────────────────────────────────────────────────────────────────────────────
+# FUTURE: this is a single web instance — correct and cheap for now. The
+# background AI jobs live in this one process, so don't scale to multiple
+# instances until the planned job-queue + background-worker upgrade. Database
+# (Supabase) scales independently by tier. See DEPLOY.md.
 
 services:
   - type: web
     name: xtraunit-estimator
     runtime: node
-    plan: starter # ~$7/mo, always-on. Bump to standard/pro as load grows.
-    region: oregon # closest US region; change if your users are elsewhere.
-    numInstances: 1 # KEEP AT 1 until the job-queue upgrade (see note above).
+    plan: starter
+    region: oregon
     buildCommand: npm ci && npm run build
     startCommand: npm run start
     healthCheckPath: /login
-    autoDeploy: true # redeploy automatically on every push to the main branch
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # Secrets — set these in the Render dashboard (Environment tab), not here.
-      # sync:false tells Render "a human fills this in; don't expect it in git".
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      # Optional per-job model overrides (defaults live in src/config/ai.ts).
-      # Uncomment in the dashboard only if you want to override a model there.
-      # - key: AI_MODEL_SCOPE_DRAFT
-      #   sync: false
