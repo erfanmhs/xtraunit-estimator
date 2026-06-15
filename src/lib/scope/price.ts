@@ -16,7 +16,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { findBestMatch } from "./match";
 
-const PRICING_MODEL = "claude-opus-4-8";
+import { AI_MODELS } from "@/config/ai";
+
+const PRICING_MODEL = AI_MODELS.pricing;
 
 type PriceableLine = {
   id: string;

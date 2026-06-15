@@ -31,11 +31,15 @@ export async function startScope(
   } = await supabase.auth.getSession();
   if (!user || !session) return { ok: false, error: "Not signed in." };
 
-  // Don't start a second run if one is already going. (kind filter is skipped
-  // if migration 0011 hasn't been run — before it there are only scope runs.)
+  // Don't start a second run if one is GENUINELY still going. A run whose
+  // process died leaves a stale "running" row that never updates — we must not
+  // let that block new runs forever, or Regenerate silently does nothing.
+  // A live run heartbeats every ~1–2 min between chunks; treat >3 min without
+  // an update as dead, mark it errored, and proceed. (kind filter skipped if
+  // migration 0011 hasn't run — before it there are only scope runs.)
   let existing = await supabase
     .from("scope_runs")
-    .select("id")
+    .select("id,updated_at")
     .eq("project_id", projectId)
     .eq("status", "running")
     .eq("kind", "scope")
@@ -43,12 +47,20 @@ export async function startScope(
   if (existing.error) {
     existing = await supabase
       .from("scope_runs")
-      .select("id")
+      .select("id,updated_at")
       .eq("project_id", projectId)
       .eq("status", "running")
       .maybeSingle();
   }
-  if (existing.data) return { ok: true };
+  if (existing.data) {
+    const age = Date.now() - new Date(existing.data.updated_at).getTime();
+    if (age < 3 * 60 * 1000) return { ok: true }; // a live run is in progress
+    // Stale row from a dead process — clear it so this Regenerate can proceed.
+    await supabase
+      .from("scope_runs")
+      .update({ status: "error", error: "Interrupted.", updated_at: new Date().toISOString() })
+      .eq("id", existing.data.id);
+  }
 
   const { data: run, error } = await supabase
     .from("scope_runs")
@@ -317,7 +329,8 @@ export async function getScopeRun(projectId: string): Promise<ScopeRun | null> {
       return {
         ...run,
         status: "error",
-        error: "Generation timed out or was interrupted. Please try again.",
+        error:
+          "The last generation didn't finish (the server may have restarted). Any scope already shown is unchanged — click Regenerate to run it again.",
       };
     }
   }

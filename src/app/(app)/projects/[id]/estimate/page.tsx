@@ -31,7 +31,7 @@ export default async function EstimatePage({
   // estimates row (markups). Resilient: 0013 not run → defaults + banner.
   const { data: est, error: estError } = await supabase
     .from("estimates")
-    .select("contingency_pct,insurance_pct,overhead_pct,profit_pct")
+    .select("contingency_pct,insurance_pct,overhead_pct,profit_pct,building_sf")
     .eq("project_id", id)
     .maybeSingle();
 
@@ -88,10 +88,9 @@ export default async function EstimatePage({
           <div className="mt-10 rounded-xl border border-brand/40 bg-brand/10 p-6">
             <p className="text-sm text-foreground">
               A database change is needed before the estimate works: run the
-              pending migration(s) — up through{" "}
-              <span className="font-medium">0013_phase10_estimate.sql</span> — in
-              Supabase (SQL Editor → New query → paste → Run). They&apos;re listed
-              in supabase/PENDING-DB-CHANGES.md. Then reload this page.
+              pending migration(s) listed in supabase/PENDING-DB-CHANGES.md in
+              Supabase (SQL Editor → New query → paste → Run), then reload this
+              page.
             </p>
           </div>
         ) : lines.length === 0 ? (
@@ -120,6 +119,7 @@ export default async function EstimatePage({
             projectName={project?.name ?? "Project"}
             lines={lines}
             initialMarkups={markups}
+            initialBuildingSf={est?.building_sf ?? null}
           />
         )}
       </div>

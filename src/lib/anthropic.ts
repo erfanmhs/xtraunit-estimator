@@ -16,11 +16,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 
-/**
- * Default Claude model for the app. Change this in one place to upgrade the
- * whole app to a different model later.
- */
-export const CLAUDE_MODEL = "claude-sonnet-4-6";
+// Model selection lives in src/config/ai.ts (per-role, env-overridable).
 
 let client: Anthropic | null = null;
 

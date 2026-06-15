@@ -7,11 +7,10 @@ export default async function SettingsPage() {
 
   // Resilient to migration 0016 not being run yet — the form still renders
   // (saving shows a friendly "run the migration" error).
+  // select("*") so the page keeps working whatever columns exist (pre/post 0018).
   const { data } = await supabase
     .from("company_settings")
-    .select(
-      "company_name,company_address,company_phone,company_email,company_license,default_contingency_pct,default_insurance_pct,default_op_pct",
-    )
+    .select("*")
     .maybeSingle();
 
   const initial: CompanySettings = {
@@ -20,6 +19,8 @@ export default async function SettingsPage() {
     company_phone: data?.company_phone ?? null,
     company_email: data?.company_email ?? null,
     company_license: data?.company_license ?? "CA LIC #1033830",
+    signer_name: data?.signer_name ?? null,
+    signer_title: data?.signer_title ?? null,
     default_contingency_pct: data?.default_contingency_pct ?? 0,
     default_insurance_pct: data?.default_insurance_pct ?? 0,
     default_op_pct: data?.default_op_pct ?? 0,

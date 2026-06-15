@@ -16,6 +16,7 @@ export type Markups = {
 export async function saveMarkups(
   projectId: string,
   markups: Markups,
+  buildingSf?: number | null,
 ): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
   const {
@@ -37,15 +38,17 @@ export async function saveMarkups(
     clean[k] = v;
   }
 
-  const { error } = await supabase.from("estimates").upsert(
-    {
-      project_id: projectId,
-      owner_id: user.id,
-      ...clean,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "project_id" },
-  );
+  const row: Record<string, unknown> = {
+    project_id: projectId,
+    owner_id: user.id,
+    ...clean,
+    updated_at: new Date().toISOString(),
+  };
+  if (buildingSf !== undefined) row.building_sf = buildingSf;
+
+  const { error } = await supabase
+    .from("estimates")
+    .upsert(row, { onConflict: "project_id" });
   if (error)
     return {
       ok: false,

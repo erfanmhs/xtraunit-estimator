@@ -440,14 +440,23 @@ export async function startPricing(
   } = await supabase.auth.getSession();
   if (!user || !session) return { ok: false, error: "Not signed in." };
 
+  // Block only on a GENUINELY live run; a stale row from a dead process
+  // (>3 min without an update) must not block new runs forever.
   const { data: existing } = await supabase
     .from("scope_runs")
-    .select("id")
+    .select("id,updated_at")
     .eq("project_id", projectId)
     .eq("status", "running")
     .eq("kind", "pricing")
     .maybeSingle();
-  if (existing) return { ok: true };
+  if (existing) {
+    const age = Date.now() - new Date(existing.updated_at).getTime();
+    if (age < 3 * 60 * 1000) return { ok: true };
+    await supabase
+      .from("scope_runs")
+      .update({ status: "error", error: "Interrupted.", updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+  }
 
   const { data: run, error } = await supabase
     .from("scope_runs")

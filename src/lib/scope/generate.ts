@@ -19,10 +19,11 @@ import { toFile } from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
 
-// Draft = Fable 5 (best plan-reading/reasoning); review = Opus 4.8 so the
-// second opinion comes from a genuinely different model.
-const DRAFT_MODEL = "claude-fable-5";
-const CRITIQUE_MODEL = "claude-opus-4-8";
+// Models come from one config (env-overridable) — see src/config/ai.ts.
+import { AI_MODELS } from "@/config/ai";
+
+const DRAFT_MODEL = AI_MODELS.scopeDraft;
+const CRITIQUE_MODEL = AI_MODELS.scopeReview;
 const FILES_BETA = "files-api-2025-04-14";
 
 export type GeneratedLineItem = {
@@ -278,9 +279,46 @@ function parseJson<T>(text: string, what: string): T {
     return JSON.parse(text) as T;
   } catch {
     throw new Error(
-      `The AI's ${what} was too long and got cut off before it finished. Try again, or split this into a smaller plan set.`,
+      `Part of the ${what} came back incomplete. Click Generate again — it usually completes on a retry.`,
     );
   }
+}
+
+// Full-building generation runs in division-sized chunks so no single AI
+// response can grow big enough to get cut off. Each chunk is a complete,
+// bounded draft of related trades; run.ts merges them.
+export const FULL_BUILDING_CHUNKS: string[][] = [
+  [
+    "01 General Requirements",
+    "02 Existing Conditions / Demolition",
+    "31 Earthwork / Sitework",
+    "32 Exterior Improvements",
+    "33 Utilities",
+  ],
+  ["03 Concrete", "04 Masonry", "05 Metals"],
+  [
+    "06 Wood & Plastics (framing)",
+    "07 Thermal & Moisture (roofing/insulation/waterproofing)",
+    "08 Openings (doors & windows)",
+  ],
+  [
+    "09 Finishes",
+    "10 Specialties",
+    "11 Equipment",
+    "12 Furnishings",
+    "14 Conveying Equipment (elevators)",
+  ],
+  ["21 Fire Suppression", "22 Plumbing", "23 HVAC"],
+  ["26 Electrical", "27 Communications", "28 Electronic Safety & Security"],
+];
+
+/** Split a run into chunks: the standard full-building chunks, or the user's
+ *  selected trades in groups of three. */
+export function chunkTrades(trades: string[]): string[][] {
+  if (!trades.length) return FULL_BUILDING_CHUNKS;
+  const out: string[][] = [];
+  for (let i = 0; i < trades.length; i += 3) out.push(trades.slice(i, i + 3));
+  return out;
 }
 
 // Pass 1 — Sonnet draft: bloom the takeoff drivers into a full CSI scope.

@@ -13,6 +13,9 @@ import {
   findGaps,
   uploadPlanFiles,
   deletePlanFiles,
+  chunkTrades,
+  type GeneratedLineItem,
+  type GeneratedFinding,
 } from "./generate";
 
 // In-process registry of running jobs so a later request (the Cancel button)
@@ -67,14 +70,56 @@ export async function runScopeGeneration(opts: {
     stopIfCancelled();
     fileIds = await uploadPlanFiles(bundle, ac.signal);
 
-    stopIfCancelled();
-    await update({ stage: "Drafting the scope by CSI division…", progress: 35 });
-    const { lineItems, findings } = await draftScope(
-      bundle,
-      fileIds,
-      trades,
-      ac.signal,
-    );
+    // Draft in division-sized chunks (two at a time) so no single AI response
+    // can grow large enough to get cut off. Each chunk's lines are filtered to
+    // its own divisions before merging, so chunks can't duplicate each other.
+    const chunks = chunkTrades(trades);
+    const lineItems: GeneratedLineItem[] = [];
+    const findings: GeneratedFinding[] = [];
+    let failedChunks = 0;
+    for (let i = 0; i < chunks.length; i += 2) {
+      stopIfCancelled();
+      const batch = chunks.slice(i, i + 2);
+      const codes = batch
+        .flat()
+        .map((t) => t.split(" ")[0])
+        .join(", ");
+      await update({
+        stage: `Drafting the scope — divisions ${codes} (${Math.min(i + 2, chunks.length)}/${chunks.length})…`,
+        progress: 25 + Math.round((i / chunks.length) * 40),
+      });
+      // Per-chunk fault tolerance: one chunk's transient error must NOT sink the
+      // whole run. Keep what succeeds; count failures. (A user cancel still
+      // aborts everything — re-thrown below.)
+      const parts = await Promise.allSettled(
+        batch.map((chunk) => draftScope(bundle, fileIds, chunk, ac.signal)),
+      );
+      for (let j = 0; j < parts.length; j++) {
+        const p = parts[j];
+        if (p.status === "rejected") {
+          const err = p.reason;
+          if (ac.signal.aborted || (err instanceof Error && err.name === "AbortError"))
+            throw new DOMException("Cancelled", "AbortError");
+          failedChunks++;
+          continue;
+        }
+        const allowed = new Set(
+          batch[j].map((t) => t.split(" ")[0].padStart(2, "0")),
+        );
+        lineItems.push(
+          ...p.value.lineItems.filter((li) =>
+            allowed.has((li.division_code ?? "").padStart(2, "0")),
+          ),
+        );
+        findings.push(...p.value.findings);
+      }
+    }
+    // Only a total wipeout is a real failure; partial scope is still useful.
+    if (!lineItems.length) {
+      throw new Error(
+        "The AI couldn't draft any divisions this time (it may be busy). Please click Generate again.",
+      );
+    }
 
     stopIfCancelled();
     await update({ stage: "Reviewing for gaps & assumptions…", progress: 70 });
@@ -157,7 +202,14 @@ export async function runScopeGeneration(opts: {
       );
     }
 
-    await update({ status: "done", stage: "Done", progress: 100 });
+    await update({
+      status: "done",
+      stage:
+        failedChunks > 0
+          ? `Done — but ${failedChunks} division group${failedChunks > 1 ? "s" : ""} didn't generate. Click Regenerate to fill them in.`
+          : "Done",
+      progress: 100,
+    });
   } catch (e) {
     const aborted =
       ac.signal.aborted ||

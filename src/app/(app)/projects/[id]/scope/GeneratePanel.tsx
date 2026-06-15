@@ -70,7 +70,7 @@ function Progress({
           style={{ width: `${Math.min(100, Math.max(2, run.progress))}%` }}
         />
       </div>
-      <p className="mt-2 text-xs text-muted">{run.stage ?? "Working…"}</p>
+      <p className="mt-2 text-sm leading-relaxed text-foreground">{run.stage ?? "Working…"}</p>
       <div className="mt-3 flex items-center justify-between">
         <p className="text-[11px] text-muted/70">
           You can leave this page — it keeps generating in the background.
@@ -193,10 +193,14 @@ export default function GeneratePanel({
   return (
     <div className="flex w-full max-w-md flex-col items-end gap-2">
       {run?.status === "error" && run.error ? (
-        <p className="text-right text-xs text-brand-soft">{run.error}</p>
+        <p className="w-full rounded-lg border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm leading-relaxed text-brand-soft">
+          {run.error}
+        </p>
       ) : null}
       {run?.status === "cancelled" ? (
-        <p className="text-right text-xs text-muted">Generation cancelled.</p>
+        <p className="w-full rounded-lg border border-border bg-surface/40 px-4 py-2.5 text-sm text-muted">
+          Generation cancelled.
+        </p>
       ) : null}
 
       <div className="flex items-center gap-1">

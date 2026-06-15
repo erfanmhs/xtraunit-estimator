@@ -107,7 +107,7 @@ export default function SuggestPanel({
           />
         </div>
         <div className="mt-2 flex items-center justify-between">
-          <p className="text-xs text-muted">{run.stage ?? "Working…"}</p>
+          <p className="text-sm leading-relaxed text-foreground">{run.stage ?? "Working…"}</p>
           <button
             type="button"
             onClick={onCancel}
@@ -124,10 +124,14 @@ export default function SuggestPanel({
   return (
     <div className="flex flex-col items-end gap-1.5">
       {run?.status === "error" && run.error ? (
-        <p className="max-w-md text-right text-xs text-brand-soft">{run.error}</p>
+        <p className="w-full max-w-md rounded-lg border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm leading-relaxed text-brand-soft">
+          {run.error}
+        </p>
       ) : null}
       {run?.status === "cancelled" ? (
-        <p className="text-right text-xs text-muted">Suggestion cancelled.</p>
+        <p className="w-full max-w-md rounded-lg border border-border bg-surface/40 px-4 py-2.5 text-sm text-muted">
+          Suggestion cancelled.
+        </p>
       ) : null}
       <button
         type="button"

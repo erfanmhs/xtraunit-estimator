@@ -35,11 +35,13 @@ export default function EstimateView({
   projectName,
   lines,
   initialMarkups,
+  initialBuildingSf,
 }: {
   projectId: string;
   projectName: string;
   lines: PricedLine[];
   initialMarkups: Markups;
+  initialBuildingSf: number | null;
 }) {
   // Fold any previously-saved separate profit % into the combined O&P line.
   const combine = (m: Markups): Markups => ({
@@ -55,6 +57,10 @@ export default function EstimateView({
     ),
   }));
   const [saved, setSaved] = useState<Markups>(combine(initialMarkups));
+  const [sf, setSf] = useState(
+    initialBuildingSf ? String(initialBuildingSf) : "",
+  );
+  const [savedSf, setSavedSf] = useState<number | null>(initialBuildingSf);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -80,15 +86,21 @@ export default function EstimateView({
     return out;
   }, [pcts, saved]);
 
+  const sfVal = evalFormula(sf);
+
   function persistIfChanged() {
-    const changed = MARKUP_ROWS.some(([k]) => pct[k] !== saved[k]);
+    const sfChanged = (sfVal ?? null) !== savedSf;
+    const changed = MARKUP_ROWS.some(([k]) => pct[k] !== saved[k]) || sfChanged;
     if (!changed) return;
     const next = { ...pct };
+    const nextSf = sfVal ?? null;
     setError(null);
     startTransition(async () => {
-      const res = await saveMarkups(projectId, next);
-      if (res.ok) setSaved(next);
-      else setError(res.error ?? "Could not save markups.");
+      const res = await saveMarkups(projectId, next, nextSf);
+      if (res.ok) {
+        setSaved(next);
+        setSavedSf(nextSf);
+      } else setError(res.error ?? "Could not save markups.");
     });
   }
 
@@ -122,6 +134,26 @@ export default function EstimateView({
     steps.push({ label, pctVal: pct[k], amount, running });
   }
   const grandTotal = running;
+
+  // Cost mix — where the direct cost sits across the five buckets.
+  // Total-only lines can't be split, so they're shown as "unsplit".
+  const mix = useMemo(() => {
+    const m = { Labor: 0, Material: 0, Subcontractor: 0, Equipment: 0, Other: 0, Unsplit: 0 };
+    for (const li of priced) {
+      const mode = li.price_mode ?? "unit";
+      if (mode === "total") {
+        m.Unsplit += li.cost_total ?? 0;
+        continue;
+      }
+      const f = mode === "lump" ? 1 : (li.quantity ?? 0);
+      m.Labor += f * (li.cost_labor ?? 0);
+      m.Material += f * (li.cost_material ?? 0);
+      m.Subcontractor += f * (li.cost_sub ?? 0);
+      m.Equipment += f * (li.cost_equipment ?? 0);
+      m.Other += f * (li.cost_other ?? 0);
+    }
+    return m;
+  }, [priced]);
 
   function exportCsv() {
     const q = (s: unknown) => `"${String(s ?? "").replace(/"/g, '""')}"`;
@@ -174,6 +206,16 @@ export default function EstimateView({
       );
     }
     rows.push([q("GRAND TOTAL"), "", "", "", "", "", "", "", "", "", q(grandTotal.toFixed(2))].join(","));
+    rows.push("");
+    rows.push([q("Cost mix (direct)"), "", "", "", "", "", "", "", "", "", ""].join(","));
+    for (const [label, v] of Object.entries(mix)) {
+      if (v > 0)
+        rows.push([q(label === "Unsplit" ? "Total-only lines" : label), "", "", "", "", "", "", "", "", "", q(v.toFixed(2))].join(","));
+    }
+    if (sfVal && sfVal > 0) {
+      rows.push([q(`Building area (sf)`), "", "", "", "", "", "", "", "", "", q(sfVal.toFixed(0))].join(","));
+      rows.push([q(`Cost per SF`), "", "", "", "", "", "", "", "", "", q((grandTotal / sfVal).toFixed(2))].join(","));
+    }
 
     // BOM so Excel opens it as UTF-8.
     const blob = new Blob(["﻿" + rows.join("\r\n")], {
@@ -210,13 +252,33 @@ export default function EstimateView({
           {divisions.map((d) => (
             <div key={d.key} className="flex items-center justify-between py-2 text-sm">
               <span className="text-foreground">{d.key}</span>
-              <span className="text-muted">{usd.format(d.total)}</span>
+              <span className="text-muted">
+                {usd.format(d.total)}
+                <span className="ml-2 inline-block w-10 text-right text-[11px] text-muted/60">
+                  {subtotal > 0 ? `${Math.round((d.total / subtotal) * 100)}%` : ""}
+                </span>
+              </span>
             </div>
           ))}
           <div className="flex items-center justify-between py-2.5 text-sm font-medium">
             <span className="text-foreground">Direct cost subtotal</span>
             <span className="text-foreground">{usd.format(subtotal)}</span>
           </div>
+        </div>
+
+        {/* Cost mix — labor vs material vs subs at a glance */}
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-white/10 pt-3 text-xs text-muted">
+          {Object.entries(mix)
+            .filter(([, v]) => v > 0)
+            .map(([label, v]) => (
+              <span key={label}>
+                {label === "Unsplit" ? "Total-only lines" : label}:{" "}
+                <span className="text-foreground">{usd.format(v)}</span>
+                {subtotal > 0 ? (
+                  <span className="text-muted/60"> ({Math.round((v / subtotal) * 100)}%)</span>
+                ) : null}
+              </span>
+            ))}
         </div>
       </section>
 
@@ -257,6 +319,35 @@ export default function EstimateView({
           </span>
           <span className="font-heading text-2xl text-brand-soft">
             {usd.format(grandTotal)}
+          </span>
+        </div>
+
+        {/* $/SF benchmark */}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-sm">
+          <label className="flex items-center gap-2 text-muted">
+            Building area
+            <input
+              type="text"
+              inputMode="decimal"
+              value={sf}
+              onChange={(e) => setSf(e.target.value)}
+              onBlur={persistIfChanged}
+              placeholder="e.g. 12500"
+              className="w-28 rounded-md border border-border bg-black/20 px-2 py-1 text-right text-sm text-foreground outline-none focus:border-brand"
+            />
+            sf
+          </label>
+          <span className="text-muted">
+            {sfVal && sfVal > 0 ? (
+              <>
+                <span className="font-medium text-foreground">
+                  {usd.format(grandTotal / sfVal)}
+                </span>{" "}
+                / SF
+              </>
+            ) : (
+              "enter the area for $/SF"
+            )}
           </span>
         </div>
       </section>

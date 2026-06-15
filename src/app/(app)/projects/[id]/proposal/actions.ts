@@ -8,7 +8,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
 
-const LETTER_MODEL = "claude-opus-4-8";
+import { AI_MODELS } from "@/config/ai";
+
+const LETTER_MODEL = AI_MODELS.letter;
 
 export async function saveProposal(
   projectId: string,
@@ -79,7 +81,7 @@ Project: ${project?.name ?? "the project"}${project?.project_type ? ` — ${proj
 Bid amount (use this exact number once): ${usd.format(grandTotal)}.
 Trades covered: ${divisionSummary}.
 
-Structure: a short opening stating what is being proposed and for how much; one paragraph on scope coverage (reference the attached cost breakdown by CSI division rather than re-listing everything); one short paragraph on what makes the number reliable (takeoffs from the plans, trade-partner quotes where applicable); close with validity (30 days), and an invitation to discuss. Sign-off "Respectfully," followed by the company name placeholder line. 150-220 words. Letter body only — no date, no addresses (the template adds those).`;
+Structure: a short opening stating what is being proposed and for how much; one paragraph on scope coverage (reference the attached cost breakdown by CSI division rather than re-listing everything); one short paragraph on what makes the number reliable (takeoffs from the plans, trade-partner quotes where applicable); close with validity (30 days), and an invitation to discuss. End with "Respectfully," and NOTHING after it — no name, no company (the template adds the signature block). 150-220 words. Letter body only — no date, no addresses (the template adds those).`;
 
   try {
     const client = getAnthropicClient();

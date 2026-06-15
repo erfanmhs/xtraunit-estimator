@@ -12,6 +12,8 @@ export type CompanySettings = {
   company_phone: string | null;
   company_email: string | null;
   company_license: string | null;
+  signer_name: string | null;
+  signer_title: string | null;
   default_contingency_pct: number;
   default_insurance_pct: number;
   default_op_pct: number;

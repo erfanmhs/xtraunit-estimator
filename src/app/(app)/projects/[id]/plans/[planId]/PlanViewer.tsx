@@ -267,10 +267,16 @@ export default function PlanViewer({
   const [activeCountId, setActiveCountId] = useState<string | null>(null);
   const [editGeom, setEditGeom] = useState<Pt[] | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
-  // Layer groups: hidden layers stay saved but don't render; expanded groups
-  // show their individual measurement records in the panel.
+  // Layer groups: hidden layers stay saved but don't render. One layer at a
+  // time can be open in the panel's layer editor (rename / attrs / delete) —
+  // individual runs are edited by clicking them on the drawing itself.
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
-  const [expandedLayers, setExpandedLayers] = useState<Set<string>>(new Set());
+  const [editingLayer, setEditingLayer] = useState<string | null>(null);
+  const [layerName, setLayerName] = useState("");
+  const [layerHeight, setLayerHeight] = useState("");
+  const [layerSided, setLayerSided] = useState<"single" | "double">("single");
+  const [layerVolW, setLayerVolW] = useState("");
+  const [layerVolD, setLayerVolD] = useState("");
 
   const currentSheet = sheets.find((s) => s.page_number === pageNum) ?? null;
   const currentScale = currentSheet ? scales[currentSheet.id] : null;
@@ -1140,6 +1146,99 @@ export default function PlanViewer({
   }
   function duplicateSelected() {
     if (selected) duplicateMeasurement(selected);
+  }
+
+  // ── Layer-level edits: one change applies to every run in the layer ──────
+  async function renameLayer(rows: Measurement[], newName: string) {
+    const ids = rows.map((r) => r.id);
+    const layerVal = newName.trim() || null;
+    setMeasurements((arr) =>
+      arr.map((m) => (ids.includes(m.id) ? { ...m, layer: layerVal } : m)),
+    );
+    await supabase.from("measurements").update({ layer: layerVal }).in("id", ids);
+  }
+
+  async function recolorLayer(rows: Measurement[], newColor: string) {
+    const ids = rows.map((r) => r.id);
+    setMeasurements((arr) =>
+      arr.map((m) => (ids.includes(m.id) ? { ...m, color: newColor } : m)),
+    );
+    await supabase.from("measurements").update({ color: newColor }).in("id", ids);
+  }
+
+  // Change wall height/sides or volume width/depth for the WHOLE layer; every
+  // affected run's value is recomputed automatically (single↔double doubles
+  // the area, new height re-derives every run, etc.).
+  async function updateLayerAttrs(
+    rows: Measurement[],
+    patch: Partial<
+      Pick<Measurement, "wall_height" | "wall_sided" | "vol_width" | "vol_depth">
+    >,
+  ) {
+    const sx = currentScale?.x;
+    const sy = currentScale?.y;
+    if (sx == null || sy == null) return;
+    const wallPatch = "wall_height" in patch || "wall_sided" in patch;
+    const volPatch = "vol_width" in patch || "vol_depth" in patch;
+    const updated = rows
+      .filter(
+        (m) =>
+          (m.type === "wall" && wallPatch) || (m.type === "volume" && volPatch),
+      )
+      .map((m) => {
+        const next = { ...m, ...patch } as Measurement;
+        next.value = recomputeValue(next, sx, sy);
+        return next;
+      });
+    if (!updated.length) return;
+    const byId = new Map(updated.map((m) => [m.id, m]));
+    setMeasurements((arr) => arr.map((m) => byId.get(m.id) ?? m));
+    for (let i = 0; i < updated.length; i += 10) {
+      await Promise.all(
+        updated.slice(i, i + 10).map((m) =>
+          supabase
+            .from("measurements")
+            .update({
+              wall_height: m.wall_height,
+              wall_sided: m.wall_sided,
+              vol_width: m.vol_width,
+              vol_depth: m.vol_depth,
+              value: m.value,
+            })
+            .eq("id", m.id),
+        ),
+      );
+    }
+  }
+
+  async function deleteLayer(rows: Measurement[]) {
+    const label = layerKeyOf(rows[0]?.layer ?? null);
+    if (
+      !window.confirm(
+        `Delete layer "${label}" and its ${rows.length} measurement${rows.length > 1 ? "s" : ""}? This can't be undone.`,
+      )
+    )
+      return;
+    const ids = rows.map((r) => r.id);
+    setMeasurements((arr) => arr.filter((m) => !ids.includes(m.id)));
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+    setEditingLayer(null);
+    await supabase.from("measurements").delete().in("id", ids);
+  }
+
+  function openLayerEditor(g: { layer: string; rows: Measurement[] }) {
+    if (editingLayer === g.layer) {
+      setEditingLayer(null);
+      return;
+    }
+    setEditingLayer(g.layer);
+    setLayerName(g.layer === "Unlabeled" ? "" : g.layer);
+    const w = g.rows.find((r) => r.type === "wall");
+    setLayerHeight(w ? String(w.wall_height ?? 8) : "");
+    setLayerSided(w?.wall_sided === "double" ? "double" : "single");
+    const v = g.rows.find((r) => r.type === "volume");
+    setLayerVolW(v && v.vol_width != null ? String(v.vol_width) : "");
+    setLayerVolD(v && v.vol_depth != null ? String(v.vol_depth) : "");
   }
 
   async function deleteMeasurement(id: string) {
@@ -2291,7 +2390,9 @@ export default function PlanViewer({
               ) : (
                 layerGroups.map((g) => {
                   const isHidden = hiddenLayers.has(g.layer);
-                  const isExpanded = expandedLayers.has(g.layer);
+                  const isEditing = editingLayer === g.layer;
+                  const hasWall = g.rows.some((r) => r.type === "wall");
+                  const hasVol = g.rows.some((r) => r.type === "volume");
                   const isRecording =
                     !isHidden &&
                     MEASURE_TOOLS.includes(tool) &&
@@ -2329,16 +2430,9 @@ export default function PlanViewer({
                         />
                         <button
                           type="button"
-                          onClick={() =>
-                            setExpandedLayers((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(g.layer)) next.delete(g.layer);
-                              else next.add(g.layer);
-                              return next;
-                            })
-                          }
+                          onClick={() => openLayerEditor(g)}
                           className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left text-sm"
-                          title={`${g.rows.length} runs — click to ${isExpanded ? "collapse" : "expand"}`}
+                          title={`${g.rows.length} runs — click to edit this layer (name, color, wall/volume settings, delete)`}
                         >
                           <span className="truncate text-foreground">
                             {g.layer}
@@ -2372,46 +2466,130 @@ export default function PlanViewer({
                         </button>
                       </div>
 
-                      {isExpanded
-                        ? g.rows.map((m) => (
+                      {isEditing ? (
+                        <div className="flex flex-col gap-2 border-t border-white/5 px-2 pb-2 pt-2">
+                          {/* Rename — applies to every run in the layer */}
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              value={layerName}
+                              onChange={(e) => setLayerName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  renameLayer(g.rows, layerName);
+                                  setEditingLayer(null);
+                                }
+                                if (e.key === "Escape") setEditingLayer(null);
+                              }}
+                              placeholder="Layer name"
+                              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
+                            />
                             <button
-                              key={m.id}
                               type="button"
                               onClick={() => {
-                                setTool("select");
-                                setSelectedId(m.id);
+                                renameLayer(g.rows, layerName);
+                                setEditingLayer(null);
                               }}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                setSelectedId(m.id);
-                                setMenu({
-                                  x: e.clientX,
-                                  y: e.clientY,
-                                  kind: "measurement",
-                                  id: m.id,
-                                });
-                              }}
-                              className="flex w-full items-center gap-2 rounded-md py-1 pl-7 pr-2 text-left text-xs hover:bg-white/5"
+                              className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:border-brand"
                             >
-                              <span
-                                className="inline-block h-2 w-2 shrink-0 rounded-full"
-                                style={{ background: m.color ?? "#A01C2D" }}
-                              />
-                              <span className="truncate text-muted">
-                                {m.value == null
-                                  ? m.type
-                                  : m.type === "count"
-                                    ? `${m.value} ${m.unit}`
-                                    : m.type === "volume"
-                                      ? `${m.value.toFixed(0)} cf · ${(
-                                          m.value / CF_PER_CY
-                                        ).toFixed(2)} cy`
-                                      : `${m.value.toFixed(1)} ${m.unit}`}
-                                <span className="text-muted/60"> · {m.type}</span>
-                              </span>
+                              Rename
                             </button>
-                          ))
-                        : null}
+                          </div>
+
+                          {/* Color — applies to every run */}
+                          <div className="flex items-center gap-1">
+                            {COLORS.map((c) => (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => recolorLayer(g.rows, c)}
+                                style={{ background: c }}
+                                className={`h-4 w-4 rounded-full ${g.color === c ? "ring-2 ring-foreground" : ""}`}
+                              />
+                            ))}
+                          </div>
+
+                          {/* Wall settings — recompute every run's area */}
+                          {hasWall ? (
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                              <span className="uppercase tracking-wider">Height</span>
+                              <input
+                                value={layerHeight}
+                                onChange={(e) => setLayerHeight(e.target.value)}
+                                onBlur={() => {
+                                  const h = parseFloat(layerHeight);
+                                  if (Number.isFinite(h) && h > 0)
+                                    updateLayerAttrs(g.rows, { wall_height: h });
+                                }}
+                                inputMode="decimal"
+                                className="w-14 rounded-md border border-border bg-background px-1.5 py-1 text-foreground focus:border-brand focus:outline-none"
+                              />
+                              <span>ft</span>
+                              {(["single", "double"] as const).map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() => {
+                                    setLayerSided(s);
+                                    updateLayerAttrs(g.rows, { wall_sided: s });
+                                  }}
+                                  className={`rounded-md border px-2 py-1 capitalize transition-colors ${
+                                    layerSided === s
+                                      ? "border-brand bg-brand/15 text-foreground"
+                                      : "border-border hover:border-brand"
+                                  }`}
+                                >
+                                  {s}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+
+                          {/* Volume settings — recompute every run */}
+                          {hasVol ? (
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                              <span className="uppercase tracking-wider">W</span>
+                              <input
+                                value={layerVolW}
+                                onChange={(e) => setLayerVolW(e.target.value)}
+                                onBlur={() => {
+                                  const w = parseFloat(layerVolW);
+                                  if (Number.isFinite(w) && w > 0)
+                                    updateLayerAttrs(g.rows, { vol_width: w });
+                                }}
+                                inputMode="decimal"
+                                className="w-14 rounded-md border border-border bg-background px-1.5 py-1 text-foreground focus:border-brand focus:outline-none"
+                              />
+                              <span className="uppercase tracking-wider">D</span>
+                              <input
+                                value={layerVolD}
+                                onChange={(e) => setLayerVolD(e.target.value)}
+                                onBlur={() => {
+                                  const d = parseFloat(layerVolD);
+                                  if (Number.isFinite(d) && d > 0)
+                                    updateLayerAttrs(g.rows, { vol_depth: d });
+                                }}
+                                inputMode="decimal"
+                                className="w-14 rounded-md border border-border bg-background px-1.5 py-1 text-foreground focus:border-brand focus:outline-none"
+                              />
+                              <span>ft</span>
+                            </div>
+                          ) : null}
+
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-muted/70">
+                              Click a run on the drawing to edit or delete just
+                              that one.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => deleteLayer(g.rows)}
+                              className="text-brand-soft transition-colors hover:text-foreground"
+                            >
+                              Delete layer
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })

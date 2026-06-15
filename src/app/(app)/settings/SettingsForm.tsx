@@ -14,6 +14,8 @@ const IDENTITY_FIELDS = [
   ["company_phone", "Phone", "(818) 000-0000"],
   ["company_email", "Email", "bids@xtraunit.com"],
   ["company_license", "License", "CA LIC #1033830"],
+  ["signer_name", "Proposal signer — name", "Erfan Mirza"],
+  ["signer_title", "Proposal signer — title", "Principal"],
 ] as const;
 
 const MARKUP_FIELDS = [
@@ -61,6 +63,8 @@ export default function SettingsForm({
         company_phone: identity.company_phone.trim() || null,
         company_email: identity.company_email.trim() || null,
         company_license: identity.company_license.trim() || null,
+        signer_name: identity.signer_name.trim() || null,
+        signer_title: identity.signer_title.trim() || null,
         default_contingency_pct: parsed.default_contingency_pct,
         default_insurance_pct: parsed.default_insurance_pct,
         default_op_pct: parsed.default_op_pct,

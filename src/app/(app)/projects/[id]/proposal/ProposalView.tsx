@@ -17,6 +17,8 @@ export type CompanyInfo = {
   company_phone: string | null;
   company_email: string | null;
   company_license: string | null;
+  signer_name: string | null;
+  signer_title: string | null;
 };
 export type ProposalRow = {
   letter_text: string | null;
@@ -255,6 +257,18 @@ export default function ProposalView({
           >
             {letter || "—"}
           </div>
+          {/* Signature block from Settings */}
+          {company.signer_name ? (
+            <div className="mt-4 text-sm leading-snug">
+              <p className="font-medium">{company.signer_name}</p>
+              {company.signer_title ? (
+                <p className="text-neutral-600">{company.signer_title}</p>
+              ) : null}
+              <p className="text-neutral-600">
+                {company.company_name || "XtraUnit Construction"}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {/* Cost table */}

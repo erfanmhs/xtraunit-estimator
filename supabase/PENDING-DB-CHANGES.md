@@ -15,7 +15,7 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-_(nothing pending)_
+- [ ] **0018_estimate_polish.sql** — `building_sf` on estimates (enables the $/SF benchmark) and `signer_name`/`signer_title` on company settings (signs the proposal letter).
 
 ---
 

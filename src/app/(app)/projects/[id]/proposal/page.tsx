@@ -46,11 +46,10 @@ export default async function ProposalPage({
     overhead_pct: (est?.overhead_pct ?? 0) + (est?.profit_pct ?? 0),
     profit_pct: 0,
   };
+  // select("*") so the page keeps working whatever columns exist (pre/post 0018).
   const { data: cs } = await supabase
     .from("company_settings")
-    .select(
-      "company_name,company_address,company_phone,company_email,company_license,default_contingency_pct,default_insurance_pct,default_op_pct",
-    )
+    .select("*")
     .maybeSingle();
   if (!est && cs) {
     markups = {
@@ -66,6 +65,8 @@ export default async function ProposalPage({
     company_phone: cs?.company_phone ?? null,
     company_email: cs?.company_email ?? null,
     company_license: cs?.company_license ?? null,
+    signer_name: cs?.signer_name ?? null,
+    signer_title: cs?.signer_title ?? null,
   };
 
   // Assumptions & exclusions from the AI review (unresolved ones).

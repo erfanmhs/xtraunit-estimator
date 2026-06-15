@@ -8,7 +8,9 @@ import "server-only";
  */
 import { getAnthropicClient } from "@/lib/anthropic";
 
-const QUOTE_MODEL = "claude-opus-4-8";
+import { AI_MODELS } from "@/config/ai";
+
+const QUOTE_MODEL = AI_MODELS.quoteRead;
 
 export type QuoteExtraction = {
   sub_name: string;
