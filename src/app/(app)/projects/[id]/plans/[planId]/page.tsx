@@ -18,21 +18,35 @@ export default async function PlanViewerPage({
     .maybeSingle();
   if (!pf) notFound();
 
-  // Try with the optional `name` column; fall back if migration 0006 hasn't run.
-  const named = await supabase
+  // Tiered select so the page works whatever migrations have run:
+  // full (with ledger, 0024) → named (with name, 0006) → minimal.
+  const order = { ascending: true } as const;
+  const full = await supabase
     .from("sheets")
-    .select("id,page_number,name,label,notes,scale_x,scale_y,scale_preset")
+    .select(
+      "id,page_number,name,label,notes,scale_x,scale_y,scale_preset,ledger",
+    )
     .eq("plan_file_id", planId)
-    .order("page_number", { ascending: true });
-  const sheetsData = named.error
-    ? (
-        await supabase
-          .from("sheets")
-          .select("id,page_number,label,notes,scale_x,scale_y,scale_preset")
-          .eq("plan_file_id", planId)
-          .order("page_number", { ascending: true })
-      ).data
-    : named.data;
+    .order("page_number", order);
+  let sheetsData = full.data;
+  if (full.error) {
+    const named = await supabase
+      .from("sheets")
+      .select("id,page_number,name,label,notes,scale_x,scale_y,scale_preset")
+      .eq("plan_file_id", planId)
+      .order("page_number", order);
+    sheetsData = (
+      named.error
+        ? (
+            await supabase
+              .from("sheets")
+              .select("id,page_number,label,notes,scale_x,scale_y,scale_preset")
+              .eq("plan_file_id", planId)
+              .order("page_number", order)
+          ).data
+        : named.data
+    ) as typeof full.data; // older shapes lack name/ledger — optional on Sheet
+  }
 
   return (
     <PlanViewer

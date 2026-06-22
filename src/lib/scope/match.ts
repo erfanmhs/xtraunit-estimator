@@ -33,7 +33,7 @@ const UNIT_ALIASES: Record<string, string> = {
   each: "ea",
 };
 
-function normUnit(u: string | null): string {
+export function normUnit(u: string | null): string {
   const t = (u ?? "").trim().toLowerCase();
   return UNIT_ALIASES[t] ?? t;
 }

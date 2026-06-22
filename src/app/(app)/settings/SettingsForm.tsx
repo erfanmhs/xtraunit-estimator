@@ -5,8 +5,14 @@
  * (every new project's Estimate starts with these). Saves as one row.
  */
 import { useState, useTransition } from "react";
-import { saveCompanySettings, type CompanySettings } from "./actions";
+import {
+  saveCompanySettings,
+  saveProposalProfile,
+  draftProposalProfile,
+  type CompanySettings,
+} from "./actions";
 import { evalFormula } from "@/lib/formula";
+import type { ProposalProfile } from "@/lib/proposal/profile";
 
 const IDENTITY_FIELDS = [
   ["company_name", "Company name", "XtraUnit Construction"],
@@ -26,8 +32,12 @@ const MARKUP_FIELDS = [
 
 export default function SettingsForm({
   initial,
+  profile,
+  profileWasSet,
 }: {
   initial: CompanySettings;
+  profile: ProposalProfile;
+  profileWasSet: boolean;
 }) {
   const [identity, setIdentity] = useState<Record<string, string>>(() => {
     const o: Record<string, string> = {};
@@ -137,6 +147,12 @@ export default function SettingsForm({
         </div>
       </section>
 
+      <p className="text-xs text-muted">
+        Looking for $/SF benchmarks or standard unit prices? Those moved to the{" "}
+        <span className="text-brand-soft">Cost Database</span> tab, with your
+        price history.
+      </p>
+
       <div className="flex items-center justify-end gap-3">
         {state === "saved" ? (
           <span className="text-sm text-green-300">Saved ✓</span>
@@ -153,6 +169,225 @@ export default function SettingsForm({
           {pending ? "Saving…" : "Save settings"}
         </button>
       </div>
+
+      <ProposalProfileSection initial={profile} wasSet={profileWasSet} />
     </div>
+  );
+}
+
+// ── Proposal profile: the standard sections reused on every proposal ─────────
+
+function ProposalProfileSection({
+  initial,
+  wasSet,
+}: {
+  initial: ProposalProfile;
+  wasSet: boolean;
+}) {
+  const [p, setP] = useState<ProposalProfile>(initial);
+  const [state, setState] = useState<"idle" | "saved" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  // "Draft from a few notes" helper.
+  const [showNotes, setShowNotes] = useState(!wasSet);
+  const [notes, setNotes] = useState({ background: "", strengths: "", precon: "" });
+  const [drafting, setDrafting] = useState(false);
+
+  const setField = (k: keyof ProposalProfile, v: string) =>
+    setP((s) => ({ ...s, [k]: v }));
+  const setBullet = (i: number, f: "title" | "body", v: string) =>
+    setP((s) => ({
+      ...s,
+      why_fit: s.why_fit.map((b, j) => (j === i ? { ...b, [f]: v } : b)),
+    }));
+
+  function onDraft() {
+    setError(null);
+    setDrafting(true);
+    start(async () => {
+      const res = await draftProposalProfile(notes);
+      setDrafting(false);
+      if (!res.ok || !res.profile) {
+        setError(res.error ?? "Could not draft.");
+        return;
+      }
+      setP(res.profile);
+      setShowNotes(false);
+    });
+  }
+
+  function onSave() {
+    setState("idle");
+    setError(null);
+    start(async () => {
+      const res = await saveProposalProfile(p);
+      if (res.ok) setState("saved");
+      else {
+        setState("error");
+        setError(res.error ?? "Could not save.");
+      }
+    });
+  }
+
+  return (
+    <section className="glass rounded-xl p-5">
+      <h2 className="font-heading text-sm uppercase tracking-wider text-brand-soft">
+        Proposal profile
+      </h2>
+      <p className="mt-0.5 text-xs text-muted">
+        Your standard proposal sections — reused on every bid. The AI only writes
+        the project-specific parts; these stay consistent. Set them once here.
+      </p>
+
+      {!wasSet ? (
+        <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          First time here — answer the few questions below and let the AI fill
+          these in, or edit them directly. They&apos;re pre-filled with sensible
+          starting text so your proposals look right immediately.
+        </p>
+      ) : null}
+
+      {/* Draft-from-notes helper */}
+      <div className="mt-3 rounded-lg border border-border p-3">
+        <button
+          type="button"
+          onClick={() => setShowNotes((v) => !v)}
+          className="text-xs text-brand-soft hover:underline"
+        >
+          {showNotes ? "▾" : "▸"} Draft these from a few notes (AI)
+        </button>
+        {showNotes ? (
+          <div className="mt-3 space-y-2">
+            {[
+              ["background", "Who are you? Background, founders, what you build."],
+              ["strengths", "What sets you apart? Your strengths."],
+              ["precon", "What do you offer up front (preconstruction, next steps)?"],
+            ].map(([k, ph]) => (
+              <textarea
+                key={k}
+                value={notes[k as keyof typeof notes]}
+                onChange={(e) =>
+                  setNotes((s) => ({ ...s, [k]: e.target.value }))
+                }
+                placeholder={ph}
+                rows={2}
+                className="w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+              />
+            ))}
+            <button
+              type="button"
+              onClick={onDraft}
+              disabled={drafting}
+              className="glass-brand rounded-md px-3 py-1.5 text-xs font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
+            >
+              {drafting ? "Drafting…" : "Draft sections with AI"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Editable sections */}
+      <div className="mt-4 space-y-4">
+        <ProfileField
+          label="Who we are"
+          value={p.who_we_are}
+          onChange={(v) => setField("who_we_are", v)}
+          rows={4}
+        />
+
+        <div>
+          <span className="text-[11px] uppercase tracking-wider text-muted">
+            Why we&apos;re the right fit (4 points)
+          </span>
+          <div className="mt-1.5 space-y-2">
+            {p.why_fit.map((b, i) => (
+              <div key={i} className="flex flex-col gap-1 sm:flex-row sm:gap-2">
+                <input
+                  type="text"
+                  value={b.title}
+                  onChange={(e) => setBullet(i, "title", e.target.value)}
+                  placeholder="Title"
+                  className="rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand sm:w-44"
+                />
+                <input
+                  type="text"
+                  value={b.body}
+                  onChange={(e) => setBullet(i, "body", e.target.value)}
+                  placeholder="One sentence"
+                  className="flex-1 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <ProfileField
+          label="Next steps"
+          value={p.next_steps}
+          onChange={(v) => setField("next_steps", v)}
+          rows={3}
+        />
+        <ProfileField
+          label="License / bonding note"
+          value={p.license_note}
+          onChange={(v) => setField("license_note", v)}
+          rows={2}
+        />
+        <ProfileField
+          label="Finish package note"
+          value={p.finish_note}
+          onChange={(v) => setField("finish_note", v)}
+          rows={2}
+        />
+        <ProfileField
+          label="Closing line"
+          value={p.closing}
+          onChange={(v) => setField("closing", v)}
+          rows={2}
+        />
+      </div>
+
+      <div className="mt-4 flex items-center justify-end gap-3">
+        {state === "saved" ? (
+          <span className="text-sm text-green-300">Saved ✓</span>
+        ) : null}
+        {error ? <span className="text-sm text-brand-soft">{error}</span> : null}
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={pending}
+          className="glass-brand rounded-lg px-5 py-2 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
+        >
+          {pending ? "Saving…" : "Save proposal profile"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ProfileField({
+  label,
+  value,
+  onChange,
+  rows,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  rows: number;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[11px] uppercase tracking-wider text-muted">
+        {label}
+      </span>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        className="rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none focus:border-brand"
+      />
+    </label>
   );
 }

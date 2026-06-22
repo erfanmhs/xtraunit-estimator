@@ -21,6 +21,8 @@ import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import type { PlanFile } from "@/types";
 
+// On-sheet takeoff legend placement (fractions of the page + a size multiplier).
+type Ledger = { x: number; y: number; scale: number; visible: boolean };
 type Sheet = {
   id: string;
   page_number: number;
@@ -30,8 +32,14 @@ type Sheet = {
   scale_x: number | null;
   scale_y: number | null;
   scale_preset: string | null;
+  ledger?: Ledger | null;
 };
 type Pt = { x: number; y: number };
+
+const DEFAULT_LEDGER: Ledger = { x: 0.7, y: 0.04, scale: 1, visible: false };
+// Base ledger size in PDF points (then × page zoom × the user's size multiplier).
+const LEDGER_BASE_W = 200;
+const LEDGER_BASE_FONT = 11;
 type Measurement = {
   id: string;
   type: string;
@@ -45,6 +53,10 @@ type Measurement = {
   vol_mode: string | null;
   vol_width: number | null;
   vol_depth: number | null;
+  // Leader-only: the text note + its arrowhead/font sizes (PDF points).
+  text?: string | null;
+  font_size?: number | null;
+  head_size?: number | null;
 };
 type Tool =
   | "browse"
@@ -55,11 +67,15 @@ type Tool =
   | "area"
   | "wall"
   | "volume"
-  | "count";
+  | "count"
+  | "leader";
 
 const MEAS_COLS =
-  "id,type,geometry,value,unit,layer,color,wall_sided,wall_height,vol_mode,vol_width,vol_depth";
+  "id,type,geometry,value,unit,layer,color,wall_sided,wall_height,vol_mode,vol_width,vol_depth,text,font_size,head_size";
 const CF_PER_CY = 27;
+// Leader annotation defaults (PDF points). User grows/shrinks each per leader.
+const LEADER_FONT_DEFAULT = 14;
+const LEADER_HEAD_DEFAULT = 12;
 
 // Recompute a measurement's value for a given scale (points-per-foot).
 // Count is independent of scale, so its value is left untouched.
@@ -134,6 +150,7 @@ const MEASURE_TOOLS: Tool[] = [
   "wall",
   "volume",
   "count",
+  "leader",
 ];
 // Layers group by trimmed name; unnamed measurements share the "Unlabeled" group.
 function layerKeyOf(layer: string | null): string {
@@ -182,6 +199,189 @@ function distToSeg(p: Pt, a: Pt, b: Pt): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+// Group measurements into layer takeoff lines (shared by the side panel, the
+// on-sheet legend, and the PDF export).
+function buildLayerGroups(measurements: Measurement[]) {
+  const groups: {
+    layer: string;
+    color: string;
+    rows: Measurement[];
+    units: Record<string, number>;
+  }[] = [];
+  for (const m of measurements) {
+    const key = layerKeyOf(m.layer);
+    let g = groups.find((x) => x.layer === key);
+    if (!g) {
+      g = { layer: key, color: m.color ?? "#A01C2D", rows: [], units: {} };
+      groups.push(g);
+    }
+    g.rows.push(m);
+    if (m.value != null) {
+      const unit = m.unit || "";
+      g.units[unit] = (g.units[unit] ?? 0) + m.value;
+    }
+  }
+  return groups.map((g) => ({
+    ...g,
+    lines: Object.entries(g.units).map(([unit, sum]) =>
+      unit === "cf"
+        ? `${sum.toFixed(0)} cf · ${(sum / CF_PER_CY).toFixed(2)} cy`
+        : unit === "ea"
+          ? `${sum} ea`
+          : `${sum.toFixed(1)} ${unit}`,
+    ),
+  }));
+}
+
+function hexToRgba(hex: string, a: number): string {
+  const h = (hex || "#A01C2D").replace("#", "");
+  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const r = parseInt(n.slice(0, 2), 16) || 0;
+  const g = parseInt(n.slice(2, 4), 16) || 0;
+  const b = parseInt(n.slice(4, 6), 16) || 0;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// Draw all takeoff markup onto a 2D canvas at exportScale k (PDF points × k).
+// Mirrors the on-screen SVG overlay so exports look like the live sheet.
+function drawMarkupOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  ms: Measurement[],
+  k: number,
+) {
+  const P = (p: Pt) => ({ x: p.x * k, y: p.y * k });
+  for (const m of ms) {
+    const col = m.color ?? "#A01C2D";
+    const g = m.geometry;
+    if (!g || !g.length) continue;
+    if (m.type === "count") {
+      for (const v of g) {
+        const c = P(v);
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 5 * k, 0, Math.PI * 2);
+        ctx.fillStyle = hexToRgba(col, 0.85);
+        ctx.fill();
+        ctx.lineWidth = 1.2 * k;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+      }
+    } else {
+      const filled =
+        m.type === "area" || (m.type === "volume" && m.vol_mode === "area");
+      ctx.beginPath();
+      g.forEach((p, i) => {
+        const c = P(p);
+        if (i) ctx.lineTo(c.x, c.y);
+        else ctx.moveTo(c.x, c.y);
+      });
+      if (filled) {
+        ctx.closePath();
+        ctx.fillStyle = hexToRgba(col, 0.15);
+        ctx.fill();
+      }
+      ctx.lineWidth = 2 * k;
+      ctx.strokeStyle = col;
+      ctx.stroke();
+      if (m.type === "leader" && g.length >= 2) {
+        const head = P(g[0]);
+        const box = P(g[1]);
+        const ang = Math.atan2(head.y - box.y, head.x - box.x);
+        const hs = (m.head_size ?? LEADER_HEAD_DEFAULT) * k;
+        ctx.beginPath();
+        ctx.moveTo(head.x, head.y);
+        ctx.lineTo(head.x - hs * Math.cos(ang - 0.42), head.y - hs * Math.sin(ang - 0.42));
+        ctx.lineTo(head.x - hs * Math.cos(ang + 0.42), head.y - hs * Math.sin(ang + 0.42));
+        ctx.closePath();
+        ctx.fillStyle = col;
+        ctx.fill();
+        const fs = (m.font_size ?? LEADER_FONT_DEFAULT) * k;
+        ctx.font = `600 ${fs}px sans-serif`;
+        ctx.textBaseline = "alphabetic";
+        (m.text ?? "").split("\n").forEach((ln, i) => {
+          const ty = box.y + i * fs * 1.15;
+          ctx.lineWidth = Math.max(2, fs * 0.16);
+          ctx.strokeStyle = "#fff";
+          ctx.strokeText(ln, box.x + 5 * k, ty);
+          ctx.fillStyle = col;
+          ctx.fillText(ln, box.x + 5 * k, ty);
+        });
+      }
+    }
+    const text = labelText(m);
+    if (text) {
+      const centered =
+        m.type === "area" ||
+        m.type === "count" ||
+        (m.type === "volume" && m.vol_mode === "area");
+      const anchor = centered
+        ? {
+            x: g.reduce((s, p) => s + p.x, 0) / g.length,
+            y: g.reduce((s, p) => s + p.y, 0) / g.length,
+          }
+        : g.length >= 2
+          ? { x: (g[0].x + g[1].x) / 2, y: (g[0].y + g[1].y) / 2 }
+          : g[0];
+      const a = P(anchor);
+      const fs = 14 * k;
+      ctx.font = `700 ${fs}px sans-serif`;
+      ctx.textBaseline = "alphabetic";
+      ctx.lineWidth = 3.5 * k;
+      ctx.strokeStyle = "#000";
+      ctx.strokeText(text, a.x + 6 * k, a.y - 6 * k);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(text, a.x + 6 * k, a.y - 6 * k);
+    }
+  }
+}
+
+// Draw the takeoff legend onto the export canvas (matches the on-sheet box).
+function drawLedgerOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  ms: Measurement[],
+  k: number,
+  ledger: Ledger | null | undefined,
+  cw: number,
+  ch: number,
+) {
+  if (!ledger?.visible) return;
+  const rows = buildLayerGroups(ms).filter((g) => g.lines.length > 0);
+  if (!rows.length) return;
+  const sc = ledger.scale * k;
+  const W = LEDGER_BASE_W * sc;
+  const font = LEDGER_BASE_FONT * sc;
+  const pad = 6 * sc;
+  const rowH = font * 1.5 + 4 * sc;
+  const headH = font + 2 * pad;
+  const H = headH + rows.length * rowH + 4 * sc;
+  let x = ledger.x * cw;
+  let y = ledger.y * ch;
+  x = Math.max(2, Math.min(x, cw - W - 2));
+  y = Math.max(2, Math.min(y, ch - H - 2));
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.fillRect(x, y, W, H);
+  ctx.lineWidth = Math.max(1, sc);
+  ctx.strokeStyle = "#888";
+  ctx.strokeRect(x, y, W, H);
+  ctx.fillStyle = "#eef0f2";
+  ctx.fillRect(x, y, W, headH);
+  ctx.strokeRect(x, y, W, headH);
+  ctx.fillStyle = "#111";
+  ctx.textBaseline = "middle";
+  ctx.font = `600 ${font}px sans-serif`;
+  ctx.fillText("Takeoff Legend", x + pad, y + headH / 2);
+  let ry = y + headH;
+  for (const r of rows) {
+    const sw = font * 0.7;
+    ctx.fillStyle = r.color;
+    ctx.fillRect(x + pad, ry + rowH / 2 - sw / 2, sw, sw);
+    ctx.fillStyle = "#111";
+    ctx.font = `${font}px sans-serif`;
+    const txt = `${r.layer} — ${r.lines.join(", ")} · ${r.rows.length} run${r.rows.length === 1 ? "" : "s"}`;
+    ctx.fillText(txt, x + pad * 2 + sw, ry + rowH / 2, W - pad * 3 - sw);
+    ry += rowH;
+  }
+}
+
 export default function PlanViewer({
   projectId,
   planFile,
@@ -224,6 +424,12 @@ export default function PlanViewer({
   const [panelW, setPanelW] = useState(268);
   const [notesOpen, setNotesOpen] = useState(false);
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
+  // Export-to-PDF dialog state.
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportSel, setExportSel] = useState<Set<string>>(new Set());
+  const [markedSheets, setMarkedSheets] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [exportLegend, setExportLegend] = useState(true);
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -247,6 +453,10 @@ export default function PlanViewer({
     ),
   );
   const [notesSaved, setNotesSaved] = useState(false);
+  const [ledgers, setLedgers] = useState<Record<string, Ledger>>(() =>
+    Object.fromEntries(sheets.map((s) => [s.id, s.ledger ?? DEFAULT_LEDGER])),
+  );
+  const ledgerSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [tool, setTool] = useState<Tool>("select");
   const [draft, setDraft] = useState<Pt[]>([]);
@@ -280,6 +490,9 @@ export default function PlanViewer({
 
   const currentSheet = sheets.find((s) => s.page_number === pageNum) ?? null;
   const currentScale = currentSheet ? scales[currentSheet.id] : null;
+  const currentLedger = currentSheet
+    ? (ledgers[currentSheet.id] ?? DEFAULT_LEDGER)
+    : null;
   const hasScale = !!(currentScale?.x && currentScale?.y);
   const selected = measurements.find((m) => m.id === selectedId) ?? null;
   // A measuring tool was picked on a sheet with no scale → block with a prompt.
@@ -734,6 +947,52 @@ export default function PlanViewer({
     insertMeasurement("line", [p0, p1], segFeet(p0, p1, currentScale.x, currentScale.y));
   }
 
+  // A leader: an arrow whose tip (geometry[0]) points at something and whose
+  // text box (geometry[1]) holds a note. No scale needed; value stays null.
+  function finalizeLeader(head: Pt, box: Pt) {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
+    insertLeader([head, box]);
+  }
+
+  async function insertLeader(geometry: Pt[]) {
+    if (!currentSheet) return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data, error: insErr } = await supabase
+      .from("measurements")
+      .insert({
+        project_id: projectId,
+        plan_file_id: planFile.id,
+        sheet_id: currentSheet.id,
+        owner_id: user.id,
+        type: "leader",
+        geometry,
+        value: null,
+        unit: null,
+        layer: layer || null,
+        color,
+        text: "",
+        font_size: LEADER_FONT_DEFAULT,
+        head_size: LEADER_HEAD_DEFAULT,
+      })
+      .select(MEAS_COLS)
+      .single();
+    setDraft([]);
+    setHover(null);
+    if (insErr || !data) {
+      setError("Could not add the leader. (Has migration 0023 been run?)");
+      return;
+    }
+    // Drop straight into Select so the user can type the note in the panel.
+    const md = data as Measurement;
+    setMeasurements((m) => [...m, md]);
+    setTool("select");
+    setSelectedId(md.id);
+  }
+
   function finalizePolyline(g: Pt[]) {
     if (g.length < 2) return;
     if (finalizingRef.current) return;
@@ -986,6 +1245,7 @@ export default function PlanViewer({
     }
     const p0 = draft[0];
     if (tool === "line") finalizeLine(p0, pt);
+    else if (tool === "leader") finalizeLeader(p0, pt);
     else if (tool === "calibrate") {
       setCalib({ p1: p0, p2: pt });
       setDraft([]);
@@ -1028,7 +1288,9 @@ export default function PlanViewer({
       setEditGeom(null);
       if (m) {
         let value = m.value;
-        if (m.type === "count") {
+        if (m.type === "leader") {
+          value = null; // leaders carry text, not a measured value
+        } else if (m.type === "count") {
           value = geometry.length;
         } else if (currentScale?.x && currentScale?.y) {
           value =
@@ -1108,6 +1370,17 @@ export default function PlanViewer({
       .from("measurements")
       .update({ ...patch, value })
       .eq("id", selected.id);
+  }
+
+  // Leader text + sizes (each leader independent; sizes are in PDF points).
+  async function updateLeader(
+    patch: Partial<Pick<Measurement, "text" | "font_size" | "head_size">>,
+  ) {
+    if (!selected || selected.type !== "leader") return;
+    setMeasurements((arr) =>
+      arr.map((x) => (x.id === selected.id ? { ...x, ...patch } : x)),
+    );
+    await supabase.from("measurements").update(patch).eq("id", selected.id);
   }
 
   async function duplicateMeasurement(m: Measurement) {
@@ -1316,6 +1589,145 @@ export default function PlanViewer({
     router.refresh();
   }
 
+  // ── On-sheet takeoff legend (ledger) ──────────────────────────────────────
+  function updateLedger(patch: Partial<Ledger>) {
+    if (!currentSheet) return;
+    const id = currentSheet.id;
+    setLedgers((prev) => {
+      const next = { ...(prev[id] ?? DEFAULT_LEDGER), ...patch };
+      if (ledgerSaveTimer.current) clearTimeout(ledgerSaveTimer.current);
+      ledgerSaveTimer.current = setTimeout(() => {
+        supabase.from("sheets").update({ ledger: next }).eq("id", id);
+      }, 400);
+      return { ...prev, [id]: next };
+    });
+  }
+
+  function startLedgerDrag(e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const canvas = canvasRef.current;
+    const led = currentLedger;
+    if (!canvas || !led) return;
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const ox = led.x;
+    const oy = led.y;
+    const onMove = (ev: PointerEvent) => {
+      updateLedger({
+        x: Math.max(0, Math.min(0.98, ox + (ev.clientX - sx) / rect.width)),
+        y: Math.max(0, Math.min(0.98, oy + (ev.clientY - sy) / rect.height)),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  function startLedgerResize(e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const led = currentLedger;
+    if (!led) return;
+    const sx = e.clientX;
+    const base = led.scale;
+    const onMove = (ev: PointerEvent) => {
+      // ~150px of drag ≈ one full step of the size multiplier.
+      updateLedger({ scale: Math.max(0.4, Math.min(5, base + (ev.clientX - sx) / 150)) });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  // ── Export marked-up PDF ──────────────────────────────────────────────────
+  async function openExport() {
+    const { data } = await supabase
+      .from("measurements")
+      .select("sheet_id")
+      .eq("plan_file_id", planFile.id);
+    const marked = new Set<string>(
+      (data ?? []).map((r) => (r as { sheet_id: string }).sheet_id),
+    );
+    setMarkedSheets(marked);
+    setExportSel(new Set(marked.size ? [...marked] : sheets.map((s) => s.id)));
+    setExportOpen(true);
+  }
+
+  async function exportMarkedPdf() {
+    const pdf = pdfRef.current;
+    if (!pdf || !exportSel.size) return;
+    setExporting("Preparing…");
+    try {
+      const { data } = await supabase
+        .from("measurements")
+        .select(`${MEAS_COLS},sheet_id`)
+        .in("sheet_id", [...exportSel]);
+      const bySheet = new Map<string, Measurement[]>();
+      for (const m of (data ?? []) as (Measurement & { sheet_id: string })[]) {
+        const arr = bySheet.get(m.sheet_id) ?? [];
+        arr.push(m);
+        bySheet.set(m.sheet_id, arr);
+      }
+      const { PDFDocument } = await import("pdf-lib");
+      const out = await PDFDocument.create();
+      const K = 2; // render at 2× for crisp lines and text
+      const chosen = sheets
+        .filter((s) => exportSel.has(s.id))
+        .sort((a, b) => a.page_number - b.page_number);
+      let done = 0;
+      for (const s of chosen) {
+        setExporting(`Rendering ${++done} / ${chosen.length}…`);
+        const page = await pdf.getPage(s.page_number);
+        const viewport = page.getViewport({ scale: K });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const ms = bySheet.get(s.id) ?? [];
+        drawMarkupOnCanvas(ctx, ms, K);
+        // Either force the legend onto every page, or honor each sheet's toggle.
+        const led = exportLegend
+          ? { ...(ledgers[s.id] ?? DEFAULT_LEDGER), visible: true }
+          : ledgers[s.id];
+        drawLedgerOnCanvas(ctx, ms, K, led, canvas.width, canvas.height);
+        const png = await out.embedPng(canvas.toDataURL("image/png"));
+        const pg = out.addPage([canvas.width, canvas.height]);
+        pg.drawImage(png, { x: 0, y: 0, width: canvas.width, height: canvas.height });
+      }
+      setExporting("Saving…");
+      const bytes = await out.save();
+      const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const base =
+        (planFile as { file_name?: string | null }).file_name?.replace(
+          /\.[^.]+$/,
+          "",
+        ) || "takeoff";
+      a.href = url;
+      a.download = `${base}-markup.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+    } catch {
+      setError("Export failed — try fewer sheets, or reload and retry.");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   function px(p: Pt) {
     return { x: p.x * scale, y: p.y * scale };
   }
@@ -1378,43 +1790,18 @@ export default function PlanViewer({
     { id: "wall", label: "Wall" },
     { id: "volume", label: "Volume" },
     { id: "count", label: "Count" },
+    { id: "leader", label: "Leader" },
   ];
 
   // Running totals for this sheet, grouped by layer and summed per unit.
   // One group per layer: rows + summed totals. The panel shows these groups
   // (Bluebeam-style) instead of a flat record list — the group IS the takeoff
   // line; its rows are the individual runs you drew.
-  const layerGroups = (() => {
-    const groups: {
-      layer: string;
-      color: string;
-      rows: Measurement[];
-      units: Record<string, number>;
-    }[] = [];
-    for (const m of measurements) {
-      const key = layerKeyOf(m.layer);
-      let g = groups.find((x) => x.layer === key);
-      if (!g) {
-        g = { layer: key, color: m.color ?? "#A01C2D", rows: [], units: {} };
-        groups.push(g);
-      }
-      g.rows.push(m);
-      if (m.value != null) {
-        const unit = m.unit || "";
-        g.units[unit] = (g.units[unit] ?? 0) + m.value;
-      }
-    }
-    return groups.map((g) => ({
-      ...g,
-      lines: Object.entries(g.units).map(([unit, sum]) =>
-        unit === "cf"
-          ? `${sum.toFixed(0)} cf · ${(sum / CF_PER_CY).toFixed(2)} cy`
-          : unit === "ea"
-            ? `${sum} ea`
-            : `${sum.toFixed(1)} ${unit}`,
-      ),
-    }));
-  })();
+  const layerGroups = buildLayerGroups(measurements);
+
+  // The legend lists only layers with measured quantities (skips leader-only/
+  // empty groups). Each row: color, layer name, summed total(s), run count.
+  const ledgerRows = layerGroups.filter((g) => g.lines.length > 0);
 
   // Items for the right-click menu, by what was clicked.
   const menuItems: { label: string; danger?: boolean; onClick: () => void }[] =
@@ -1682,6 +2069,27 @@ export default function PlanViewer({
                 Fit
               </button>
             </div>
+            {ledgerRows.length ? (
+              <button
+                type="button"
+                onClick={() => updateLedger({ visible: !currentLedger?.visible })}
+                className={`rounded-md border px-3 py-1 transition-colors ${
+                  currentLedger?.visible
+                    ? "border-brand bg-brand/15 text-foreground"
+                    : "border-border text-muted hover:border-brand"
+                }`}
+              >
+                {currentLedger?.visible ? "Hide legend" : "Show legend"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={openExport}
+              disabled={status !== "ready"}
+              className="rounded-md border border-border px-3 py-1 text-foreground hover:border-brand disabled:opacity-40"
+            >
+              Export PDF
+            </button>
           </div>
         </div>
 
@@ -1980,6 +2388,62 @@ export default function PlanViewer({
                             strokeWidth={2}
                           />
                         )}
+                        {m.type === "leader" && pts.length >= 2
+                          ? (() => {
+                              const head = pts[0];
+                              const box = pts[1];
+                              const ang = Math.atan2(
+                                head.y - box.y,
+                                head.x - box.x,
+                              );
+                              const hs =
+                                (m.head_size ?? LEADER_HEAD_DEFAULT) * scale;
+                              const a1 = {
+                                x: head.x - hs * Math.cos(ang - 0.42),
+                                y: head.y - hs * Math.sin(ang - 0.42),
+                              };
+                              const a2 = {
+                                x: head.x - hs * Math.cos(ang + 0.42),
+                                y: head.y - hs * Math.sin(ang + 0.42),
+                              };
+                              const fs =
+                                (m.font_size ?? LEADER_FONT_DEFAULT) * scale;
+                              const lines = (m.text ?? "").split("\n");
+                              return (
+                                <>
+                                  <polygon
+                                    points={`${head.x},${head.y} ${a1.x},${a1.y} ${a2.x},${a2.y}`}
+                                    fill={m.color ?? "#A01C2D"}
+                                  />
+                                  {lines.some((l) => l.trim()) ? (
+                                    <text
+                                      x={box.x + 5}
+                                      y={box.y}
+                                      fontSize={fs}
+                                      fontWeight={600}
+                                      fill={m.color ?? "#A01C2D"}
+                                      stroke="#fff"
+                                      strokeWidth={Math.max(2, fs * 0.16)}
+                                      style={{
+                                        paintOrder: "stroke",
+                                        pointerEvents: "none",
+                                      }}
+                                    >
+                                      {lines.map((ln, i) => (
+                                        <tspan
+                                          key={i}
+                                          x={box.x + 5}
+                                          dy={i === 0 ? 0 : fs * 1.15}
+                                        >
+                                          {ln || " "}
+                                        </tspan>
+                                      ))}
+                                    </text>
+                                  ) : null}
+                                </>
+                              );
+                            })()
+                          : null}
                         {lbl ? (
                           <text
                             x={lbl.x}
@@ -2133,6 +2597,58 @@ export default function PlanViewer({
                     />
                   ) : null}
                 </svg>
+                {currentLedger?.visible && ledgerRows.length ? (
+                  <div
+                    className="absolute z-20 select-none"
+                    style={{
+                      left: currentLedger.x * displayW,
+                      top: currentLedger.y * displayH,
+                      transform: `scale(${scale * currentLedger.scale})`,
+                      transformOrigin: "top left",
+                      width: LEDGER_BASE_W,
+                      fontSize: LEDGER_BASE_FONT,
+                    }}
+                  >
+                    <div className="relative rounded border border-neutral-400 bg-white/95 text-black shadow-lg">
+                      <div
+                        onPointerDown={startLedgerDrag}
+                        className="flex cursor-move items-center justify-between border-b border-neutral-300 bg-neutral-100 px-2 py-1 font-semibold"
+                      >
+                        <span>Takeoff Legend</span>
+                      </div>
+                      <div className="divide-y divide-neutral-200">
+                        {ledgerRows.map((g) => (
+                          <div
+                            key={g.layer}
+                            className="flex items-start gap-1.5 px-2 py-1"
+                          >
+                            <span
+                              className="mt-[2px] inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                              style={{ background: g.color }}
+                            />
+                            <span className="flex-1 leading-tight">
+                              <span className="font-medium">{g.layer}</span>
+                              <span className="text-neutral-600">
+                                {" "}
+                                — {g.lines.join(", ")} · {g.rows.length} run
+                                {g.rows.length === 1 ? "" : "s"}
+                              </span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div
+                        onPointerDown={startLedgerResize}
+                        title="Drag to resize"
+                        className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
+                        style={{
+                          background:
+                            "linear-gradient(135deg, transparent 45%, #888 45%, #888 55%, transparent 55%, transparent 70%, #888 70%, #888 80%, transparent 80%)",
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
@@ -2146,7 +2662,9 @@ export default function PlanViewer({
                   ? "Click to add points · double-click to finish · "
                   : tool === "area" || (tool === "volume" && volMode === "area")
                     ? "Click corners · click the first point or double-click to close · "
-                    : ""}
+                    : tool === "leader"
+                      ? "Click where the arrow points, then click to place the text box · "
+                      : ""}
               Esc: cancel · Right-drag / Space / middle-drag: pan · Del: delete
             </div>
           ) : null}
@@ -2354,8 +2872,96 @@ export default function PlanViewer({
                 </label>
               </>
             ) : null}
+            {selected.type === "leader" ? (
+              <>
+                <label className="flex flex-col gap-1 text-xs uppercase tracking-wider text-muted">
+                  Text
+                  <textarea
+                    value={selected.text ?? ""}
+                    onChange={(e) => updateLeader({ text: e.target.value })}
+                    rows={2}
+                    placeholder="Note…"
+                    className="rounded-md border border-border bg-background px-2 py-1 text-sm normal-case text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
+                  />
+                </label>
+                <div className="flex flex-col gap-1 text-xs uppercase tracking-wider text-muted">
+                  Font size
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLeader({
+                          font_size: Math.max(
+                            6,
+                            (selected.font_size ?? LEADER_FONT_DEFAULT) - 2,
+                          ),
+                        })
+                      }
+                      className="h-6 w-6 rounded-md border border-border text-foreground hover:border-brand"
+                    >
+                      −
+                    </button>
+                    <span className="w-8 text-center text-sm normal-case text-foreground">
+                      {Math.round(selected.font_size ?? LEADER_FONT_DEFAULT)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLeader({
+                          font_size: Math.min(
+                            96,
+                            (selected.font_size ?? LEADER_FONT_DEFAULT) + 2,
+                          ),
+                        })
+                      }
+                      className="h-6 w-6 rounded-md border border-border text-foreground hover:border-brand"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1 text-xs uppercase tracking-wider text-muted">
+                  Leader head size
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLeader({
+                          head_size: Math.max(
+                            4,
+                            (selected.head_size ?? LEADER_HEAD_DEFAULT) - 2,
+                          ),
+                        })
+                      }
+                      className="h-6 w-6 rounded-md border border-border text-foreground hover:border-brand"
+                    >
+                      −
+                    </button>
+                    <span className="w-8 text-center text-sm normal-case text-foreground">
+                      {Math.round(selected.head_size ?? LEADER_HEAD_DEFAULT)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLeader({
+                          head_size: Math.min(
+                            60,
+                            (selected.head_size ?? LEADER_HEAD_DEFAULT) + 2,
+                          ),
+                        })
+                      }
+                      className="h-6 w-6 rounded-md border border-border text-foreground hover:border-brand"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
             <p className="text-xs text-muted">
-              Tip: drag the white handles on the sheet to reshape.
+              {selected.type === "leader"
+                ? "Tip: drag the white handles to move the arrow tip or the text box."
+                : "Tip: drag the white handles on the sheet to reshape."}
             </p>
             <div className="flex gap-2 pt-1">
               <button
@@ -2711,6 +3317,106 @@ export default function PlanViewer({
             ))}
           </div>
         </>
+      ) : null}
+
+      {/* Export-to-PDF dialog */}
+      {exportOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !exporting && setExportOpen(false)}
+        >
+          <div
+            className="glass-strong w-full max-w-md rounded-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="font-heading text-lg text-foreground">
+              Export marked-up PDF
+            </h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Pick the sheets to include. Each page is exported with its
+              measurements, leaders, and legend flattened on, combined into one
+              PDF.
+            </p>
+            <div className="mt-3 flex items-center justify-between text-xs">
+              <button
+                type="button"
+                onClick={() => setExportSel(new Set(sheets.map((s) => s.id)))}
+                className="text-brand-soft hover:underline"
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                onClick={() => setExportSel(new Set(markedSheets))}
+                className="text-muted hover:text-foreground"
+              >
+                Only marked-up
+              </button>
+            </div>
+            <div className="mt-2 max-h-72 space-y-1 overflow-auto rounded-lg border border-border p-2">
+              {sheets.map((s) => {
+                const on = exportSel.has(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className="flex items-center gap-2 rounded px-1.5 py-1 text-sm text-foreground hover:bg-white/5"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() =>
+                        setExportSel((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(s.id)) next.delete(s.id);
+                          else next.add(s.id);
+                          return next;
+                        })
+                      }
+                    />
+                    <span className="flex-1 truncate">{sheetTitle(s)}</span>
+                    {markedSheets.has(s.id) ? (
+                      <span className="text-[10px] text-brand-soft">markup</span>
+                    ) : (
+                      <span className="text-[10px] text-muted/60">blank</span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+            <label className="mt-3 flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={exportLegend}
+                onChange={(e) => setExportLegend(e.target.checked)}
+              />
+              Show takeoff legend on each page
+            </label>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              {exporting ? (
+                <span className="mr-auto animate-pulse text-xs text-muted">
+                  {exporting}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setExportOpen(false)}
+                disabled={!!exporting}
+                className="rounded-md border border-border px-3 py-1.5 text-sm text-muted hover:text-foreground disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={exportMarkedPdf}
+                disabled={!!exporting || exportSel.size === 0}
+                className="glass-brand rounded-lg px-4 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
+              >
+                Export {exportSel.size} sheet{exportSel.size === 1 ? "" : "s"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

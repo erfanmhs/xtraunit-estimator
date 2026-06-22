@@ -7,11 +7,136 @@
  * run as a background job (same scope_runs table, kind 'pricing').
  */
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { runPricingSuggestion, abortPricingRun } from "@/lib/scope/price";
 import { readSubQuote, type QuoteExtraction } from "@/lib/scope/subquote";
+import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
 import type { ScopeRun } from "../scope/actions";
 
 type ActionResult = { ok: boolean; error?: string };
+
+// A confirmed line, as selected from line_items for snapshotting.
+type ConfirmedLine = {
+  id: string;
+  project_id: string | null;
+  division_code: string | null;
+  section_code: string | null;
+  description: string;
+  unit: string | null;
+  price_mode: string | null;
+  cost_labor: number | null;
+  cost_material: number | null;
+  cost_sub: number | null;
+  cost_equipment: number | null;
+  cost_other: number | null;
+  cost_total: number | null;
+  price_source: string | null;
+  price_note: string | null;
+  price_confidence: string | null;
+};
+
+const CONFIRMED_LINE_COLS =
+  "id,project_id,division_code,section_code,description,unit,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence";
+
+// The job context stamped onto every observation so the price stays useful
+// (and poolable) forever — region, project type, building size.
+type PriceContext = {
+  region: string | null;
+  project_type: string | null;
+  building_sf: number | null;
+};
+
+async function loadPriceContext(
+  supabase: SupabaseClient,
+  projectId: string | null,
+): Promise<PriceContext> {
+  if (!projectId) return { region: "CA", project_type: null, building_sf: null };
+  const { data: project } = await supabase
+    .from("projects")
+    .select("project_type,region")
+    .eq("id", projectId)
+    .maybeSingle();
+  let buildingSf: number | null = null;
+  const est = await supabase
+    .from("estimates")
+    .select("building_sf")
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (!est.error) buildingSf = est.data?.building_sf ?? null;
+  return {
+    // Default to California — XtraUnit's market — when none is set yet.
+    region: (project?.region as string | null) || "CA",
+    project_type: (project?.project_type as string | null) ?? null,
+    building_sf: buildingSf,
+  };
+}
+
+/**
+ * Snapshot confirmed lines into the cost-database spine: link each to its
+ * canonical cost item, insert the observation (with context), then refresh
+ * the affected items' standard prices. Resilient if migration 0021 (or 0014)
+ * hasn't run — it retries with only the legacy columns.
+ */
+async function snapshotConfirmed(
+  supabase: SupabaseClient,
+  userId: string,
+  lines: ConfirmedLine[],
+  ctx: PriceContext,
+): Promise<void> {
+  const touchedItems = new Set<string>();
+  const rows: Record<string, unknown>[] = [];
+
+  for (const li of lines) {
+    const itemId = await findOrCreateItem(supabase, userId, {
+      division_code: li.division_code,
+      section_code: li.section_code,
+      description: li.description,
+      unit: li.unit,
+    });
+    if (itemId) touchedItems.add(itemId);
+    rows.push({
+      owner_id: userId,
+      project_id: li.project_id,
+      item_id: itemId,
+      source: "confirmed",
+      region: ctx.region,
+      project_type: ctx.project_type,
+      building_sf: ctx.building_sf,
+      division_code: li.division_code,
+      section_code: li.section_code,
+      description: li.description,
+      unit: li.unit,
+      price_mode: li.price_mode ?? "unit",
+      cost_labor: li.cost_labor,
+      cost_material: li.cost_material,
+      cost_sub: li.cost_sub,
+      cost_equipment: li.cost_equipment,
+      cost_other: li.cost_other,
+      cost_total: li.cost_total,
+      price_source: li.price_source,
+      price_note: li.price_note,
+      price_confidence: li.price_confidence,
+    });
+  }
+
+  const ins = await supabase.from("cost_database").insert(rows);
+  if (ins.error) {
+    // Fallback for a DB missing the 0021/0014 columns — keep the legacy fields.
+    const legacy = rows.map((r) => {
+      const {
+        item_id: _i, source: _s, region: _r, project_type: _t,
+        building_sf: _b, observed_on: _o, section_code: _c, ...rest
+      } = r;
+      void _i; void _s; void _r; void _t; void _b; void _o; void _c;
+      return rest;
+    });
+    await supabase.from("cost_database").insert(legacy);
+    return; // can't recompute items if the catalog isn't there yet
+  }
+
+  // Refresh each affected item's standard price (includes the new rows).
+  for (const id of touchedItems) await recomputeItemStd(supabase, id);
+}
 
 export type PricePatch = {
   price_mode?: string; // 'unit' | 'lump' | 'total'
@@ -58,9 +183,7 @@ export async function confirmLinePrice(lineId: string): Promise<ActionResult> {
 
   const { data: li, error: fetchErr } = await supabase
     .from("line_items")
-    .select(
-      "id,project_id,division_code,section_code,description,unit,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence",
-    )
+    .select(CONFIRMED_LINE_COLS)
     .eq("id", lineId)
     .single();
   if (fetchErr || !li) return { ok: false, error: "Line not found." };
@@ -71,32 +194,10 @@ export async function confirmLinePrice(lineId: string): Promise<ActionResult> {
     .eq("id", lineId);
   if (error) return { ok: false, error: "Could not confirm the price." };
 
-  // Snapshot into the growing cost database (history for future jobs).
-  // section_code is dropped automatically if migration 0014 hasn't run yet.
-  const snapshot: Record<string, unknown> = {
-    owner_id: user.id,
-    project_id: li.project_id,
-    division_code: li.division_code,
-    section_code: li.section_code,
-    description: li.description,
-    unit: li.unit,
-    price_mode: li.price_mode ?? "unit",
-    cost_labor: li.cost_labor,
-    cost_material: li.cost_material,
-    cost_sub: li.cost_sub,
-    cost_equipment: li.cost_equipment,
-    cost_other: li.cost_other,
-    cost_total: li.cost_total,
-    price_source: li.price_source,
-    price_note: li.price_note,
-    price_confidence: li.price_confidence,
-  };
-  const ins = await supabase.from("cost_database").insert(snapshot);
-  if (ins.error) {
-    // Pre-0014 fallback: retry without the section column.
-    delete snapshot.section_code;
-    await supabase.from("cost_database").insert(snapshot);
-  }
+  // Snapshot into the cost-database spine (history + canonical item) so the
+  // next job can reuse it and the catalog's standard price stays current.
+  const ctx = await loadPriceContext(supabase, (li as ConfirmedLine).project_id);
+  await snapshotConfirmed(supabase, user.id, [li as ConfirmedLine], ctx);
 
   return { ok: true };
 }
@@ -118,13 +219,11 @@ export async function confirmManyPrices(
 
   const { data: rows, error: fetchErr } = await supabase
     .from("line_items")
-    .select(
-      "id,project_id,division_code,section_code,description,unit,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence,price_status",
-    )
+    .select(`${CONFIRMED_LINE_COLS},price_status`)
     .in("id", lineIds)
     .eq("price_status", "proposed");
   if (fetchErr) return { ok: false, error: "Could not load the lines." };
-  const toConfirm = rows ?? [];
+  const toConfirm = (rows ?? []) as (ConfirmedLine & { price_status: string })[];
   if (!toConfirm.length) return { ok: true, confirmed: 0 };
 
   const { error } = await supabase
@@ -137,25 +236,9 @@ export async function confirmManyPrices(
     .eq("price_status", "proposed");
   if (error) return { ok: false, error: "Could not confirm the prices." };
 
-  const snapshots = toConfirm.map((li) => ({
-    owner_id: user.id,
-    project_id: li.project_id,
-    division_code: li.division_code,
-    section_code: li.section_code,
-    description: li.description,
-    unit: li.unit,
-    price_mode: li.price_mode ?? "unit",
-    cost_labor: li.cost_labor,
-    cost_material: li.cost_material,
-    cost_sub: li.cost_sub,
-    cost_equipment: li.cost_equipment,
-    cost_other: li.cost_other,
-    cost_total: li.cost_total,
-    price_source: li.price_source,
-    price_note: li.price_note,
-    price_confidence: li.price_confidence,
-  }));
-  await supabase.from("cost_database").insert(snapshots);
+  // All lines on one project share a context — load it once.
+  const ctx = await loadPriceContext(supabase, toConfirm[0].project_id);
+  await snapshotConfirmed(supabase, user.id, toConfirm, ctx);
 
   return { ok: true, confirmed: toConfirm.length };
 }

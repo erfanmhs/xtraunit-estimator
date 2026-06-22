@@ -42,3 +42,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .claude/settings.local.json
+.benchmarks/
+
+# XtraUnit's real sample contracts — sensitive client data, used only for
+# benchmark extraction (results live in .benchmarks/). Never commit to the repo.
+/assets/Sample contracts/

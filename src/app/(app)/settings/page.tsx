@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import SettingsForm from "./SettingsForm";
 import type { CompanySettings } from "./actions";
+import { resolveProfile } from "@/lib/proposal/profile";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -25,6 +26,8 @@ export default async function SettingsPage() {
     default_insurance_pct: data?.default_insurance_pct ?? 0,
     default_op_pct: data?.default_op_pct ?? 0,
   };
+  const profile = resolveProfile(data?.proposal_profile);
+  const profileWasSet = data?.proposal_profile != null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -34,7 +37,11 @@ export default async function SettingsPage() {
           Company identity for proposals, and the markup defaults every new
           estimate starts from.
         </p>
-        <SettingsForm initial={initial} />
+        <SettingsForm
+          initial={initial}
+          profile={profile}
+          profileWasSet={profileWasSet}
+        />
       </div>
     </div>
   );

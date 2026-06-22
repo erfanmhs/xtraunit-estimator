@@ -6,9 +6,10 @@
  * division, collapsible like the other pages. These entries are what the
  * pricing matcher and the AI reuse on future jobs — clean history, better bids.
  */
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { updateCostEntry, deleteCostEntry, type CostEntryPatch } from "./actions";
 import { evalFormula } from "@/lib/formula";
+import { divisionLabel } from "@/lib/csi";
 
 export type CostEntry = {
   id: string;
@@ -75,7 +76,12 @@ export default function CostDbBrowser({
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  useEffect(() => setEntries(initialEntries), [initialEntries]);
+  // Re-sync to fresh server data when the props change, without an effect.
+  const [prevEntries, setPrevEntries] = useState(initialEntries);
+  if (initialEntries !== prevEntries) {
+    setPrevEntries(initialEntries);
+    setEntries(initialEntries);
+  }
 
   function run(
     optimistic: () => void,
@@ -132,7 +138,7 @@ export default function CostDbBrowser({
   }, [entries, search]);
 
   const groups = useMemo(() => {
-    const gs: { key: string; rows: CostEntry[] }[] = [];
+    const gs: { key: string; label: string; rows: CostEntry[] }[] = [];
     const sorted = [...filtered].sort((a, b) =>
       (a.division_code ?? "99").localeCompare(b.division_code ?? "99"),
     );
@@ -140,7 +146,7 @@ export default function CostDbBrowser({
       const key = `Division ${e.division_code ?? "—"}`;
       let g = gs.find((x) => x.key === key);
       if (!g) {
-        g = { key, rows: [] };
+        g = { key, label: `Division ${divisionLabel(e.division_code)}`, rows: [] };
         gs.push(g);
       }
       g.rows.push(e);
@@ -179,7 +185,7 @@ export default function CostDbBrowser({
                   {isCollapsed ? "▸" : "▾"}
                 </span>
                 <h2 className="font-heading text-sm uppercase tracking-wider text-brand-soft">
-                  {g.key}
+                  {g.label}
                 </h2>
                 <span className="text-[11px] text-muted">
                   {g.rows.length} entries

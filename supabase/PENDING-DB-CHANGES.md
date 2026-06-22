@@ -15,7 +15,7 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-- [ ] **0018_estimate_polish.sql** — `building_sf` on estimates (enables the $/SF benchmark) and `signer_name`/`signer_title` on company settings (signs the proposal letter).
+_(nothing pending)_
 
 ---
 
@@ -38,3 +38,10 @@ one once in Supabase, then it moves to **Already run**.
 - [x] 0015_sub_quotes.sql — run 2026-06-10
 - [x] 0016_company_settings.sql — run 2026-06-10
 - [x] 0017_phase11_proposals.sql — run 2026-06-10
+- [x] 0018_estimate_polish.sql — run 2026-06-15
+- [x] 0019_cost_benchmarks.sql — run 2026-06-15
+- [x] 0020_unit_prices.sql — run 2026-06-15
+- [x] 0021_cost_observations_items.sql — run 2026-06-17
+- [x] 0022_proposal_format.sql — run 2026-06-19
+- [x] 0023_measurement_leaders.sql — run 2026-06-19
+- [x] 0024_sheet_ledger.sql — run 2026-06-19

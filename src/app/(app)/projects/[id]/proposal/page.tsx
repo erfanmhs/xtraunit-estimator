@@ -7,6 +7,7 @@ import ProposalView, {
 } from "./ProposalView";
 import type { PricedLine } from "../pricing/PricingTable";
 import type { Markups } from "../estimate/actions";
+import { resolveProfile } from "@/lib/proposal/profile";
 
 export default async function ProposalPage({
   params,
@@ -18,7 +19,7 @@ export default async function ProposalPage({
 
   const { data: project } = await supabase
     .from("projects")
-    .select("id,name,client_name,address")
+    .select("id,name,client_name,address,project_type")
     .eq("id", id)
     .maybeSingle();
 
@@ -30,16 +31,17 @@ export default async function ProposalPage({
     .eq("project_id", id)
     .order("division_code", { ascending: true })
     .order("sort_order", { ascending: true });
-  const lines = ((items as PricedLine[]) ?? []).filter(
-    (li) => li.status !== "excluded",
-  );
+  // Keep ALL lines (incl. excluded) — the Included/Excluded table needs them;
+  // totals downstream only count active, priced lines.
+  const lines = (items as PricedLine[]) ?? [];
 
-  // Markups: project's own, else company defaults.
+  // Markups + building size: project's own, else company defaults.
   const { data: est } = await supabase
     .from("estimates")
-    .select("contingency_pct,insurance_pct,overhead_pct,profit_pct")
+    .select("contingency_pct,insurance_pct,overhead_pct,profit_pct,building_sf")
     .eq("project_id", id)
     .maybeSingle();
+  const buildingSf: number | null = est?.building_sf ?? null;
   let markups: Markups = {
     contingency_pct: est?.contingency_pct ?? 0,
     insurance_pct: est?.insurance_pct ?? 0,
@@ -68,6 +70,7 @@ export default async function ProposalPage({
     signer_name: cs?.signer_name ?? null,
     signer_title: cs?.signer_title ?? null,
   };
+  const profile = resolveProfile(cs?.proposal_profile);
 
   // Assumptions & exclusions from the AI review (unresolved ones).
   const { data: findings } = await supabase
@@ -80,9 +83,10 @@ export default async function ProposalPage({
     .map((f) => ({ kind: f.kind, text: f.text }));
 
   // Saved proposal (letter etc.). Banner if migration 0017 is missing.
+  // select("*") so it works whether 0022's new columns exist yet or not.
   const prop = await supabase
     .from("proposals")
-    .select("letter_text,client_name,proposal_date")
+    .select("*")
     .eq("project_id", id)
     .maybeSingle();
   const migrationMissing = !!prop.error;
@@ -90,6 +94,11 @@ export default async function ProposalPage({
     letter_text: prop.data?.letter_text ?? null,
     client_name: prop.data?.client_name ?? null,
     proposal_date: prop.data?.proposal_date ?? null,
+    project_description: prop.data?.project_description ?? null,
+    understanding: prop.data?.understanding ?? null,
+    estimated_duration: prop.data?.estimated_duration ?? null,
+    anticipated_start: prop.data?.anticipated_start ?? null,
+    table_style: prop.data?.table_style ?? null,
   };
 
   return (
@@ -129,10 +138,13 @@ export default async function ProposalPage({
           <ProposalView
             projectId={id}
             company={company}
+            profile={profile}
             project={{
               name: project?.name ?? "Project",
               client_name: project?.client_name ?? null,
               address: project?.address ?? null,
+              project_type: project?.project_type ?? null,
+              building_sf: buildingSf,
             }}
             lines={lines}
             markups={markups}
