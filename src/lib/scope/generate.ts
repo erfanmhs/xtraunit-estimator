@@ -16,9 +16,15 @@ import "server-only";
  *   - Never invent a price (pricing is a later phase).
  */
 import { toFile } from "@anthropic-ai/sdk";
+import { PDFDocument } from "pdf-lib";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
+
+// Anthropic's document-PDF limits. We stay safely under both, and only ever
+// send the specific image-only pages (not the whole plan file).
+const MAX_PDF_BYTES = 28 * 1024 * 1024; // < the ~32 MB request limit (leave headroom)
+const MAX_PDF_PAGES = 95; // < the 100-page limit
 
 // Models come from one config (env-overridable) — see src/config/ai.ts.
 import { AI_MODELS } from "@/config/ai";
@@ -205,18 +211,40 @@ export async function uploadPlanFiles(
     if (signal?.aborted) break;
     const { data: blob } = await sb.storage.from("plans").download(p.storage_path);
     if (!blob) continue;
-    // Read this ONE file into bytes (one at a time = the memory win), then hand
-    // toFile the byte array — the same form the SDK has always accepted.
-    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const srcBytes = new Uint8Array(await blob.arrayBuffer());
+
+    // Build a small sub-PDF of ONLY the image-only pages that need a vision read
+    // (capped to the page limit). This keeps us under Anthropic's PDF limits even
+    // when the full plan set is hundreds of MB. Falls back to the file as-is.
+    let outBytes = srcBytes;
+    try {
+      const wanted = (p.pages ?? []).map((n) => n - 1).filter((i) => i >= 0);
+      if (wanted.length) {
+        const src = await PDFDocument.load(srcBytes);
+        const total = src.getPageCount();
+        const idx = wanted.filter((i) => i < total).slice(0, MAX_PDF_PAGES);
+        if (idx.length && idx.length < total) {
+          const out = await PDFDocument.create();
+          (await out.copyPages(src, idx)).forEach((pg) => out.addPage(pg));
+          outBytes = new Uint8Array(await out.save());
+        }
+      }
+    } catch {
+      outBytes = srcBytes; // extraction failed — try the whole file (cap still applies)
+    }
+
+    // If it's still over the model's limit, skip the vision read rather than
+    // failing the whole run — the AI drafts from text + measurements instead.
+    if (outBytes.length > MAX_PDF_BYTES) continue;
+
     const uploaded = await client.beta.files.upload(
       {
-        file: await toFile(bytes, p.file_name, { type: "application/pdf" }),
+        file: await toFile(outBytes, p.file_name, { type: "application/pdf" }),
         betas: [FILES_BETA],
       },
       { signal },
     );
     ids.push(uploaded.id);
-    // `bytes`/`blob` fall out of scope here → freed before the next file.
   }
   return ids;
 }

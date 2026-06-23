@@ -44,9 +44,10 @@ export type ScopeBundle = {
   measurements: BundleMeasurement[];
   // Cached plan text (schedules/notes/callouts) extracted from vector PDFs.
   planText: string;
-  // Only the PDFs that still need an AI vision read (image-only sheets). Refs
-  // only — the bytes are streamed at upload time, never held in the bundle.
-  plans: { file_name: string; storage_path: string }[];
+  // Plan files with image-only sheets that need an AI vision read: a reference
+  // plus the exact page numbers needing vision. Only those pages (capped) are
+  // sent to the AI — never the whole multi-page file. Streamed at upload time.
+  plans: { file_name: string; storage_path: string; pages: number[] }[];
   // Answers the user gave to the AI's earlier "question" findings. Fed back into
   // the prompt so a regenerate is more accurate and doesn't re-ask them.
   clarifications: { question: string; answer: string }[];
@@ -128,26 +129,30 @@ export async function gatherBundle(
     })
     .join("\n\n");
 
-  // Only download PDFs for plan files that still have an image-only / un-ingested
-  // sheet — those need an AI vision read. Fully text-extracted files are skipped.
-  const visionFileIds = [
-    ...new Set(
-      allSheets
-        .filter((s) => s.ingest_method !== "text")
-        .map((s) => s.plan_file_id)
-        .filter(Boolean),
-    ),
-  ];
-  // Just collect references — the bytes are downloaded one-at-a-time at upload
-  // time (uploadPlanFiles), so a big plan set never sits in memory all at once.
-  const plans: { file_name: string; storage_path: string }[] = [];
-  if (visionFileIds.length) {
+  // Which PAGES of each plan file still need an AI vision read (image-only /
+  // un-ingested sheets). Text-extracted sheets are skipped — and crucially, we
+  // send the AI only these specific pages, never the whole multi-page file
+  // (Anthropic rejects PDFs over its size/page limit with "Could not process PDF").
+  const visionPagesByFile = new Map<string, number[]>();
+  for (const s of allSheets) {
+    if (s.ingest_method === "text" || !s.plan_file_id) continue;
+    const arr = visionPagesByFile.get(s.plan_file_id) ?? [];
+    arr.push(s.page_number);
+    visionPagesByFile.set(s.plan_file_id, arr);
+  }
+  // Just references + page lists — bytes are downloaded at upload time.
+  const plans: { file_name: string; storage_path: string; pages: number[] }[] = [];
+  if (visionPagesByFile.size) {
     const { data: planFiles } = await supabase
       .from("plan_files")
       .select("id,file_name,storage_path")
-      .in("id", visionFileIds);
+      .in("id", [...visionPagesByFile.keys()]);
     for (const pf of planFiles ?? []) {
-      plans.push({ file_name: pf.file_name, storage_path: pf.storage_path });
+      plans.push({
+        file_name: pf.file_name,
+        storage_path: pf.storage_path,
+        pages: (visionPagesByFile.get(pf.id) ?? []).sort((a, b) => a - b),
+      });
     }
   }
 
