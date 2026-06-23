@@ -477,6 +477,14 @@ export default function PlanViewer({
   const [activeCountId, setActiveCountId] = useState<string | null>(null);
   const [editGeom, setEditGeom] = useState<Pt[] | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  // Undo / redo — snapshots of this sheet's measurements; on undo/redo the DB is
+  // reconciled (re-insert / update / delete) to match. Reset when the sheet
+  // changes. Latest undo/redo fns are mirrored to refs for the keyboard handler.
+  const [undoStack, setUndoStack] = useState<Measurement[][]>([]);
+  const [redoStack, setRedoStack] = useState<Measurement[][]>([]);
+  const historyBusy = useRef(false);
+  const undoFnRef = useRef<() => void>(() => {});
+  const redoFnRef = useRef<() => void>(() => {});
   // Layer groups: hidden layers stay saved but don't render. One layer at a
   // time can be open in the panel's layer editor (rename / attrs / delete) —
   // individual runs are edited by clicking them on the drawing itself.
@@ -538,6 +546,8 @@ export default function PlanViewer({
     setEditGeom(null);
     activeCountRef.current = null;
     setActiveCountId(null);
+    setUndoStack([]);
+    setRedoStack([]);
     if (!currentSheet) return;
     (async () => {
       const { data } = await supabase
@@ -732,6 +742,37 @@ export default function PlanViewer({
     };
   }, [draft.length, calib, tool, selectedId, activeCountId, menu]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep the keyboard handler pointed at the latest undo/redo closures.
+  useEffect(() => {
+    undoFnRef.current = undo;
+    redoFnRef.current = redo;
+  });
+
+  // Ctrl/Cmd+Z = undo · Ctrl+Shift+Z or Ctrl+Y = redo (ignored while typing).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      )
+        return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undoFnRef.current();
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        redoFnRef.current();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // ---- notes ----
   // Drag a divider to resize a side panel (window listeners keep it smooth).
   function startResize(side: "left" | "right", e: React.PointerEvent) {
@@ -910,6 +951,7 @@ export default function PlanViewer({
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
+    recordHistory();
     const { data, error: insErr } = await supabase
       .from("measurements")
       .insert({
@@ -961,6 +1003,7 @@ export default function PlanViewer({
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
+    recordHistory();
     const { data, error: insErr } = await supabase
       .from("measurements")
       .insert({
@@ -1080,6 +1123,7 @@ export default function PlanViewer({
   // if you click an existing marker). Nothing is ever lost mid-count.
   async function addCountMarker(pt: Pt) {
     if (!currentSheet) return;
+    recordHistory();
     const active = activeCountRef.current;
     if (active) {
       const idx = active.geometry.findIndex(
@@ -1287,6 +1331,7 @@ export default function PlanViewer({
       const geometry = editGeom;
       setEditGeom(null);
       if (m) {
+        recordHistory();
         let value = m.value;
         if (m.type === "leader") {
           value = null; // leaders carry text, not a measured value
@@ -1320,6 +1365,7 @@ export default function PlanViewer({
   // ---- edit / copy / delete ----
   async function updateSelected(patch: Partial<Pick<Measurement, "layer" | "color">>) {
     if (!selected) return;
+    recordHistory();
     setMeasurements((arr) =>
       arr.map((x) => (x.id === selected.id ? { ...x, ...patch } : x)),
     );
@@ -1332,6 +1378,7 @@ export default function PlanViewer({
     wall_height?: number;
   }) {
     if (!selected || selected.type !== "wall") return;
+    recordHistory();
     const height = patch.wall_height ?? selected.wall_height ?? 0;
     const sided = patch.wall_sided ?? selected.wall_sided;
     const value =
@@ -1352,6 +1399,7 @@ export default function PlanViewer({
   // Width / depth change recomputes the volume (cubic feet).
   async function updateVolume(patch: { vol_width?: number; vol_depth?: number }) {
     if (!selected || selected.type !== "volume") return;
+    recordHistory();
     const depth = patch.vol_depth ?? selected.vol_depth ?? 0;
     const width = patch.vol_width ?? selected.vol_width ?? 0;
     let value = selected.value;
@@ -1377,6 +1425,7 @@ export default function PlanViewer({
     patch: Partial<Pick<Measurement, "text" | "font_size" | "head_size">>,
   ) {
     if (!selected || selected.type !== "leader") return;
+    recordHistory();
     setMeasurements((arr) =>
       arr.map((x) => (x.id === selected.id ? { ...x, ...patch } : x)),
     );
@@ -1389,6 +1438,7 @@ export default function PlanViewer({
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
+    recordHistory();
     const off = 12 / scale;
     const geometry = m.geometry.map((p) => ({ x: p.x + off, y: p.y + off }));
     const { data } = await supabase
@@ -1423,6 +1473,7 @@ export default function PlanViewer({
 
   // ── Layer-level edits: one change applies to every run in the layer ──────
   async function renameLayer(rows: Measurement[], newName: string) {
+    recordHistory();
     const ids = rows.map((r) => r.id);
     const layerVal = newName.trim() || null;
     setMeasurements((arr) =>
@@ -1432,6 +1483,7 @@ export default function PlanViewer({
   }
 
   async function recolorLayer(rows: Measurement[], newColor: string) {
+    recordHistory();
     const ids = rows.map((r) => r.id);
     setMeasurements((arr) =>
       arr.map((m) => (ids.includes(m.id) ? { ...m, color: newColor } : m)),
@@ -1451,6 +1503,7 @@ export default function PlanViewer({
     const sx = currentScale?.x;
     const sy = currentScale?.y;
     if (sx == null || sy == null) return;
+    recordHistory();
     const wallPatch = "wall_height" in patch || "wall_sided" in patch;
     const volPatch = "vol_width" in patch || "vol_depth" in patch;
     const updated = rows
@@ -1492,6 +1545,7 @@ export default function PlanViewer({
       )
     )
       return;
+    recordHistory();
     const ids = rows.map((r) => r.id);
     setMeasurements((arr) => arr.filter((m) => !ids.includes(m.id)));
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
@@ -1515,9 +1569,117 @@ export default function PlanViewer({
   }
 
   async function deleteMeasurement(id: string) {
+    recordHistory();
     await supabase.from("measurements").delete().eq("id", id);
     setMeasurements((m) => m.filter((x) => x.id !== id));
     if (selectedId === id) setSelectedId(null);
+  }
+
+  // ── Undo / redo engine ────────────────────────────────────────────────────
+  // Snapshot the current measurements before a change. Capped to 50 steps.
+  function recordHistory() {
+    setUndoStack((s) => [...s.slice(-49), measurements]);
+    setRedoStack([]);
+  }
+
+  // Make the DB match `target`, knowing `current` is what's stored now.
+  async function reconcileDb(target: Measurement[], current: Measurement[]) {
+    const tgt = new Map(target.map((m) => [m.id, m]));
+    const cur = new Map(current.map((m) => [m.id, m]));
+    const toDelete = current.filter((m) => !tgt.has(m.id)).map((m) => m.id);
+    const toInsert = target.filter((m) => !cur.has(m.id));
+    const toUpdate = target.filter((m) => {
+      const c = cur.get(m.id);
+      return c && JSON.stringify(c) !== JSON.stringify(m);
+    });
+    if (toDelete.length)
+      await supabase.from("measurements").delete().in("id", toDelete);
+    if (toInsert.length && currentSheet) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from("measurements").insert(
+          toInsert.map((m) => ({
+            id: m.id,
+            project_id: projectId,
+            plan_file_id: planFile.id,
+            sheet_id: currentSheet.id,
+            owner_id: user.id,
+            type: m.type,
+            geometry: m.geometry,
+            value: m.value,
+            unit: m.unit,
+            layer: m.layer,
+            color: m.color,
+            wall_sided: m.wall_sided,
+            wall_height: m.wall_height,
+            vol_mode: m.vol_mode,
+            vol_width: m.vol_width,
+            vol_depth: m.vol_depth,
+            text: m.text,
+            font_size: m.font_size,
+            head_size: m.head_size,
+          })),
+        );
+      }
+    }
+    for (let i = 0; i < toUpdate.length; i += 10) {
+      await Promise.all(
+        toUpdate.slice(i, i + 10).map((m) =>
+          supabase
+            .from("measurements")
+            .update({
+              geometry: m.geometry,
+              value: m.value,
+              unit: m.unit,
+              layer: m.layer,
+              color: m.color,
+              wall_sided: m.wall_sided,
+              wall_height: m.wall_height,
+              vol_mode: m.vol_mode,
+              vol_width: m.vol_width,
+              vol_depth: m.vol_depth,
+              text: m.text,
+              font_size: m.font_size,
+              head_size: m.head_size,
+            })
+            .eq("id", m.id),
+        ),
+      );
+    }
+  }
+
+  async function applyHistory(target: Measurement[], pushTo: "undo" | "redo") {
+    const current = measurements;
+    if (pushTo === "redo") setRedoStack((s) => [...s.slice(-49), current]);
+    else setUndoStack((s) => [...s.slice(-49), current]);
+    finishCount();
+    setSelectedId(null);
+    setEditGeom(null);
+    setDraft([]);
+    setMeasurements(target);
+    try {
+      await reconcileDb(target, current);
+    } finally {
+      historyBusy.current = false;
+    }
+  }
+
+  async function undo() {
+    if (historyBusy.current || !undoStack.length) return;
+    historyBusy.current = true;
+    const target = undoStack[undoStack.length - 1];
+    setUndoStack((s) => s.slice(0, -1));
+    await applyHistory(target, "redo");
+  }
+
+  async function redo() {
+    if (historyBusy.current || !redoStack.length) return;
+    historyBusy.current = true;
+    const target = redoStack[redoStack.length - 1];
+    setRedoStack((s) => s.slice(0, -1));
+    await applyHistory(target, "undo");
   }
 
   // ---- pan ----
@@ -1998,6 +2160,25 @@ export default function PlanViewer({
               className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand disabled:opacity-40"
             >
               ›
+            </button>
+            <span className="mx-1 h-5 w-px bg-border" />
+            <button
+              type="button"
+              onClick={undo}
+              disabled={!undoStack.length}
+              title="Undo (Ctrl+Z)"
+              className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand disabled:opacity-40"
+            >
+              ↶
+            </button>
+            <button
+              type="button"
+              onClick={redo}
+              disabled={!redoStack.length}
+              title="Redo (Ctrl+Shift+Z)"
+              className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand disabled:opacity-40"
+            >
+              ↷
             </button>
           </div>
 

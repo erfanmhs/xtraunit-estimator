@@ -139,6 +139,7 @@ export async function suggestPrices(opts: {
     name: string | null;
     address: string | null;
     project_type: string | null;
+    notes: string | null;
     building_sf: number | null;
     benchmarks?: { label: string; sell_low: number | null; sell_high: number | null }[];
     unit_prices?: { item: string; unit: string; cost: number | null }[];
@@ -199,6 +200,14 @@ export async function suggestPrices(opts: {
   } else {
     anchor = `REALITY CHECK: price at competitive California GC levels. If your numbers trend high, they probably are — err lean, not retail.`;
   }
+  // Trade/subcontract work isn't a whole building — a $/SF anchor would mislead.
+  if ((project.project_type ?? "").toLowerCase().includes("trade")) {
+    anchor = `REALITY CHECK: this is single-trade / subcontract work, NOT a whole building — do NOT anchor to a whole-building $/SF figure. Price ONLY the listed scope at a competitive California buy cost for that trade, lean rather than retail.`;
+  }
+
+  const notesText = project.notes?.trim()
+    ? `PROJECT NOTES from the estimator (authoritative context — factor these into every price): ${project.notes.trim()}`
+    : "";
 
   const prompt = `XtraUnit is a licensed California general contractor (CA #1033830) pricing all trades. Suggest DIRECT COSTS for each scope line below. A senior estimator will review every number — these are proposals, not final prices. ACCURACY MATTERS MORE THAN CAUTION-PADDING: a number that is too high is just as wrong as one that is too low.
 
@@ -216,6 +225,8 @@ Critical rules:
 ${anchor}
 
 PROJECT: ${project.name ?? "Unnamed"} — ${project.project_type ?? "type unknown"} at ${project.address ?? "address unknown"}.
+
+${notesText}
 
 ${claText}
 
@@ -294,7 +305,7 @@ export async function runPricingSuggestion(opts: {
 
     const { data: project } = await sb
       .from("projects")
-      .select("name,address,project_type")
+      .select("name,address,project_type,notes")
       .eq("id", projectId)
       .single();
 
@@ -471,6 +482,7 @@ export async function runPricingSuggestion(opts: {
         name: project?.name ?? null,
         address: project?.address ?? null,
         project_type: project?.project_type ?? null,
+        notes: project?.notes ?? null,
         building_sf: buildingSf,
         benchmarks,
         unit_prices: unitPrices,

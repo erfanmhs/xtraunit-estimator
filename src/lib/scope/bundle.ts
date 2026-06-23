@@ -44,8 +44,9 @@ export type ScopeBundle = {
   measurements: BundleMeasurement[];
   // Cached plan text (schedules/notes/callouts) extracted from vector PDFs.
   planText: string;
-  // Only the PDFs that still need an AI vision read (image-only sheets).
-  plans: { file_name: string; base64: string }[];
+  // Only the PDFs that still need an AI vision read (image-only sheets). Refs
+  // only — the bytes are streamed at upload time, never held in the bundle.
+  plans: { file_name: string; storage_path: string }[];
   // Answers the user gave to the AI's earlier "question" findings. Fed back into
   // the prompt so a regenerate is more accurate and doesn't re-ask them.
   clarifications: { question: string; answer: string }[];
@@ -137,20 +138,16 @@ export async function gatherBundle(
         .filter(Boolean),
     ),
   ];
-  const plans: { file_name: string; base64: string }[] = [];
+  // Just collect references — the bytes are downloaded one-at-a-time at upload
+  // time (uploadPlanFiles), so a big plan set never sits in memory all at once.
+  const plans: { file_name: string; storage_path: string }[] = [];
   if (visionFileIds.length) {
     const { data: planFiles } = await supabase
       .from("plan_files")
       .select("id,file_name,storage_path")
       .in("id", visionFileIds);
     for (const pf of planFiles ?? []) {
-      const { data: blob } = await supabase.storage
-        .from("plans")
-        .download(pf.storage_path);
-      if (blob) {
-        const buf = Buffer.from(await blob.arrayBuffer());
-        plans.push({ file_name: pf.file_name, base64: buf.toString("base64") });
-      }
+      plans.push({ file_name: pf.file_name, storage_path: pf.storage_path });
     }
   }
 

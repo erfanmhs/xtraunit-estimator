@@ -1,0 +1,5 @@
+# Never apply end-of-line conversion to binary assets (it corrupts them).
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary

@@ -68,7 +68,9 @@ export default async function NewProjectPage({
                 <option value="">Select…</option>
                 <option value="multifamily">Multifamily</option>
                 <option value="adu_addition">ADU / Addition</option>
+                <option value="residential">Residential</option>
                 <option value="commercial">Commercial</option>
+                <option value="trade_work">Trade work</option>
                 <option value="other">Other</option>
               </select>
             </div>

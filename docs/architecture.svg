@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 760" width="1180" height="760">
+<rect x="0" y="0" width="1180" height="760" rx="0" fill="#ffffff" stroke="#ffffff" stroke-width="1"/>
+<text x="40" y="44" font-family="Helvetica, Arial, sans-serif" font-size="24" fill="#0f172a" text-anchor="start" font-weight="bold">XtraUnit Estimator — Architecture &amp; Data Flow</text>
+<text x="40" y="68" font-family="Courier, monospace" font-size="11.5" fill="#64748b" text-anchor="start" font-weight="normal">Next.js 16 (App Router) · React 19 · Supabase (Postgres + RLS) · Anthropic Claude · pdf.js / pdf-lib · Render</text>
+<text x="40" y="104" font-family="Helvetica, Arial, sans-serif" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">1 · PRODUCT PIPELINE  (plans -&gt; proposal)</text>
+<rect x="40" y="116" width="148" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="114.0" y="138" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="bold">Plans</text>
+<text x="114.0" y="154" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="normal">upload &amp; trim PDF</text>
+<path d="M190.0,135 L198.0,139 L190.0,143 Z" fill="#64748b"/>
+<rect x="200" y="116" width="148" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="274.0" y="138" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="bold">Prepare</text>
+<text x="274.0" y="154" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="normal">extract sheet text</text>
+<path d="M350.0,135 L358.0,139 L350.0,143 Z" fill="#64748b"/>
+<rect x="360" y="116" width="148" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="434.0" y="138" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="bold">Takeoff</text>
+<text x="434.0" y="154" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="normal">measure on SVG</text>
+<path d="M510.0,135 L518.0,139 L510.0,143 Z" fill="#64748b"/>
+<rect x="520" y="116" width="148" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="594.0" y="138" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="bold">AI Scope</text>
+<text x="594.0" y="154" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="normal">draft + review</text>
+<path d="M670.0,135 L678.0,139 L670.0,143 Z" fill="#64748b"/>
+<rect x="680" y="116" width="148" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="754.0" y="138" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="bold">Pricing</text>
+<text x="754.0" y="154" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="normal">history + AI</text>
+<path d="M830.0,135 L838.0,139 L830.0,143 Z" fill="#64748b"/>
+<rect x="840" y="116" width="148" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="914.0" y="138" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="bold">Estimate</text>
+<text x="914.0" y="154" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="normal">markups -&gt; total</text>
+<path d="M990.0,135 L998.0,139 L990.0,143 Z" fill="#64748b"/>
+<rect x="1000" y="116" width="148" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1074.0" y="138" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle" font-weight="bold">Proposal</text>
+<text x="1074.0" y="154" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#64748b" text-anchor="middle" font-weight="normal">letter + PDF</text>
+<text x="40" y="196" font-family="Helvetica, Arial, sans-serif" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">2 · ARCHITECTURE  (a request flows top -&gt; bottom; data returns bottom -&gt; top)</text>
+<rect x="40" y="206" width="1108" height="78" rx="8" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<rect x="40" y="206" width="5" height="78" rx="0" fill="#A01C2D" stroke="#A01C2D" stroke-width="1"/>
+<text x="60" y="236" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="bold">Browser</text>
+<text x="60" y="256" font-family="Courier, monospace" font-size="10" fill="#64748b" text-anchor="start" font-weight="normal">React client</text>
+<rect x="230.0" y="228" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="337.5" y="249" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">PDF.js page render</text>
+<rect x="457.0" y="228" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="564.5" y="249" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">SVG measure overlay</text>
+<rect x="684.0" y="228" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="791.5" y="249" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">pdf-lib trim / export</text>
+<rect x="911.0" y="228" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1018.5" y="249" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">undo/redo · optimistic UI</text>
+<line x1="150" y1="286" x2="150" y2="300" stroke="#64748b" stroke-width="1"/>
+<path d="M147,297 L153,300 L147,303 Z" fill="#64748b"/>
+<text x="162" y="296.0" font-family="Courier, monospace" font-size="10" fill="#64748b" text-anchor="start" font-weight="normal">server actions · RSC</text>
+<rect x="40" y="302" width="1108" height="78" rx="8" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<rect x="40" y="302" width="5" height="78" rx="0" fill="#A01C2D" stroke="#A01C2D" stroke-width="1"/>
+<text x="60" y="332" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="bold">Next.js 16</text>
+<text x="60" y="352" font-family="Courier, monospace" font-size="10" fill="#64748b" text-anchor="start" font-weight="normal">@ Render · 1 inst</text>
+<rect x="230.0" y="324" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="337.5" y="345" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Server Components (read)</text>
+<rect x="457.0" y="324" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="564.5" y="345" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Server Actions (write)</text>
+<rect x="684.0" y="324" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="791.5" y="345" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Background AI jobs</text>
+<rect x="911.0" y="324" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1018.5" y="345" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">config/ai.ts model map</text>
+<line x1="150" y1="382" x2="150" y2="396" stroke="#64748b" stroke-width="1"/>
+<path d="M147,393 L153,396 L147,399 Z" fill="#64748b"/>
+<text x="162" y="392.0" font-family="Courier, monospace" font-size="10" fill="#64748b" text-anchor="start" font-weight="normal">SQL + Storage · RLS</text>
+<rect x="40" y="398" width="1108" height="78" rx="8" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<rect x="40" y="398" width="5" height="78" rx="0" fill="#A01C2D" stroke="#A01C2D" stroke-width="1"/>
+<text x="60" y="428" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="bold">Supabase</text>
+<text x="60" y="448" font-family="Courier, monospace" font-size="10" fill="#64748b" text-anchor="start" font-weight="normal">backend</text>
+<rect x="230.0" y="420" width="290.6666666666667" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="375.33333333333337" y="441" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Auth (email)</text>
+<rect x="532.6666666666667" y="420" width="290.6666666666667" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="678.0000000000001" y="441" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Postgres + Row-Level Security</text>
+<rect x="835.3333333333334" y="420" width="290.6666666666667" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="980.6666666666667" y="441" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Storage — plans bucket</text>
+<line x1="150" y1="478" x2="150" y2="492" stroke="#64748b" stroke-width="1"/>
+<path d="M147,489 L153,492 L147,495 Z" fill="#64748b"/>
+<text x="162" y="488.0" font-family="Courier, monospace" font-size="10" fill="#64748b" text-anchor="start" font-weight="normal">AI calls + Files API</text>
+<rect x="40" y="494" width="1108" height="78" rx="8" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<rect x="40" y="494" width="5" height="78" rx="0" fill="#A01C2D" stroke="#A01C2D" stroke-width="1"/>
+<text x="60" y="524" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#0f172a" text-anchor="start" font-weight="bold">Claude</text>
+<text x="60" y="544" font-family="Courier, monospace" font-size="10" fill="#64748b" text-anchor="start" font-weight="normal">Anthropic API</text>
+<rect x="230.0" y="516" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="337.5" y="537" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Opus 4.8 — draft/price</text>
+<rect x="457.0" y="516" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="564.5" y="537" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Sonnet 4.6 — review/letter</text>
+<rect x="684.0" y="516" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="791.5" y="537" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">Files API (plan vision)</text>
+<rect x="911.0" y="516" width="215.0" height="34" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="1018.5" y="537" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="normal">structured JSON output</text>
+<rect x="40" y="592" width="1108" height="84" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="58" y="616" font-family="Helvetica, Arial, sans-serif" font-size="13.5" fill="#0f172a" text-anchor="start" font-weight="bold">Signature pattern — background AI jobs (scope &amp; pricing)</text>
+<text x="58" y="638" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">Server Action inserts a scope_runs row -&gt; spawns a fire-and-forget job in the SAME process -&gt; job re-auths with the user&#x27;s token -&gt;</text>
+<text x="58" y="655" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">gatherBundle -&gt; Files API (streamed 1 file/time) -&gt; draftScope (Opus, chunked) -&gt; findGaps (Sonnet) -&gt; writes line_items + scope_findings; UI polls progress.</text>
+<text x="1130" y="616" font-family="Courier, monospace" font-size="10" fill="#A01C2D" text-anchor="end" font-weight="normal">Known limit: single instance — a job queue + worker is the next infra step.</text>
+<text x="40" y="742" font-family="Courier, monospace" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">Deploy:  git push main  -&gt;  Render auto-deploys     ·     one Supabase project backs both local &amp; production</text>
+</svg>

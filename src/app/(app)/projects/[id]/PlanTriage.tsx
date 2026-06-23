@@ -36,6 +36,7 @@ export default function PlanTriage({
   const [labels, setLabels] = useState<Record<number, string>>({});
   const [phase, setPhase] = useState<"rendering" | "ready" | "saving">("rendering");
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
 
   useEffect(() => {
     if (ranRef.current) return;
@@ -100,6 +101,18 @@ export default function PlanTriage({
       copied.forEach((p) => out.addPage(p));
       const bytes = await out.save();
 
+      // pdf-lib trims pages but doesn't recompress — show the result so the
+      // user sees how big the upload is (and how much dropping pages saved).
+      const trimMb = bytes.length / (1024 * 1024);
+      const origMb = file.size / (1024 * 1024);
+      setProgress(
+        `Uploading ${trimMb.toFixed(1)} MB` +
+          (origMb > trimMb + 0.1
+            ? ` — trimmed from ${origMb.toFixed(1)} MB (${keptPages.length} of ${total} pages)`
+            : "") +
+          "…",
+      );
+
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `${user.id}/${projectId}/${Date.now()}-${safeName}`;
       const blob = new Blob([new Uint8Array(bytes)], {
@@ -108,7 +121,16 @@ export default function PlanTriage({
       const { error: upErr } = await supabase.storage
         .from("plans")
         .upload(path, blob, { contentType: "application/pdf" });
-      if (upErr) throw upErr;
+      if (upErr) {
+        const mb = (bytes.length / (1024 * 1024)).toFixed(1);
+        // Supabase storage rejects files over the bucket/project size limit.
+        if (/exceeded the maximum allowed size|payload too large|413/i.test(upErr.message)) {
+          throw new Error(
+            `This trimmed plan set is ${mb} MB, over your storage upload limit. In Supabase, raise the "plans" bucket file-size limit (Storage → Buckets → plans → Edit) and the project upload limit (Storage → Settings). Or keep fewer / lighter pages.`,
+          );
+        }
+        throw upErr;
+      }
 
       const { data: pf, error: pfErr } = await supabase
         .from("plan_files")
@@ -159,9 +181,11 @@ export default function PlanTriage({
             Select the sheets to keep
           </h2>
           <p className="text-sm text-muted">
-            {rendering
-              ? `Loading thumbnails… ${thumbs.length}/${total || "?"}`
-              : `${kept.size} of ${total} pages kept — ${file.name}`}
+            {saving && progress
+              ? progress
+              : rendering
+                ? `Loading thumbnails… ${thumbs.length}/${total || "?"}`
+                : `${kept.size} of ${total} pages kept — ${file.name}`}
           </p>
         </div>
         <div className="flex items-center gap-2">

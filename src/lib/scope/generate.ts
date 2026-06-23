@@ -16,6 +16,7 @@ import "server-only";
  *   - Never invent a price (pricing is a later phase).
  */
 import { toFile } from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
 
@@ -190,24 +191,29 @@ function notesText(bundle: ScopeBundle): string {
 }
 
 // Upload the plan PDFs once via the Files API (avoids the request-size limit
-// you hit when inlining big PDFs as base64). Returns the file IDs.
+// you hit when inlining big PDFs). Memory-frugal: download and upload ONE file
+// at a time as a Blob (no base64 string, no extra Buffer copy), so peak memory
+// is a single plan file — not the sum of all of them. Returns the file IDs.
 export async function uploadPlanFiles(
+  sb: SupabaseClient,
   bundle: ScopeBundle,
   signal?: AbortSignal,
 ): Promise<string[]> {
   const client = getAnthropicClient();
   const ids: string[] = [];
   for (const p of bundle.plans) {
+    if (signal?.aborted) break;
+    const { data: blob } = await sb.storage.from("plans").download(p.storage_path);
+    if (!blob) continue;
     const uploaded = await client.beta.files.upload(
       {
-        file: await toFile(Buffer.from(p.base64, "base64"), p.file_name, {
-          type: "application/pdf",
-        }),
+        file: await toFile(blob, p.file_name, { type: "application/pdf" }),
         betas: [FILES_BETA],
       },
       { signal },
     );
     ids.push(uploaded.id);
+    // `blob` falls out of scope here → freed before the next file downloads.
   }
   return ids;
 }

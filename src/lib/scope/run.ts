@@ -68,7 +68,7 @@ export async function runScopeGeneration(opts: {
     await update({ stage: "Reading your plans…", progress: 10 });
     const bundle = await gatherBundle(sb, projectId);
     stopIfCancelled();
-    fileIds = await uploadPlanFiles(bundle, ac.signal);
+    fileIds = await uploadPlanFiles(sb, bundle, ac.signal);
 
     // Draft in division-sized chunks (two at a time) so no single AI response
     // can grow large enough to get cut off. Each chunk's lines are filtered to

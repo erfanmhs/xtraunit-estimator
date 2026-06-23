@@ -1,0 +1,589 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1372 959" width="1372" height="959">
+<rect x="0" y="0" width="1372" height="959.5" rx="0" fill="#ffffff" stroke="#ffffff" stroke-width="1"/>
+<text x="24" y="40" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#0f172a" text-anchor="start" font-weight="bold">XtraUnit Estimator — Database Schema (Supabase / Postgres)</text>
+<text x="24" y="62" font-family="Courier, monospace" font-size="11" fill="#64748b" text-anchor="start" font-weight="normal">15 tables · every table is owner-scoped via Row-Level Security (owner_id -&gt; auth.users).  •=primary key   -&gt;=foreign key reference   uniq=unique</text>
+<rect x="24" y="92" width="252" height="172.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="92" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="109" width="252" height="7" fill="#eef2f7"/>
+<text x="34" y="108" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">projects</text>
+<text x="34" y="126.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="268" y="126.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="25" y="129.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="139.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="268" y="139.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<text x="34" y="153.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">name</text>
+<text x="268" y="153.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="156.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="166.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">client_name</text>
+<text x="268" y="166.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="180.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">address</text>
+<text x="268" y="180.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="183.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="193.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_type</text>
+<text x="268" y="193.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="207.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">status</text>
+<text x="268" y="207.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="210.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="220.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">notes</text>
+<text x="268" y="220.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="234.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">region</text>
+<text x="268" y="234.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="237.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="247.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="268" y="247.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<text x="34" y="261.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">updated_at</text>
+<text x="268" y="261.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="24" y="284.5" width="252" height="132.0" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="284.5" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="301.5" width="252" height="7" fill="#eef2f7"/>
+<text x="34" y="300.5" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">plan_files</text>
+<text x="34" y="318.5" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="268" y="318.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="25" y="322.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="332.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="268" y="332.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<text x="34" y="345.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="268" y="345.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<rect x="25" y="349.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="359.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">file_name</text>
+<text x="268" y="359.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="372.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">storage_path</text>
+<text x="268" y="372.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="376.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="386.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">size_bytes</text>
+<text x="268" y="386.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">int8</text>
+<text x="34" y="399.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">mime_type</text>
+<text x="268" y="399.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="403.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="413.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="268" y="413.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="24" y="436.5" width="252" height="280.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="436.5" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="453.5" width="252" height="7" fill="#eef2f7"/>
+<text x="34" y="452.5" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">sheets</text>
+<text x="34" y="470.5" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="268" y="470.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="25" y="474.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="484.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="268" y="484.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<text x="34" y="497.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">plan_file_id</text>
+<text x="268" y="497.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; plan_files</text>
+<rect x="25" y="501.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="511.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="268" y="511.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<text x="34" y="524.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">page_number</text>
+<text x="268" y="524.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">int</text>
+<rect x="25" y="528.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="538.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">original_page_number</text>
+<text x="268" y="538.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">int</text>
+<text x="34" y="551.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">name</text>
+<text x="268" y="551.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="555.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="565.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">label</text>
+<text x="268" y="565.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="578.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">notes</text>
+<text x="268" y="578.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="582.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="592.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">scale_px_per_unit</text>
+<text x="268" y="592.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="34" y="605.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">scale_unit</text>
+<text x="268" y="605.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="609.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="619.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">scale_x</text>
+<text x="268" y="619.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="34" y="632.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">scale_y</text>
+<text x="268" y="632.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="25" y="636.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="646.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">scale_preset</text>
+<text x="268" y="646.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="659.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">extracted_text</text>
+<text x="268" y="659.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="663.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="673.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">ingest_method</text>
+<text x="268" y="673.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="686.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">ingested_at</text>
+<text x="268" y="686.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="25" y="690.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="700.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">ledger</text>
+<text x="268" y="700.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<text x="34" y="713.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="268" y="713.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="24" y="737.0" width="252" height="91.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="737.0" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="24" y="754.0" width="252" height="7" fill="#eef2f7"/>
+<text x="34" y="753.0" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">profiles</text>
+<text x="34" y="771.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="268" y="771.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<rect x="25" y="774.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="784.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">email</text>
+<text x="268" y="784.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="798.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">full_name</text>
+<text x="268" y="798.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="25" y="801.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="34" y="811.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">role</text>
+<text x="268" y="811.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="34" y="825.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="268" y="825.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="292" y="92" width="252" height="307.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="292" y="92" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="292" y="109" width="252" height="7" fill="#eef2f7"/>
+<text x="302" y="108" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">measurements</text>
+<text x="302" y="126.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="536" y="126.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="293" y="129.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="139.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="536" y="139.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<text x="302" y="153.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">plan_file_id</text>
+<text x="536" y="153.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; plan_files</text>
+<rect x="293" y="156.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="166.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">sheet_id</text>
+<text x="536" y="166.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; sheets</text>
+<text x="302" y="180.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="536" y="180.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<rect x="293" y="183.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="193.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">type</text>
+<text x="536" y="193.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="302" y="207.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">geometry</text>
+<text x="536" y="207.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<rect x="293" y="210.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="220.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">value</text>
+<text x="536" y="220.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="302" y="234.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">unit</text>
+<text x="536" y="234.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="237.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="247.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">layer</text>
+<text x="536" y="247.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="302" y="261.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">color</text>
+<text x="536" y="261.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="264.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="274.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">attributes</text>
+<text x="536" y="274.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<text x="302" y="288.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">wall_sided</text>
+<text x="536" y="288.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="291.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="301.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">wall_height</text>
+<text x="536" y="301.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="302" y="315.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">vol_mode</text>
+<text x="536" y="315.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="318.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="328.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">vol_width</text>
+<text x="536" y="328.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="302" y="342.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">vol_depth</text>
+<text x="536" y="342.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="293" y="345.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="355.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">text</text>
+<text x="536" y="355.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="302" y="369.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">font_size</text>
+<text x="536" y="369.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="293" y="372.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="382.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">head_size</text>
+<text x="536" y="382.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="302" y="396.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="536" y="396.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="292" y="419.5" width="252" height="253.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="292" y="419.5" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="292" y="436.5" width="252" height="7" fill="#eef2f7"/>
+<text x="302" y="435.5" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">company_settings</text>
+<text x="302" y="453.5" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="536" y="453.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="293" y="457.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="467.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="536" y="467.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users · uniq</text>
+<text x="302" y="480.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">company_name</text>
+<text x="536" y="480.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="484.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="494.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">company_address</text>
+<text x="536" y="494.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="302" y="507.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">company_phone</text>
+<text x="536" y="507.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="511.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="521.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">company_email</text>
+<text x="536" y="521.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="302" y="534.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">company_license</text>
+<text x="536" y="534.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="538.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="548.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">default_contingency_pct</text>
+<text x="536" y="548.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="302" y="561.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">default_insurance_pct</text>
+<text x="536" y="561.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="293" y="565.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="575.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">default_op_pct</text>
+<text x="536" y="575.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="302" y="588.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">signer_name</text>
+<text x="536" y="588.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="293" y="592.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="602.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">signer_title</text>
+<text x="536" y="602.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="302" y="615.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">benchmarks</text>
+<text x="536" y="615.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<rect x="293" y="619.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="629.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">unit_prices</text>
+<text x="536" y="629.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<text x="302" y="642.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">proposal_profile</text>
+<text x="536" y="642.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<rect x="293" y="646.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="302" y="656.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="536" y="656.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<text x="302" y="669.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">updated_at</text>
+<text x="536" y="669.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="560" y="92" width="252" height="483.0" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="560" y="92" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="560" y="109" width="252" height="7" fill="#eef2f7"/>
+<text x="570" y="108" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">line_items</text>
+<text x="570" y="126.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="804" y="126.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="561" y="129.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="139.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="804" y="139.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<text x="570" y="153.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">plan_file_id</text>
+<text x="804" y="153.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; plan_files</text>
+<rect x="561" y="156.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="166.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="804" y="166.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<text x="570" y="180.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">division_code</text>
+<text x="804" y="180.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="183.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="193.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">division_name</text>
+<text x="804" y="193.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="207.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">section_code</text>
+<text x="804" y="207.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="210.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="220.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">section_name</text>
+<text x="804" y="220.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="234.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">description</text>
+<text x="804" y="234.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="237.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="247.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">quantity</text>
+<text x="804" y="247.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="570" y="261.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">unit</text>
+<text x="804" y="261.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="264.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="274.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">source_kind</text>
+<text x="804" y="274.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="288.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">evidence</text>
+<text x="804" y="288.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<rect x="561" y="291.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="301.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">status</text>
+<text x="804" y="301.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="315.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">confidence</text>
+<text x="804" y="315.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="318.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="328.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">ai_generated</text>
+<text x="804" y="328.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">bool</text>
+<text x="570" y="342.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">user_edited</text>
+<text x="804" y="342.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">bool</text>
+<rect x="561" y="345.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="355.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">notes</text>
+<text x="804" y="355.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="369.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">sort_order</text>
+<text x="804" y="369.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">int</text>
+<rect x="561" y="372.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="382.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_mode</text>
+<text x="804" y="382.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="396.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_labor</text>
+<text x="804" y="396.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="561" y="399.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="409.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_material</text>
+<text x="804" y="409.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="570" y="423.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_sub</text>
+<text x="804" y="423.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="561" y="426.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="436.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_equipment</text>
+<text x="804" y="436.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="570" y="450.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_other</text>
+<text x="804" y="450.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="561" y="453.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="463.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_total</text>
+<text x="804" y="463.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="570" y="477.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_source</text>
+<text x="804" y="477.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="480.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="490.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_note</text>
+<text x="804" y="490.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="504.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_confidence</text>
+<text x="804" y="504.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="507.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="517.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_status</text>
+<text x="804" y="517.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="531.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">priced_at</text>
+<text x="804" y="531.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="561" y="534.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="544.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">sub_quote_id</text>
+<text x="804" y="544.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; sub_quotes</text>
+<text x="570" y="558.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="804" y="558.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="561" y="561.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="571.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">updated_at</text>
+<text x="804" y="571.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="560" y="595.0" width="252" height="159.0" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="560" y="595.0" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="560" y="612.0" width="252" height="7" fill="#eef2f7"/>
+<text x="570" y="611.0" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">scope_runs</text>
+<text x="570" y="629.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="804" y="629.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="561" y="632.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="642.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="804" y="642.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<text x="570" y="656.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="804" y="656.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<rect x="561" y="659.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="669.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">status</text>
+<text x="804" y="669.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="683.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">stage</text>
+<text x="804" y="683.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="686.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="696.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">progress</text>
+<text x="804" y="696.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">int</text>
+<text x="570" y="710.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">error</text>
+<text x="804" y="710.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="561" y="713.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="723.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">kind</text>
+<text x="804" y="723.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="570" y="737.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="804" y="737.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="561" y="740.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="570" y="750.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">updated_at</text>
+<text x="804" y="750.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="828" y="92" width="252" height="348.0" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="828" y="92" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="828" y="109" width="252" height="7" fill="#eef2f7"/>
+<text x="838" y="108" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">cost_database</text>
+<text x="838" y="126.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="1072" y="126.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="829" y="129.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="139.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="1072" y="139.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<text x="838" y="153.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="1072" y="153.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<rect x="829" y="156.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="166.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">item_id</text>
+<text x="1072" y="166.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; cost_items</text>
+<text x="838" y="180.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">division_code</text>
+<text x="1072" y="180.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="183.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="193.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">section_code</text>
+<text x="1072" y="193.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="838" y="207.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">description</text>
+<text x="1072" y="207.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="210.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="220.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">unit</text>
+<text x="1072" y="220.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="838" y="234.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_mode</text>
+<text x="1072" y="234.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="237.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="247.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_labor</text>
+<text x="1072" y="247.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="838" y="261.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_material</text>
+<text x="1072" y="261.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="829" y="264.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="274.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_sub</text>
+<text x="1072" y="274.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="838" y="288.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_equipment</text>
+<text x="1072" y="288.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="829" y="291.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="301.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_other</text>
+<text x="1072" y="301.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="838" y="315.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">cost_total</text>
+<text x="1072" y="315.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="829" y="318.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="328.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_source</text>
+<text x="1072" y="328.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="838" y="342.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_note</text>
+<text x="1072" y="342.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="345.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="355.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">price_confidence</text>
+<text x="1072" y="355.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="838" y="369.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">source</text>
+<text x="1072" y="369.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="372.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="382.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">region</text>
+<text x="1072" y="382.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="838" y="396.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_type</text>
+<text x="1072" y="396.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="399.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="409.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">building_sf</text>
+<text x="1072" y="409.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="838" y="423.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">observed_on</text>
+<text x="1072" y="423.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">date</text>
+<rect x="829" y="426.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="436.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="1072" y="436.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="828" y="460.0" width="252" height="226.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="828" y="460.0" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="828" y="477.0" width="252" height="7" fill="#eef2f7"/>
+<text x="838" y="476.0" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">cost_items</text>
+<text x="838" y="494.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="1072" y="494.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="829" y="497.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="507.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="1072" y="507.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<text x="838" y="521.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">division_code</text>
+<text x="1072" y="521.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="524.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="534.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">section_code</text>
+<text x="1072" y="534.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="838" y="548.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">name</text>
+<text x="1072" y="548.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="551.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="561.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">norm_key</text>
+<text x="1072" y="561.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="838" y="575.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">unit</text>
+<text x="1072" y="575.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="829" y="578.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="588.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">aliases</text>
+<text x="1072" y="588.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<text x="838" y="602.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">std_cost_override</text>
+<text x="1072" y="602.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="829" y="605.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="615.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">std_cost_computed</text>
+<text x="1072" y="615.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="838" y="629.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">std_count</text>
+<text x="1072" y="629.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">int</text>
+<rect x="829" y="632.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="642.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">last_observed</text>
+<text x="1072" y="642.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<text x="838" y="656.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">active</text>
+<text x="1072" y="656.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">bool</text>
+<rect x="829" y="659.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="838" y="669.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="1072" y="669.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<text x="838" y="683.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">updated_at</text>
+<text x="1072" y="683.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="1096" y="92" width="252" height="186.0" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="92" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="109" width="252" height="7" fill="#eef2f7"/>
+<text x="1106" y="108" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">scope_findings</text>
+<text x="1106" y="126.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="1340" y="126.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="1097" y="129.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="139.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="1340" y="139.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<text x="1106" y="153.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">plan_file_id</text>
+<text x="1340" y="153.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; plan_files</text>
+<rect x="1097" y="156.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="166.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="1340" y="166.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<text x="1106" y="180.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">kind</text>
+<text x="1340" y="180.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="183.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="193.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">text</text>
+<text x="1340" y="193.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="207.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">severity</text>
+<text x="1340" y="207.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="210.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="220.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">evidence</text>
+<text x="1340" y="220.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<text x="1106" y="234.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">resolved</text>
+<text x="1340" y="234.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">bool</text>
+<rect x="1097" y="237.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="247.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">answer</text>
+<text x="1340" y="247.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="261.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">answered_at</text>
+<text x="1340" y="261.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="1097" y="264.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="274.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="1340" y="274.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="1096" y="298.0" width="252" height="199.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="298.0" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="315.0" width="252" height="7" fill="#eef2f7"/>
+<text x="1106" y="314.0" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">sub_quotes</text>
+<text x="1106" y="332.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="1340" y="332.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="1097" y="335.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="345.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="1340" y="345.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects</text>
+<text x="1106" y="359.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="1340" y="359.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<rect x="1097" y="362.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="372.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">sub_name</text>
+<text x="1340" y="372.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="386.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">trade</text>
+<text x="1340" y="386.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="389.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="399.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">division_codes</text>
+<text x="1340" y="399.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text[]</text>
+<text x="1106" y="413.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">quote_date</text>
+<text x="1340" y="413.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="416.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="426.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">total</text>
+<text x="1340" y="426.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="1106" y="440.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">file_path</text>
+<text x="1340" y="440.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="443.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="453.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">file_name</text>
+<text x="1340" y="453.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="467.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">extracted</text>
+<text x="1340" y="467.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">jsonb</text>
+<rect x="1097" y="470.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="480.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">notes</text>
+<text x="1340" y="480.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="494.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="1340" y="494.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="1096" y="517.5" width="252" height="172.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="517.5" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="534.5" width="252" height="7" fill="#eef2f7"/>
+<text x="1106" y="533.5" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">estimates</text>
+<text x="1106" y="551.5" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="1340" y="551.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="1097" y="555.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="565.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="1340" y="565.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects · uniq</text>
+<text x="1106" y="578.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="1340" y="578.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<rect x="1097" y="582.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="592.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">contingency_pct</text>
+<text x="1340" y="592.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="1106" y="605.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">insurance_pct</text>
+<text x="1340" y="605.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="1097" y="609.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="619.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">overhead_pct</text>
+<text x="1340" y="619.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="1106" y="632.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">profit_pct</text>
+<text x="1340" y="632.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<rect x="1097" y="636.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="646.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">building_sf</text>
+<text x="1340" y="646.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">num</text>
+<text x="1106" y="659.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">notes</text>
+<text x="1340" y="659.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="663.0" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="673.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="1340" y="673.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<text x="1106" y="686.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">updated_at</text>
+<text x="1340" y="686.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<rect x="1096" y="710.0" width="252" height="199.5" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="710.0" width="252" height="24" rx="7" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="1096" y="727.0" width="252" height="7" fill="#eef2f7"/>
+<text x="1106" y="726.0" font-family="Courier, monospace" font-size="12.5" fill="#A01C2D" text-anchor="start" font-weight="bold">proposals</text>
+<text x="1106" y="744.0" font-family="Courier, monospace" font-size="9.5" fill="#A01C2D" text-anchor="start" font-weight="bold">• id</text>
+<text x="1340" y="744.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">uuid</text>
+<rect x="1097" y="747.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="757.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_id</text>
+<text x="1340" y="757.5" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; projects · uniq</text>
+<text x="1106" y="771.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">owner_id</text>
+<text x="1340" y="771.0" font-family="Courier, monospace" font-size="8.5" fill="#2563eb" text-anchor="end" font-weight="normal">-&gt; auth.users</text>
+<rect x="1097" y="774.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="784.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">letter_text</text>
+<text x="1340" y="784.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="798.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">client_name</text>
+<text x="1340" y="798.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="801.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="811.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">proposal_date</text>
+<text x="1340" y="811.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="825.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">project_description</text>
+<text x="1340" y="825.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="828.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="838.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">understanding</text>
+<text x="1340" y="838.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="852.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">estimated_duration</text>
+<text x="1340" y="852.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="855.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="865.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">anticipated_start</text>
+<text x="1340" y="865.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<text x="1106" y="879.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">table_style</text>
+<text x="1340" y="879.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">text</text>
+<rect x="1097" y="882.5" width="250" height="13.5" fill="#f8fafc"/>
+<text x="1106" y="892.5" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">created_at</text>
+<text x="1340" y="892.5" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+<text x="1106" y="906.0" font-family="Courier, monospace" font-size="9.5" fill="#0f172a" text-anchor="start" font-weight="normal">updated_at</text>
+<text x="1340" y="906.0" font-family="Courier, monospace" font-size="8.5" fill="#64748b" text-anchor="end" font-weight="normal">ts</text>
+</svg>
