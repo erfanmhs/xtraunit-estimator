@@ -142,6 +142,9 @@ export default function ProposalView({
 
   const assumptions = findings.filter((f) => f.kind === "assumption");
   const exclusions = findings.filter((f) => f.kind === "exclusion");
+  // Scope lines you marked "Exclude" — kept (not deleted), shown here as
+  // exclusions on the proposal regardless of the scope-table style.
+  const excludedScope = lines.filter(isExcluded);
   const unconfirmed = priced.filter((li) => li.price_status === "proposed").length;
   const unpriced = active.length - priced.length;
 
@@ -404,12 +407,15 @@ export default function ProposalView({
           </Section>
         ) : null}
 
-        {/* Exclusions + license note */}
-        {exclusions.length > 0 ? (
+        {/* Exclusions: excluded scope lines + exclusion findings + license note */}
+        {exclusions.length > 0 || excludedScope.length > 0 ? (
           <Section title="Exclusions">
             <ul className="list-disc pl-5">
+              {excludedScope.map((li) => (
+                <li key={li.id}>{li.description}</li>
+              ))}
               {exclusions.map((f, i) => (
-                <li key={i}>{f.text}</li>
+                <li key={`f-${i}`}>{f.text}</li>
               ))}
             </ul>
             {profile.license_note ? (
