@@ -205,15 +205,18 @@ export async function uploadPlanFiles(
     if (signal?.aborted) break;
     const { data: blob } = await sb.storage.from("plans").download(p.storage_path);
     if (!blob) continue;
+    // Read this ONE file into bytes (one at a time = the memory win), then hand
+    // toFile the byte array — the same form the SDK has always accepted.
+    const bytes = new Uint8Array(await blob.arrayBuffer());
     const uploaded = await client.beta.files.upload(
       {
-        file: await toFile(blob, p.file_name, { type: "application/pdf" }),
+        file: await toFile(bytes, p.file_name, { type: "application/pdf" }),
         betas: [FILES_BETA],
       },
       { signal },
     );
     ids.push(uploaded.id);
-    // `blob` falls out of scope here → freed before the next file downloads.
+    // `bytes`/`blob` fall out of scope here → freed before the next file.
   }
   return ids;
 }

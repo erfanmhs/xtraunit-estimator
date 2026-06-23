@@ -77,6 +77,7 @@ export async function runScopeGeneration(opts: {
     const lineItems: GeneratedLineItem[] = [];
     const findings: GeneratedFinding[] = [];
     let failedChunks = 0;
+    let firstError: string | null = null;
     for (let i = 0; i < chunks.length; i += 2) {
       stopIfCancelled();
       const batch = chunks.slice(i, i + 2);
@@ -101,6 +102,7 @@ export async function runScopeGeneration(opts: {
           if (ac.signal.aborted || (err instanceof Error && err.name === "AbortError"))
             throw new DOMException("Cancelled", "AbortError");
           failedChunks++;
+          if (!firstError) firstError = err instanceof Error ? err.message : String(err);
           continue;
         }
         const allowed = new Set(
@@ -116,8 +118,9 @@ export async function runScopeGeneration(opts: {
     }
     // Only a total wipeout is a real failure; partial scope is still useful.
     if (!lineItems.length) {
+      const detail = firstError ? ` — ${firstError}` : "";
       throw new Error(
-        "The AI couldn't draft any divisions this time (it may be busy). Please click Generate again.",
+        `The AI couldn't draft any divisions this time (${failedChunks}/${chunks.length} parts failed${detail}). Please click Generate again; if it keeps failing, send me this exact message.`,
       );
     }
 
