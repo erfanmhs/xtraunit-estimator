@@ -63,26 +63,47 @@ export default async function ScopePage({
   const initialRun = await getScopeRun(id);
 
   // Plan files + sheet ingest state (for the "Prepare plans" step). Resilient to
-  // the extracted_text column not existing yet (migration 0009 not run).
-  const { data: planFiles } = await supabase
+  // migration 0025 (vision_pdf_path) not being run yet.
+  const pfFull = await supabase
     .from("plan_files")
-    .select("id,file_name,storage_path")
+    .select("id,file_name,storage_path,vision_pdf_path")
     .eq("project_id", id);
+  const planFilesRaw = pfFull.error
+    ? (
+        await supabase
+          .from("plan_files")
+          .select("id,file_name,storage_path")
+          .eq("project_id", id)
+      ).data
+    : pfFull.data;
+  const planFiles = (planFilesRaw ?? []).map(
+    (p: {
+      id: string;
+      file_name: string;
+      storage_path: string;
+      vision_pdf_path?: string | null;
+    }) => ({
+      id: p.id,
+      file_name: p.file_name,
+      storage_path: p.storage_path,
+      hasVisionPdf: !!p.vision_pdf_path,
+    }),
+  );
   const { data: sheetRows } = await supabase
     .from("sheets")
-    .select("id,page_number,plan_file_id,extracted_text")
+    .select("id,page_number,plan_file_id,ingest_method")
     .eq("project_id", id);
   const ingestSheets = (sheetRows ?? []).map(
     (s: {
       id: string;
       page_number: number;
       plan_file_id: string;
-      extracted_text: string | null;
+      ingest_method: string | null;
     }) => ({
       id: s.id,
       page_number: s.page_number,
       plan_file_id: s.plan_file_id,
-      hasText: !!(s.extracted_text ?? "").trim(),
+      ingestMethod: s.ingest_method,
     }),
   );
 

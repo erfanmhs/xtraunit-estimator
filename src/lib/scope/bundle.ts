@@ -143,16 +143,39 @@ export async function gatherBundle(
   // Just references + page lists — bytes are downloaded at upload time.
   const plans: { file_name: string; storage_path: string; pages: number[] }[] = [];
   if (visionPagesByFile.size) {
-    const { data: planFiles } = await supabase
+    const ids = [...visionPagesByFile.keys()];
+    // Resilient to migration 0025 (vision_pdf_path) not being run yet.
+    const pfFull = await supabase
       .from("plan_files")
-      .select("id,file_name,storage_path")
-      .in("id", [...visionPagesByFile.keys()]);
+      .select("id,file_name,storage_path,vision_pdf_path")
+      .in("id", ids);
+    const planFiles = (
+      pfFull.error
+        ? (
+            await supabase
+              .from("plan_files")
+              .select("id,file_name,storage_path")
+              .in("id", ids)
+          ).data
+        : pfFull.data
+    ) as {
+      id: string;
+      file_name: string;
+      storage_path: string;
+      vision_pdf_path?: string | null;
+    }[] | null;
     for (const pf of planFiles ?? []) {
-      plans.push({
-        file_name: pf.file_name,
-        storage_path: pf.storage_path,
-        pages: (visionPagesByFile.get(pf.id) ?? []).sort((a, b) => a - b),
-      });
+      if (pf.vision_pdf_path) {
+        // Compact, downscaled PDF of only the scanned pages — send it whole.
+        plans.push({ file_name: pf.file_name, storage_path: pf.vision_pdf_path, pages: [] });
+      } else {
+        // No vision PDF yet — fall back to extracting the image pages (capped).
+        plans.push({
+          file_name: pf.file_name,
+          storage_path: pf.storage_path,
+          pages: (visionPagesByFile.get(pf.id) ?? []).sort((a, b) => a - b),
+        });
+      }
     }
   }
 

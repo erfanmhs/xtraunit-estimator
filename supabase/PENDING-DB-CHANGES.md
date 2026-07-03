@@ -15,7 +15,9 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-_(nothing pending)_
+- [ ] **0025_plan_vision_pdf.sql** — adds `plan_files.vision_pdf_path`. For
+  scanned/image-only plans, the Prepare step renders the pages to a small,
+  downscaled "vision PDF" the AI can actually read; this stores its path.
 
 ---
 
