@@ -256,11 +256,17 @@ export async function deletePlanFiles(fileIds: string[]): Promise<void> {
   }
 }
 
-// Reference uploaded PDFs by file_id as document blocks.
+// Reference uploaded PDFs by file_id as document blocks. The LAST document
+// carries a cache breakpoint, so the plan drawings are cached once and reused
+// by every draft chunk AND the review pass (read at ~10% cost) instead of being
+// re-billed on each call.
 function planBlocks(fileIds: string[]) {
-  return fileIds.map((id) => ({
+  return fileIds.map((id, i) => ({
     type: "document" as const,
     source: { type: "file" as const, file_id: id },
+    ...(i === fileIds.length - 1
+      ? { cache_control: { type: "ephemeral" as const } }
+      : {}),
   }));
 }
 
@@ -373,16 +379,25 @@ export async function draftScope(
       betas: [FILES_BETA],
       output_config: { format: { type: "json_schema", schema: DRAFT_SCHEMA } },
       messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${scopeFocusText(trades)}\n\n${taxonomyPromptText(trades)}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}\n\nUsing the plan content above (and any attached image-only sheets), produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division and the STANDARD SUBCATEGORIES above. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Fold the door/window/finish schedule counts into the matching subcategory lines, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
-          },
-          ...planBlocks(fileIds),
-        ],
-      },
+        {
+          role: "user",
+          content: [
+            // 1) Plan drawings — cached, shared by every draft chunk + the review.
+            ...planBlocks(fileIds),
+            // 2) Project-level context + rules — identical across the 6 chunks, so
+            //    cache it too; chunks 2-6 read it instead of re-sending.
+            {
+              type: "text",
+              text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}`,
+              cache_control: { type: "ephemeral" as const },
+            },
+            // 3) Chunk-specific instructions (the only part that varies per call).
+            {
+              type: "text",
+              text: `${scopeFocusText(trades)}\n\n${taxonomyPromptText(trades)}\n\nUsing the plan content and STANDARD SUBCATEGORIES above, produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division and those subcategories. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Fold the door/window/finish schedule counts into the matching subcategory lines, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
+            },
+          ],
+        },
       ],
     },
     signal,
@@ -419,16 +434,17 @@ export async function findGaps(
       betas: [FILES_BETA],
       output_config: { format: { type: "json_schema", schema: FINDINGS_SCHEMA } },
       messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `${COMPANY_CONTEXT}\n\nA draft scope was generated from the user's takeoff and the attached plans. Act as a senior estimator giving it a final review. Report ONLY the things that genuinely matter to a bid — be selective, not exhaustive. A short list of real issues is far more useful than a long list of nitpicks.\n\nHARD LIMITS: return at most ~10 findings TOTAL, and at most 5 of kind "question". Only include a finding if it is HIGH or MEDIUM impact on cost or scope; drop anything trivial or low-severity. Consolidate related points into one finding. If the draft is solid, it is fine to return very few findings.\n\nFinding kinds:\n- "gap": real, cost-significant work that is drawn/implied but missing from the draft (e.g. "3 baths shown but no plumbing fixtures scoped"). Not minor omissions.\n- "exclusion": owner-furnished / out-of-contract items worth calling out in the proposal.\n- "question": only genuinely ambiguous, cost-moving items the user must decide (cap 5).\n- "assumption": only a load-bearing assumption that, if wrong, materially changes the price.\nBe specific, reference sheets where possible, set severity high/medium/low (you should rarely include "low"). Do NOT re-ask anything already answered in the USER CLARIFICATIONS below.\n\n${scopeFocusText(trades)}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}\n\nDRAFT SCOPE:\n${draftSummary}`,
-          },
-          ...planBlocks(fileIds),
-        ],
-      },
+        {
+          role: "user",
+          content: [
+            // Plan drawings first → reuse the cache written during the draft.
+            ...planBlocks(fileIds),
+            {
+              type: "text",
+              text: `${COMPANY_CONTEXT}\n\nA draft scope was generated from the user's takeoff and the attached plans. Act as a senior estimator giving it a final review. Report ONLY the things that genuinely matter to a bid — be selective, not exhaustive. A short list of real issues is far more useful than a long list of nitpicks.\n\nHARD LIMITS: return at most ~10 findings TOTAL, and at most 5 of kind "question". Only include a finding if it is HIGH or MEDIUM impact on cost or scope; drop anything trivial or low-severity. Consolidate related points into one finding. If the draft is solid, it is fine to return very few findings.\n\nFinding kinds:\n- "gap": real, cost-significant work that is drawn/implied but missing from the draft (e.g. "3 baths shown but no plumbing fixtures scoped"). Not minor omissions.\n- "exclusion": owner-furnished / out-of-contract items worth calling out in the proposal.\n- "question": only genuinely ambiguous, cost-moving items the user must decide (cap 5).\n- "assumption": only a load-bearing assumption that, if wrong, materially changes the price.\nBe specific, reference sheets where possible, set severity high/medium/low (you should rarely include "low"). Do NOT re-ask anything already answered in the USER CLARIFICATIONS below.\n\n${scopeFocusText(trades)}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}\n\nDRAFT SCOPE:\n${draftSummary}`,
+            },
+          ],
+        },
       ],
     },
     signal,

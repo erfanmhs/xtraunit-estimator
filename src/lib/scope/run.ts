@@ -78,17 +78,24 @@ export async function runScopeGeneration(opts: {
     const findings: GeneratedFinding[] = [];
     let failedChunks = 0;
     let firstError: string | null = null;
-    for (let i = 0; i < chunks.length; i += 2) {
+    // Run the first chunk alone to WARM the prompt cache (writes the plan +
+    // rules), then the rest in pairs so they READ the cache instead of
+    // re-sending the drawings — much cheaper and faster.
+    const batches: string[][][] = [];
+    if (chunks.length) batches.push([chunks[0]]);
+    for (let i = 1; i < chunks.length; i += 2) batches.push(chunks.slice(i, i + 2));
+    let processed = 0;
+    for (const batch of batches) {
       stopIfCancelled();
-      const batch = chunks.slice(i, i + 2);
       const codes = batch
         .flat()
         .map((t) => t.split(" ")[0])
         .join(", ");
       await update({
-        stage: `Drafting the scope — divisions ${codes} (${Math.min(i + 2, chunks.length)}/${chunks.length})…`,
-        progress: 25 + Math.round((i / chunks.length) * 40),
+        stage: `Drafting the scope — divisions ${codes} (${processed}/${chunks.length})…`,
+        progress: 25 + Math.round((processed / chunks.length) * 40),
       });
+      processed += batch.length;
       // Per-chunk fault tolerance: one chunk's transient error must NOT sink the
       // whole run. Keep what succeeds; count failures. (A user cancel still
       // aborts everything — re-thrown below.)
