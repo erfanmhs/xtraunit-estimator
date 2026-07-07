@@ -1,0 +1,21 @@
+# Dependabot — GitHub watches these for outdated or vulnerable versions and
+# opens a pull request (which the CI robot then checks) so updates are a review,
+# not a chore. Weekly so it's not noisy.
+version: 2
+updates:
+  # The app's npm libraries.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Bundle minor/patch bumps into one PR to cut noise; majors stay separate.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # The versions used inside the CI workflow (actions/checkout, setup-node, …).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

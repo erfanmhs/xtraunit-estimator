@@ -7,6 +7,7 @@
  */
 import { createClient } from "@/lib/supabase/server";
 import { runScopeGeneration, abortScopeRun } from "@/lib/scope/run";
+import { lineItemPatch, tradesInput } from "@/lib/validation";
 
 export type ScopeRun = {
   id: string;
@@ -30,6 +31,10 @@ export async function startScope(
     data: { session },
   } = await supabase.auth.getSession();
   if (!user || !session) return { ok: false, error: "Not signed in." };
+
+  const validTrades = tradesInput.safeParse(trades);
+  if (!validTrades.success)
+    return { ok: false, error: "That trade selection wasn't valid." };
 
   // Don't start a second run if one is GENUINELY still going. A run whose
   // process died leaves a stale "running" row that never updates — we must not
@@ -107,6 +112,13 @@ export async function updateLineItem(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+
+  const parsed = lineItemPatch.safeParse(patch);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "That change wasn't valid.",
+    };
 
   const clean: Record<string, unknown> = { user_edited: true };
   if (patch.description !== undefined) {
