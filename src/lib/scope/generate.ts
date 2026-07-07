@@ -21,6 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
 import { taxonomyPromptText } from "./taxonomy";
+import { routedDisciplines } from "./routing";
 
 // Anthropic's document-PDF limits. We stay safely under both, and only ever
 // send the specific image-only pages (not the whole plan file).
@@ -285,6 +286,37 @@ function planContentText(bundle: ScopeBundle): string {
   return `PLAN CONTENT (text extracted from the drawings — schedules, general notes, callouts):\n${bundle.planText}`;
 }
 
+function renderSheetDocs(docs: ScopeBundle["sheetDocs"]): string {
+  return docs
+    .map((s) => {
+      const title = `${s.name || `Sheet ${s.page_number}`}${s.label ? ` (${s.label})` : ""} [${s.discipline}]`;
+      return `=== ${title} ===\n${s.text}`;
+    })
+    .join("\n\n");
+}
+
+// CORE plan text — the shared reference sheets (cover, general notes, schedules,
+// all architectural) sent to EVERY division chunk. Identical across chunks, so
+// it sits in the cached block and every chunk reads it at ~10% cost.
+function coreContentText(bundle: ScopeBundle): string {
+  const core = bundle.sheetDocs.filter((s) => s.is_core);
+  if (!core.length)
+    return "PLAN CONTENT: (no text extracted — read the attached sheet images.)";
+  return `PLAN CONTENT — shared reference sheets (cover, general notes, schedules, architectural):\n${renderSheetDocs(core)}`;
+}
+
+// Discipline-specific plan text routed to THIS chunk's divisions only — e.g. the
+// structural sheets for the concrete chunk, the MEP sheets for the plumbing/HVAC
+// chunk. Keeps each division from wading through unrelated disciplines' sheets.
+function chunkContentText(bundle: ScopeBundle, trades: string[]): string {
+  const routed = routedDisciplines(trades);
+  const extra = bundle.sheetDocs.filter(
+    (s) => !s.is_core && (routed === null || routed.has(s.discipline)),
+  );
+  if (!extra.length) return "";
+  return `PLAN CONTENT — sheets specific to these trades:\n${renderSheetDocs(extra)}`;
+}
+
 // Limit the scope to chosen trades, or the whole building when none are chosen.
 function scopeFocusText(trades: string[]): string {
   if (!trades.length)
@@ -384,17 +416,27 @@ export async function draftScope(
           content: [
             // 1) Plan drawings — cached, shared by every draft chunk + the review.
             ...planBlocks(fileIds),
-            // 2) Project-level context + rules — identical across the 6 chunks, so
-            //    cache it too; chunks 2-6 read it instead of re-sending.
+            // 2) Project-level context + rules + the shared CORE sheets —
+            //    identical across the 6 chunks, so cache it; chunks 2-6 read it
+            //    instead of re-sending. Discipline-specific sheets are routed in
+            //    block 3 (per chunk) to keep this cache prefix stable.
             {
               type: "text",
-              text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}`,
+              text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${coreContentText(bundle)}`,
               cache_control: { type: "ephemeral" as const },
             },
-            // 3) Chunk-specific instructions (the only part that varies per call).
+            // 3) Chunk-specific content: the sheets routed to this chunk's
+            //    disciplines, plus the taxonomy + instructions (varies per call).
             {
               type: "text",
-              text: `${scopeFocusText(trades)}\n\n${taxonomyPromptText(trades)}\n\nUsing the plan content and STANDARD SUBCATEGORIES above, produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division and those subcategories. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Fold the door/window/finish schedule counts into the matching subcategory lines, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
+              text: [
+                scopeFocusText(trades),
+                chunkContentText(bundle, trades),
+                taxonomyPromptText(trades),
+                `Using the plan content and STANDARD SUBCATEGORIES above, produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division and those subcategories. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Fold the door/window/finish schedule counts into the matching subcategory lines, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
+              ]
+                .filter((s) => s.trim())
+                .join("\n\n"),
             },
           ],
         },

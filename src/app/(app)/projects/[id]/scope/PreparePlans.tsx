@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { PDFDocument } from "pdf-lib";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
+import { classifyDiscipline } from "@/lib/scope/discipline";
 
 type PlanFileLite = {
   id: string;
@@ -30,6 +31,9 @@ type SheetLite = {
   page_number: number;
   plan_file_id: string;
   ingestMethod: string | null;
+  name: string | null;
+  label: string | null;
+  discipline: string | null;
 };
 
 // Render scanned pages at this long-edge (px) and JPEG quality. A balance
@@ -104,6 +108,15 @@ export default function PreparePlans({
               ingested_at: new Date().toISOString(),
             })
             .eq("id", s.id);
+          // Tag the sheet's discipline for scope routing (best-effort: this is a
+          // newer column, migration 0026, so ignore an error if it's absent).
+          // Don't overwrite a discipline that's already set (a user correction).
+          if (!s.discipline) {
+            await supabase
+              .from("sheets")
+              .update({ discipline: classifyDiscipline(s.name, s.label) })
+              .eq("id", s.id);
+          }
         }
 
         // Build a compact, downscaled PDF of just the scanned pages for the AI.

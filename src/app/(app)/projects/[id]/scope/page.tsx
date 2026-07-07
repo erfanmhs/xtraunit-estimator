@@ -5,6 +5,7 @@ import GeneratePanel from "./GeneratePanel";
 import PreparePlans from "./PreparePlans";
 import ScopeCanvas, { type LineItem } from "./ScopeCanvas";
 import FindingsReview, { type Finding } from "./FindingsReview";
+import SheetDisciplines from "./SheetDisciplines";
 import NextStep from "@/components/NextStep";
 
 export default async function ScopePage({
@@ -89,23 +90,41 @@ export default async function ScopePage({
       hasVisionPdf: !!p.vision_pdf_path,
     }),
   );
-  const { data: sheetRows } = await supabase
-    .from("sheets")
-    .select("id,page_number,plan_file_id,ingest_method")
-    .eq("project_id", id);
-  const ingestSheets = (sheetRows ?? []).map(
-    (s: {
-      id: string;
-      page_number: number;
-      plan_file_id: string;
-      ingest_method: string | null;
-    }) => ({
+  // Resilient to migration 0026 (discipline) not being run yet.
+  const sheetSel =
+    "id,page_number,plan_file_id,ingest_method,name,label,discipline";
+  const shRes = await supabase.from("sheets").select(sheetSel).eq("project_id", id);
+  const sheetRows = (
+    shRes.error
+      ? (
+          await supabase
+            .from("sheets")
+            .select("id,page_number,plan_file_id,ingest_method,name,label")
+            .eq("project_id", id)
+        ).data
+      : shRes.data
+  ) as
+    | {
+        id: string;
+        page_number: number;
+        plan_file_id: string;
+        ingest_method: string | null;
+        name: string | null;
+        label: string | null;
+        discipline?: string | null;
+      }[]
+    | null;
+  const ingestSheets = (sheetRows ?? [])
+    .map((s) => ({
       id: s.id,
       page_number: s.page_number,
       plan_file_id: s.plan_file_id,
       ingestMethod: s.ingest_method,
-    }),
-  );
+      name: s.name,
+      label: s.label,
+      discipline: s.discipline ?? null,
+    }))
+    .sort((a, b) => a.page_number - b.page_number);
 
   const lineItems = (items as LineItem[]) ?? [];
 
@@ -145,6 +164,18 @@ export default async function ScopePage({
         ) : null}
 
         <PreparePlans plans={planFiles ?? []} sheets={ingestSheets} />
+
+        {ingestSheets.length ? (
+          <SheetDisciplines
+            sheets={ingestSheets.map((s) => ({
+              id: s.id,
+              page_number: s.page_number,
+              name: s.name,
+              label: s.label,
+              discipline: s.discipline,
+            }))}
+          />
+        ) : null}
 
         {lineItems.length === 0 ? (
           <div className="mt-10 rounded-xl glass p-8 text-center">

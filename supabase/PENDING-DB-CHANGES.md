@@ -15,7 +15,9 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-_(nothing pending)_
+- [ ] 0026_sheet_discipline.sql — adds `discipline` to `sheets` for the scope
+      retrieval/routing layer. Nullable, no backfill; safe to run anytime. The
+      app works with or without it (falls back to classifying on the fly).
 
 ---
 

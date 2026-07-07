@@ -245,6 +245,31 @@ export async function setFindingResolved(
   return { ok: true };
 }
 
+// Correct a sheet's discipline (drives which sheets each CSI-division draft
+// pass reads). Persisted so the fix sticks across regenerates.
+export async function setSheetDiscipline(
+  sheetId: string,
+  discipline: string,
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error } = await supabase
+    .from("sheets")
+    .update({ discipline })
+    .eq("id", sheetId);
+  if (error)
+    return {
+      ok: false,
+      error:
+        "Could not save. (Has migration 0026 been run in Supabase?)",
+    };
+  return { ok: true };
+}
+
 export async function cancelScope(
   projectId: string,
 ): Promise<{ ok: boolean; error?: string }> {

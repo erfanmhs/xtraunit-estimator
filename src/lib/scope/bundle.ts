@@ -11,6 +11,12 @@ import "server-only";
  * reading the plans. This module assembles both halves of that input.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  classifyDiscipline,
+  isCoreSheet,
+  asDiscipline,
+  type Discipline,
+} from "./discipline";
 
 export type BundleMeasurement = {
   sheet_id: string;
@@ -43,7 +49,20 @@ export type ScopeBundle = {
   }[];
   measurements: BundleMeasurement[];
   // Cached plan text (schedules/notes/callouts) extracted from vector PDFs.
+  // Full concatenation — used by the review pass, which sees the whole set.
   planText: string;
+  // Per-sheet extracted text tagged with discipline + a "core" flag, so the
+  // draft can route only the relevant sheets into each CSI-division chunk while
+  // always carrying the shared core (cover/notes/schedules/architectural). See
+  // ./routing.ts. Only sheets that actually have text are included.
+  sheetDocs: {
+    page_number: number;
+    name: string | null;
+    label: string | null;
+    discipline: Discipline;
+    is_core: boolean;
+    text: string;
+  }[];
   // Plan files with image-only sheets that need an AI vision read: a reference
   // plus the exact page numbers needing vision. Only those pages (capped) are
   // sent to the AI — never the whole multi-page file. Streamed at upload time.
@@ -72,27 +91,27 @@ export async function gatherBundle(
     notes: string | null;
     extracted_text?: string | null;
     ingest_method?: string | null;
+    discipline?: string | null;
   };
-  // Prefer the ingest columns; fall back if migration 0009 hasn't run (then all
-  // sheets are treated as needing the PDF, i.e. the old behavior).
-  const withText = await supabase
-    .from("sheets")
-    .select(
+  // Prefer the newest columns; degrade one tier at a time so the app keeps
+  // working whether or not a given migration has run: discipline (0026) →
+  // extracted_text/ingest_method (0009) → the base columns.
+  const trySelect = (cols: string) =>
+    supabase
+      .from("sheets")
+      .select(cols)
+      .eq("project_id", projectId)
+      .order("page_number", { ascending: true });
+  let sheetRes = await trySelect(
+    "id,plan_file_id,page_number,name,label,notes,extracted_text,ingest_method,discipline",
+  );
+  if (sheetRes.error)
+    sheetRes = await trySelect(
       "id,plan_file_id,page_number,name,label,notes,extracted_text,ingest_method",
-    )
-    .eq("project_id", projectId)
-    .order("page_number", { ascending: true });
-  const sheets = (
-    withText.error
-      ? (
-          await supabase
-            .from("sheets")
-            .select("id,plan_file_id,page_number,name,label,notes")
-            .eq("project_id", projectId)
-            .order("page_number", { ascending: true })
-        ).data
-      : withText.data
-  ) as SheetRow[] | null;
+    );
+  if (sheetRes.error)
+    sheetRes = await trySelect("id,plan_file_id,page_number,name,label,notes");
+  const sheets = (sheetRes.data ?? null) as unknown as SheetRow[] | null;
 
   const { data: measurements } = await supabase
     .from("measurements")
@@ -120,12 +139,30 @@ export async function gatherBundle(
 
   const allSheets = sheets ?? [];
 
-  // Build the cheap plan text from cached per-sheet extraction.
-  const planText = allSheets
+  // Build the cheap plan text from cached per-sheet extraction, tagging each
+  // sheet with its discipline so the draft can route sheets per CSI division.
+  const sheetDocs = allSheets
     .filter((s) => (s.extracted_text ?? "").trim().length > 0)
     .map((s) => {
+      // Prefer the stored discipline (a user correction, or what Prepare saved);
+      // fall back to deriving it so existing / un-prepared projects still route.
+      const discipline =
+        asDiscipline(s.discipline) ?? classifyDiscipline(s.name, s.label);
+      const text = (s.extracted_text ?? "").trim();
+      return {
+        page_number: s.page_number,
+        name: s.name,
+        label: s.label,
+        discipline,
+        is_core: isCoreSheet(discipline, s.name, s.label, text),
+        text,
+      };
+    });
+
+  const planText = sheetDocs
+    .map((s) => {
       const title = `${s.name || `Sheet ${s.page_number}`}${s.label ? ` (${s.label})` : ""}`;
-      return `=== ${title} ===\n${(s.extracted_text ?? "").trim()}`;
+      return `=== ${title} ===\n${s.text}`;
     })
     .join("\n\n");
 
@@ -197,6 +234,7 @@ export async function gatherBundle(
     })),
     measurements: (measurements as BundleMeasurement[]) ?? [],
     planText,
+    sheetDocs,
     plans,
     clarifications,
   };
