@@ -20,6 +20,7 @@ import { PDFDocument } from "pdf-lib";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
+import { taxonomyPromptText } from "./taxonomy";
 
 // Anthropic's document-PDF limits. We stay safely under both, and only ever
 // send the specific image-only pages (not the whole plan file).
@@ -61,22 +62,19 @@ const RULES = `Critical rules:
 - READ THE DIMENSIONS. The plan content includes dimension strings, grid spacings, ceiling heights, and other numbers printed on the drawings — use them, together with the user's takeoff measurements, as the AUTHORITATIVE basis for every quantity you propose. When a printed dimension and your visual estimate disagree, the printed dimension wins; when the user's measurement and anything else disagree, the user's measurement wins.
 - The user's measurements are ANCHORS, NOT LIMITS. Do NOT restrict the scope to only the areas the user measured. Measured areas should be richer/higher-confidence, but you must ALSO scope everything else in the plans even when the user gave no measurement for it.
 - For work with no user measurement, you MUST still include the scope line and PROPOSE the quantity yourself — read the plans, COUNT items in the schedules, and estimate from dimensions/areas. Never omit a needed scope line just because the user didn't measure it. If you truly can't put a number, include the line with quantity null and a note, but always include the line.
-- COUNT THE SCHEDULES. Read every schedule on the plans (door schedule, window schedule, finish schedule, fixture/equipment schedules) and produce counted line items from them — e.g. count each door type in the door schedule (3070 ×4, 3068 ×6 …) and total them, same for windows. Do this even though the user did not measure doors/windows.
+- COUNT THE SCHEDULES. Read every schedule (door, window, finish, fixture/equipment) and fold the counts INTO the matching subcategory line — total the quantity and put the per-type breakdown in "formula" (e.g. "door schedule: 3070×4 + 3068×6 = 10 interior doors"). Do this even though the user did not measure doors/windows.
 - Every quantity you provide is a PROPOSAL the user will check. Show your work: set "formula" (e.g. "door schedule: 4+6+2 = 12 doors", or "2400 sf slab × 4in ÷ 27 = 35.6 cy") and list "assumptions". Set source_kind to "takeoff" (user measured), "derived" (computed from a measurement), "ai_measured" (you counted/measured it off the drawing or schedule), "schedule", "note", "drawing", or "assumption".
 - Do NOT split Builder's vs Owner's cost. Owner-furnished or out-of-contract items go in findings as an "exclusion".
 - Never invent prices — no costs at all in this phase.
 - ASSUME FIRST, ASK RARELY. Make a reasonable, clearly-stated assumption for normal unknowns (standard slab thickness, typical wall height, common finishes) and record it in the line's "assumptions" — do NOT turn every unknown into a question. Only add a kind "question" finding when an answer would SIGNIFICANTLY change cost or scope AND you genuinely cannot infer it from the plans (e.g. "is existing structure demolition in your contract?", "owner-furnished appliances or by GC?"). Hard cap: at most 5 of the most important questions for the whole project. A short, confident scope with stated assumptions is better than one buried in questions.
 - Use CSI MasterFormat divisions (e.g. 03 Concrete, 06 Wood/Plastics/Composites, 08 Openings, 09 Finishes, 22 Plumbing, 23 HVAC, 26 Electrical). division_code is the 2-digit number, division_name the title.
 - ALWAYS assign the CSI SECTION under the division: section_code is the standard 6-digit MasterFormat section written "06 10 00", section_name its title ("Rough Carpentry"). Group related work under the same section — e.g. 03 30 00 Cast-in-Place Concrete, 06 10 00 Rough Carpentry, 07 21 00 Thermal Insulation, 08 11 00 Metal Doors and Frames, 09 29 00 Gypsum Board, 22 40 00 Plumbing Fixtures. Never leave section_code/section_name null.
-- FORMAT EVERY DESCRIPTION THE SAME WAY, one work item per line: "<Action> <item with specification> — <location/extent>". Use ONLY these action openers: "Furnish and install", "Supply only", "Install only", "Demolish and remove", "Excavate", "Place and finish", "Apply", "Rough-in", "Provide allowance for". Include the spec (size, grade, spacing, thickness, rating) and the location/extent after the em dash.
-  Examples of the required style:
-    "Furnish and install 2x6 DFL studs @ 16\\" o.c. — exterior walls, floors 1–3"
-    "Furnish and install 2x12 DFL floor joists @ 16\\" o.c. — 2nd & 3rd floor framing"
-    "Place and finish 4\\" concrete slab on grade w/ #4 rebar @ 18\\" o.c. e.w. — ground floor"
-    "Furnish and install 3070 solid-core wood doors w/ frames & hardware — units, per door schedule"
-  Never write narrative sentences, observations, or explanations in description — that material belongs in evidence_text or assumptions.
+- ORGANIZE THE SCOPE BY STANDARD SUBCATEGORIES. For each division use the STANDARD SUBCATEGORIES listed later in this prompt. Produce ONE line item per subcategory the project actually has, and ROLL granular components up into that package — e.g. studs, joists, sheathing, hold-downs and connectors all become a single "Wood Framing — walls, floors & roof" line; put the component breakdown in "formula"/"assumptions", NEVER as separate lines. Keep it short, standardized and client-clear — typically 3–8 lines per division.
+- DESCRIPTION = the subcategory's EXACT standard label, optionally followed by " — <spec/type/extent>" ONLY when the plans show a specific product, type, or location worth noting (e.g. "Windows — vinyl, per schedule", "Wood Framing — walls, floors & roof (Type V-A)"). Do NOT use action-verb sentences, narrative, or explanations in description — that material belongs in evidence_text/assumptions.
+- Use the subcategory's SECTION CODE for section_code (and its title for section_name).
+- ADD A SUBCATEGORY ONLY WHEN NEEDED: if the project has real scope that fits NONE of the listed subcategories for its division, you MAY add ONE new line at the same work-package level, in the same formal CSI-style wording (a section title + short scope). Never create a near-duplicate of a listed subcategory.
 - Within each section, order line items in construction sequence: below-grade → structure → exterior shell → interior, lower floors before upper floors.
-- Use the SAME wording for the same work item on every project — consistent phrasing is required so past prices can be matched to future jobs.
+- Use the SAME standard subcategory label for the same work on every project — identical phrasing is required so past prices match future jobs.
 - confidence is "high", "medium", or "low" (high when measured or counted from a schedule; lower when broadly estimated).`;
 
 const DRAFT_SCHEMA = {
@@ -380,7 +378,7 @@ export async function draftScope(
         content: [
           {
             type: "text",
-            text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${scopeFocusText(trades)}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}\n\nUsing the plan content above (and any attached image-only sheets), produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Count the door/window/finish schedules into line items, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
+            text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${scopeFocusText(trades)}\n\n${taxonomyPromptText(trades)}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}\n\nUsing the plan content above (and any attached image-only sheets), produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division and the STANDARD SUBCATEGORIES above. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Fold the door/window/finish schedule counts into the matching subcategory lines, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
           },
           ...planBlocks(fileIds),
         ],
