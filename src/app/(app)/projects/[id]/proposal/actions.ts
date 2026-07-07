@@ -7,6 +7,7 @@
  */
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
+import { enforceAiLimit } from "@/lib/ai-usage";
 
 import { AI_MODELS } from "@/config/ai";
 
@@ -71,6 +72,9 @@ export async function draftProposalNarrative(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+
+  const limit = await enforceAiLimit(supabase, user.id, "proposal");
+  if (!limit.ok) return { ok: false, error: limit.error };
 
   const { data: project } = await supabase
     .from("projects")

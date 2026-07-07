@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runScopeGeneration, abortScopeRun } from "@/lib/scope/run";
 import { lineItemPatch, tradesInput } from "@/lib/validation";
+import { enforceAiLimit } from "@/lib/ai-usage";
 
 export type ScopeRun = {
   id: string;
@@ -66,6 +67,10 @@ export async function startScope(
       .update({ status: "error", error: "Interrupted.", updated_at: new Date().toISOString() })
       .eq("id", existing.data.id);
   }
+
+  // Guard the AI bill — refuse if the user is over their daily/monthly cap.
+  const limit = await enforceAiLimit(supabase, user.id, "scope");
+  if (!limit.ok) return { ok: false, error: limit.error };
 
   const { data: run, error } = await supabase
     .from("scope_runs")

@@ -11,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { runPricingSuggestion, abortPricingRun } from "@/lib/scope/price";
 import { readSubQuote, type QuoteExtraction } from "@/lib/scope/subquote";
 import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
+import { enforceAiLimit } from "@/lib/ai-usage";
 import type { ScopeRun } from "../scope/actions";
 
 type ActionResult = { ok: boolean; error?: string };
@@ -326,6 +327,10 @@ export async function readQuoteDoc(
   if (blob.size > 20 * 1024 * 1024)
     return { ok: false, error: "File too large — keep quotes under 20 MB." };
 
+  // Guard the AI bill before the read.
+  const limit = await enforceAiLimit(supabase, user.id, "subquote");
+  if (!limit.ok) return { ok: false, error: limit.error };
+
   try {
     const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
     const extraction = await readSubQuote({ base64, mime, fileName });
@@ -540,6 +545,10 @@ export async function startPricing(
       .update({ status: "error", error: "Interrupted.", updated_at: new Date().toISOString() })
       .eq("id", existing.id);
   }
+
+  // Guard the AI bill — refuse if the user is over their daily/monthly cap.
+  const limit = await enforceAiLimit(supabase, user.id, "pricing");
+  if (!limit.ok) return { ok: false, error: limit.error };
 
   const { data: run, error } = await supabase
     .from("scope_runs")

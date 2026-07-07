@@ -6,6 +6,7 @@
  */
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
+import { enforceAiLimit } from "@/lib/ai-usage";
 import { AI_MODELS } from "@/config/ai";
 import {
   DEFAULT_PROFILE,
@@ -107,6 +108,9 @@ export async function draftProposalProfile(notes: {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+
+  const limit = await enforceAiLimit(supabase, user.id, "profile");
+  if (!limit.ok) return { ok: false, error: limit.error };
 
   const prompt = `You write the standard, reusable sections of a construction company's bid proposals. Use the owner's notes below. Plain, confident, professional language — no clichés, no markdown, no flowery filler. Write in first-person plural ("we").
 
