@@ -15,12 +15,7 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-- [ ] 0026_sheet_discipline.sql — adds `discipline` to `sheets` for the scope
-      retrieval/routing layer. Nullable, no backfill; safe to run anytime. The
-      app works with or without it (falls back to classifying on the fly).
-- [ ] 0027_ai_usage.sql — adds the `ai_usage` log that powers the per-user AI
-      spend cap. **Running this switches the cap ON** (until then the app
-      "fails open" and doesn't limit AI runs). Safe to run anytime.
+_(nothing pending)_
 
 ---
 
@@ -51,3 +46,5 @@ one once in Supabase, then it moves to **Already run**.
 - [x] 0023_measurement_leaders.sql — run 2026-06-19
 - [x] 0024_sheet_ledger.sql — run 2026-06-19
 - [x] 0025_plan_vision_pdf.sql — run 2026-07-03
+- [x] 0026_sheet_discipline.sql — run 2026-07-07
+- [x] 0027_ai_usage.sql — run 2026-07-07
