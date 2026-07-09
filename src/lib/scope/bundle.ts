@@ -17,6 +17,7 @@ import {
   asDiscipline,
   type Discipline,
 } from "./discipline";
+import { hasTableContent } from "./tables";
 
 export type BundleMeasurement = {
   sheet_id: string;
@@ -154,7 +155,11 @@ export async function gatherBundle(
         name: s.name,
         label: s.label,
         discipline,
-        is_core: isCoreSheet(discipline, s.name, s.label, text),
+        // Table/schedule sheets are core too — their values must reach every
+        // trade that needs them, never be routed away.
+        is_core:
+          isCoreSheet(discipline, s.name, s.label, text) ||
+          hasTableContent(text),
         text,
       };
     });
@@ -166,53 +171,54 @@ export async function gatherBundle(
     })
     .join("\n\n");
 
-  // Which PAGES of each plan file still need an AI vision read (image-only /
-  // un-ingested sheets). Text-extracted sheets are skipped — and crucially, we
-  // send the AI only these specific pages, never the whole multi-page file
-  // (Anthropic rejects PDFs over its size/page limit with "Could not process PDF").
-  const visionPagesByFile = new Map<string, number[]>();
+  // Pages with no text layer (scanned/image-only) must be sent as images.
+  // Table/schedule sheets ALSO get an image, but those are baked into the plan
+  // file's vision PDF at prepare time — so here we simply ship the vision PDF
+  // whenever one exists, and fall back to the raw image-only pages if not.
+  const imagePagesByFile = new Map<string, number[]>();
   for (const s of allSheets) {
     if (s.ingest_method === "text" || !s.plan_file_id) continue;
-    const arr = visionPagesByFile.get(s.plan_file_id) ?? [];
+    const arr = imagePagesByFile.get(s.plan_file_id) ?? [];
     arr.push(s.page_number);
-    visionPagesByFile.set(s.plan_file_id, arr);
+    imagePagesByFile.set(s.plan_file_id, arr);
   }
   // Just references + page lists — bytes are downloaded at upload time.
   const plans: { file_name: string; storage_path: string; pages: number[] }[] = [];
-  if (visionPagesByFile.size) {
-    const ids = [...visionPagesByFile.keys()];
-    // Resilient to migration 0025 (vision_pdf_path) not being run yet.
-    const pfFull = await supabase
-      .from("plan_files")
-      .select("id,file_name,storage_path,vision_pdf_path")
-      .in("id", ids);
-    const planFiles = (
-      pfFull.error
-        ? (
-            await supabase
-              .from("plan_files")
-              .select("id,file_name,storage_path")
-              .in("id", ids)
-          ).data
-        : pfFull.data
-    ) as {
-      id: string;
-      file_name: string;
-      storage_path: string;
-      vision_pdf_path?: string | null;
-    }[] | null;
-    for (const pf of planFiles ?? []) {
-      if (pf.vision_pdf_path) {
-        // Compact, downscaled PDF of only the scanned pages — send it whole.
-        plans.push({ file_name: pf.file_name, storage_path: pf.vision_pdf_path, pages: [] });
-      } else {
-        // No vision PDF yet — fall back to extracting the image pages (capped).
+  // Fetch ALL plan files for the project: a file can have a vision PDF (scanned
+  // AND/OR table sheets) even when it has no image-only sheets. Resilient to
+  // migration 0025 (vision_pdf_path) not being run yet.
+  const pfFull = await supabase
+    .from("plan_files")
+    .select("id,file_name,storage_path,vision_pdf_path")
+    .eq("project_id", projectId);
+  const planFiles = (
+    pfFull.error
+      ? (
+          await supabase
+            .from("plan_files")
+            .select("id,file_name,storage_path")
+            .eq("project_id", projectId)
+        ).data
+      : pfFull.data
+  ) as {
+    id: string;
+    file_name: string;
+    storage_path: string;
+    vision_pdf_path?: string | null;
+  }[] | null;
+  for (const pf of planFiles ?? []) {
+    if (pf.vision_pdf_path) {
+      // Compact, downscaled PDF of the scanned + table sheets — send it whole.
+      plans.push({ file_name: pf.file_name, storage_path: pf.vision_pdf_path, pages: [] });
+    } else {
+      // No vision PDF — fall back to the raw image-only pages (capped later).
+      const pages = imagePagesByFile.get(pf.id);
+      if (pages && pages.length)
         plans.push({
           file_name: pf.file_name,
           storage_path: pf.storage_path,
-          pages: (visionPagesByFile.get(pf.id) ?? []).sort((a, b) => a - b),
+          pages: [...pages].sort((a, b) => a - b),
         });
-      }
     }
   }
 

@@ -90,9 +90,9 @@ export default async function ScopePage({
       hasVisionPdf: !!p.vision_pdf_path,
     }),
   );
-  // Resilient to migration 0026 (discipline) not being run yet.
+  // Resilient to migrations 0026 (discipline) / 0028 (ingest_version) not run.
   const sheetSel =
-    "id,page_number,plan_file_id,ingest_method,name,label,discipline";
+    "id,page_number,plan_file_id,ingest_method,name,label,discipline,ingest_version";
   const shRes = await supabase.from("sheets").select(sheetSel).eq("project_id", id);
   const sheetRows = (
     shRes.error
@@ -112,6 +112,7 @@ export default async function ScopePage({
         name: string | null;
         label: string | null;
         discipline?: string | null;
+        ingest_version?: number | null;
       }[]
     | null;
   const ingestSheets = (sheetRows ?? [])
@@ -120,6 +121,7 @@ export default async function ScopePage({
       page_number: s.page_number,
       plan_file_id: s.plan_file_id,
       ingestMethod: s.ingest_method,
+      ingestVersion: s.ingest_version ?? null,
       name: s.name,
       label: s.label,
       discipline: s.discipline ?? null,
