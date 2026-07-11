@@ -37,6 +37,13 @@ export async function startScope(
   if (!validTrades.success)
     return { ok: false, error: "That trade selection wasn't valid." };
 
+  // Remember this project's trade selection so Regenerate defaults back to it
+  // (best-effort; migration 0030 adds gen_trades).
+  await supabase
+    .from("projects")
+    .update({ gen_trades: trades })
+    .eq("id", projectId);
+
   // Don't start a second run if one is GENUINELY still going. A run whose
   // process died leaves a stale "running" row that never updates — we must not
   // let that block new runs forever, or Regenerate silently does nothing.

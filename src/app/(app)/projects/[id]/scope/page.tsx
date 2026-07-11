@@ -19,11 +19,24 @@ export default async function ScopePage({
   const { error } = await searchParams;
   const supabase = await createClient();
 
-  const { data: project } = await supabase
+  // Resilient to migration 0030 (gen_trades) not being run yet.
+  const projRes = await supabase
     .from("projects")
-    .select("id,name")
+    .select("id,name,gen_trades")
     .eq("id", id)
     .maybeSingle();
+  const project = (
+    projRes.error
+      ? (
+          await supabase
+            .from("projects")
+            .select("id,name")
+            .eq("id", id)
+            .maybeSingle()
+        ).data
+      : projRes.data
+  ) as { id: string; name: string | null; gen_trades?: string[] | null } | null;
+  const genTrades = Array.isArray(project?.gen_trades) ? project.gen_trades : [];
 
   const { data: items } = await supabase
     .from("line_items")
@@ -155,6 +168,7 @@ export default async function ScopePage({
               projectId={id}
               initialRun={initialRun}
               hasScope={lineItems.length > 0}
+              initialTrades={genTrades}
             />
           </div>
         </div>
