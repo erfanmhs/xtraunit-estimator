@@ -5,7 +5,6 @@ import GeneratePanel from "./GeneratePanel";
 import PreparePlans from "./PreparePlans";
 import ScopeCanvas, { type LineItem } from "./ScopeCanvas";
 import FindingsReview, { type Finding } from "./FindingsReview";
-import SheetDisciplines from "./SheetDisciplines";
 import NextStep from "@/components/NextStep";
 
 export default async function ScopePage({
@@ -192,18 +191,6 @@ export default async function ScopePage({
         ) : null}
 
         <PreparePlans plans={planFiles ?? []} sheets={ingestSheets} />
-
-        {ingestSheets.length ? (
-          <SheetDisciplines
-            sheets={ingestSheets.map((s) => ({
-              id: s.id,
-              page_number: s.page_number,
-              name: s.name,
-              label: s.label,
-              discipline: s.discipline,
-            }))}
-          />
-        ) : null}
 
         {lineItems.length === 0 ? (
           <div className="mt-10 rounded-xl glass p-8 text-center">
