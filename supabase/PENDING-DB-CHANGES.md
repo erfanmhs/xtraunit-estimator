@@ -15,7 +15,10 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-_(nothing pending)_
+- [ ] 0028_sheet_ingest_version.sql — adds `ingest_version` to `sheets`. Powers
+      the improved plan-reading (layout-aware text so tables survive + schedule
+      sheets sent as images). Running it makes existing projects re-read their
+      plans ONCE, automatically, with the better logic. Safe to run anytime.
 
 ---
 
