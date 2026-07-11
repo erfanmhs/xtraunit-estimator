@@ -214,15 +214,28 @@ export async function runScopeGeneration(opts: {
     }
     const allFindings = [...findings, ...gapFindings];
     if (allFindings.length) {
-      await sb.from("scope_findings").insert(
+      const ins = await sb.from("scope_findings").insert(
         allFindings.map((f) => ({
           project_id: projectId,
           owner_id: userId,
           kind: f.kind,
           text: f.text,
           severity: f.severity,
+          options: f.options ?? [],
         })),
       );
+      if (ins.error) {
+        // migration 0031 (options) not run — insert without it.
+        await sb.from("scope_findings").insert(
+          allFindings.map((f) => ({
+            project_id: projectId,
+            owner_id: userId,
+            kind: f.kind,
+            text: f.text,
+            severity: f.severity,
+          })),
+        );
+      }
     }
 
     await update({

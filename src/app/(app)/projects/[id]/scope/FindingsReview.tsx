@@ -32,6 +32,7 @@ export type Finding = {
   answer: string | null;
   resolved: boolean | null;
   status: string | null; // 'open' | 'accepted' | 'dismissed'
+  options: string[] | null; // quick answer choices for a question
 };
 
 const FINDING_LABEL: Record<string, string> = {
@@ -369,24 +370,84 @@ function QuestionRow({
   onSave: (answer: string) => void;
 }) {
   const saved = (f.answer ?? "").trim();
+  const options = f.options ?? [];
   const [editing, setEditing] = useState(!saved);
   const [value, setValue] = useState(f.answer ?? "");
+  const [typing, setTyping] = useState(false); // "Other…" free-text revealed
 
   // Collapse to the saved view whenever an answer lands.
   useEffect(() => {
-    if (saved) setEditing(false);
+    if (saved) {
+      setEditing(false);
+      setTyping(false);
+    }
   }, [saved]);
 
+  // Answered → compact confirmation with Edit.
+  if (!editing) {
+    return (
+      <li className="text-sm">
+        <p className="text-foreground">{f.text}</p>
+        <div className="mt-1.5 flex items-start justify-between gap-3 rounded-md border border-green-500/20 bg-green-500/5 px-2.5 py-1.5">
+          <p className="text-sm text-green-200">
+            <span className="text-green-400">✓ </span>
+            {saved}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setTyping(false);
+              setEditing(true);
+            }}
+            className="shrink-0 text-[11px] text-muted transition-colors hover:text-foreground"
+          >
+            Edit
+          </button>
+        </div>
+      </li>
+    );
+  }
+
+  const showChips = options.length > 0 && !typing;
   return (
     <li className="text-sm">
       <p className="text-foreground">{f.text}</p>
 
-      {editing ? (
+      {showChips ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {options.map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => onSave(o)}
+              className="glass-brand rounded-full px-3 py-1 text-xs font-medium text-foreground hover:bg-brand/30"
+            >
+              {o}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setTyping(true)}
+            className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-foreground"
+          >
+            Other…
+          </button>
+          {saved ? (
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="px-2 py-1 text-xs text-muted hover:text-foreground"
+            >
+              Cancel
+            </button>
+          ) : null}
+        </div>
+      ) : (
         <div className="mt-1.5">
           <textarea
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder="Your answer (e.g. '4-inch slab', 'walls are 9 ft', 'demo is in scope')…"
+            placeholder="Your answer (e.g. '4-inch slab', 'walls are 9 ft')…"
             rows={2}
             className={NOTE_CLASS}
           />
@@ -399,7 +460,15 @@ function QuestionRow({
             >
               Save answer
             </button>
-            {saved ? (
+            {options.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setTyping(false)}
+                className="rounded-md px-2 py-1 text-muted hover:text-foreground"
+              >
+                ← Choices
+              </button>
+            ) : saved ? (
               <button
                 type="button"
                 onClick={() => {
@@ -412,20 +481,6 @@ function QuestionRow({
               </button>
             ) : null}
           </div>
-        </div>
-      ) : (
-        <div className="mt-1.5 flex items-start justify-between gap-3 rounded-md border border-green-500/20 bg-green-500/5 px-2.5 py-1.5">
-          <p className="text-sm text-green-200">
-            <span className="text-green-400">✓ </span>
-            {saved}
-          </p>
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="shrink-0 text-[11px] text-muted transition-colors hover:text-foreground"
-          >
-            Edit
-          </button>
         </div>
       )}
     </li>
