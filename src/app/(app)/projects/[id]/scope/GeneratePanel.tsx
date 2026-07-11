@@ -92,17 +92,23 @@ export default function GeneratePanel({
   projectId,
   initialRun,
   hasScope,
+  initialTrades = [],
 }: {
   projectId: string;
   initialRun: ScopeRun | null;
   hasScope: boolean;
+  initialTrades?: string[];
 }) {
   const router = useRouter();
   const [run, setRun] = useState<ScopeRun | null>(initialRun);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [mode, setMode] = useState<"full" | "trades">("full");
-  const [selected, setSelected] = useState<string[]>([]);
+  // Default back to the project's last-used trade selection so a Regenerate
+  // doesn't forget the trades this estimate was scoped for.
+  const [mode, setMode] = useState<"full" | "trades">(
+    initialTrades.length ? "trades" : "full",
+  );
+  const [selected, setSelected] = useState<string[]>(initialTrades);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the user cancels, so an in-flight poll() can't overwrite the
   // cancelled state with a stale "running" read.
