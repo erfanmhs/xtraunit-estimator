@@ -6,7 +6,11 @@
  * navigate away; progress is read from the scope_runs row.
  */
 import { createClient } from "@/lib/supabase/server";
-import { runScopeGeneration, abortScopeRun } from "@/lib/scope/run";
+import {
+  runScopeGeneration,
+  runApplyFindings,
+  abortScopeRun,
+} from "@/lib/scope/run";
 import { lineItemPatch, tradesInput } from "@/lib/validation";
 import { enforceAiLimit } from "@/lib/ai-usage";
 
@@ -234,12 +238,13 @@ export async function answerFinding(
   if (!user) return { ok: false, error: "Not signed in." };
 
   const trimmed = answer.trim();
+  // Note: `resolved` is NOT set here — it now means "applied to the scope",
+  // which only the Apply job sets. Answering just saves the note/answer.
   const { error } = await supabase
     .from("scope_findings")
     .update({
       answer: trimmed || null,
       answered_at: trimmed ? new Date().toISOString() : null,
-      resolved: !!trimmed,
     })
     .eq("id", findingId);
   if (error)
@@ -266,6 +271,31 @@ export async function setFindingResolved(
     .update({ resolved })
     .eq("id", findingId);
   if (error) return { ok: false, error: "Could not update the finding." };
+  return { ok: true };
+}
+
+// Accept / dismiss a finding (assumption, gap, exclusion). "accepted" keeps it
+// (optionally with a note/correction saved via answerFinding); "dismissed"
+// leaves it out; "open" is undecided.
+export async function setFindingStatus(
+  findingId: string,
+  status: "open" | "accepted" | "dismissed",
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error } = await supabase
+    .from("scope_findings")
+    .update({ status })
+    .eq("id", findingId);
+  if (error)
+    return {
+      ok: false,
+      error: "Could not save. (Has migration 0029 been run in Supabase?)",
+    };
   return { ok: true };
 }
 
@@ -382,6 +412,108 @@ export async function getScopeRun(projectId: string): Promise<ScopeRun | null> {
           "The last generation didn't finish (the server may have restarted). Any scope already shown is unchanged — click Regenerate to run it again.",
       };
     }
+  }
+  return run;
+}
+
+// ── Apply findings to the scope (cheap; no full regenerate) ────────────────
+
+/** Start the targeted "apply my responses to the scope" job. */
+export async function startApplyFindings(
+  projectId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!user || !session) return { ok: false, error: "Not signed in." };
+
+  // Counts toward the AI cap — it's an AI call, just a small one.
+  const limit = await enforceAiLimit(supabase, user.id, "apply");
+  if (!limit.ok) return { ok: false, error: limit.error };
+
+  // Don't start a second apply if one is genuinely still running.
+  let existing = await supabase
+    .from("scope_runs")
+    .select("id,updated_at")
+    .eq("project_id", projectId)
+    .eq("status", "running")
+    .eq("kind", "apply")
+    .maybeSingle();
+  if (existing.error) {
+    existing = await supabase
+      .from("scope_runs")
+      .select("id,updated_at")
+      .eq("project_id", projectId)
+      .eq("status", "running")
+      .maybeSingle();
+  }
+  if (existing.data) {
+    const age = Date.now() - new Date(existing.data.updated_at).getTime();
+    if (age < 3 * 60 * 1000) return { ok: true };
+    await supabase
+      .from("scope_runs")
+      .update({
+        status: "error",
+        error: "Interrupted.",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.data.id);
+  }
+
+  const { data: run, error } = await supabase
+    .from("scope_runs")
+    .insert({
+      project_id: projectId,
+      owner_id: user.id,
+      status: "running",
+      stage: "Starting…",
+      progress: 2,
+      kind: "apply",
+    })
+    .select("id")
+    .single();
+  if (error || !run)
+    return { ok: false, error: "Could not start applying your responses." };
+
+  void runApplyFindings({
+    projectId,
+    userId: user.id,
+    token: session.access_token,
+    runId: run.id,
+  });
+  return { ok: true };
+}
+
+export async function getApplyRun(projectId: string): Promise<ScopeRun | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("scope_runs")
+    .select("id,status,stage,progress,error,created_at,updated_at")
+    .eq("project_id", projectId)
+    .eq("kind", "apply")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+
+  const run = data as ScopeRun;
+  if (run.status === "running") {
+    const age = Date.now() - new Date(run.updated_at).getTime();
+    if (age > 5 * 60 * 1000)
+      return {
+        ...run,
+        status: "error",
+        error: "That didn't finish — please try Apply again.",
+      };
   }
   return run;
 }

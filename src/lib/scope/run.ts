@@ -17,6 +17,11 @@ import {
   type GeneratedLineItem,
   type GeneratedFinding,
 } from "./generate";
+import {
+  applyFindingsToScope,
+  type CurrentLine,
+  type FindingResponse,
+} from "./applyFindings";
 
 // In-process registry of running jobs so a later request (the Cancel button)
 // can abort the AI stream immediately. Works because Next.js server actions and
@@ -160,16 +165,24 @@ export async function runScopeGeneration(opts: {
     }
     await del;
     if (!trades.length) {
-      // Clear old findings, but KEEP answered questions — those are the user's
-      // clarifications and must survive a regenerate. Fall back to clearing all
-      // if the answer column isn't there yet (migration 0010 not run).
-      const keepAnswered = await sb
+      // Clear old findings, but KEEP any the user acted on — a saved note/answer,
+      // or an explicit Accept/Dismiss — so a regenerate never wipes decisions.
+      // Degrade gracefully if migration 0029 (status) / 0010 (answer) isn't run.
+      const keepDecided = await sb
         .from("scope_findings")
         .delete()
         .eq("project_id", projectId)
-        .is("answer", null);
-      if (keepAnswered.error) {
-        await sb.from("scope_findings").delete().eq("project_id", projectId);
+        .is("answer", null)
+        .or("status.is.null,status.eq.open");
+      if (keepDecided.error) {
+        const keepAnswered = await sb
+          .from("scope_findings")
+          .delete()
+          .eq("project_id", projectId)
+          .is("answer", null);
+        if (keepAnswered.error) {
+          await sb.from("scope_findings").delete().eq("project_id", projectId);
+        }
       }
     }
 
@@ -242,5 +255,208 @@ export async function runScopeGeneration(opts: {
     controllers.delete(runId);
     // Tidy up the uploaded PDFs (storage is free; just keeping it clean).
     if (fileIds.length) await deletePlanFiles(fileIds);
+  }
+}
+
+/**
+ * Apply the user's finding responses to the existing scope — the cheap path that
+ * avoids a full regenerate (no plans re-read, no division chunks). One focused
+ * AI call turns the current scope + decisions into targeted edits.
+ */
+export async function runApplyFindings(opts: {
+  projectId: string;
+  userId: string;
+  token: string;
+  runId: string;
+}) {
+  const { projectId, userId, token, runId } = opts;
+  const sb = bgClient(token);
+  const ac = new AbortController();
+  controllers.set(runId, ac);
+  const update = (patch: Record<string, unknown>) =>
+    sb
+      .from("scope_runs")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", runId);
+
+  try {
+    await update({ stage: "Reading your responses…", progress: 20 });
+
+    const { data: lineRows } = await sb
+      .from("line_items")
+      .select(
+        "id,division_code,division_name,section_code,section_name,description,quantity,unit,status,sort_order",
+      )
+      .eq("project_id", projectId)
+      .order("division_code", { ascending: true })
+      .order("sort_order", { ascending: true });
+    const lines = (lineRows ?? []) as unknown as CurrentLine[];
+
+    // Findings the user responded to but hasn't applied yet (resolved = applied).
+    // Resilient to migration 0029 (status) not being run.
+    type FRow = {
+      id: string;
+      kind: string;
+      text: string;
+      answer: string | null;
+      status?: string | null;
+      resolved: boolean | null;
+    };
+    let fRows: FRow[] = [];
+    const fTop = await sb
+      .from("scope_findings")
+      .select("id,kind,text,answer,status,resolved")
+      .eq("project_id", projectId);
+    if (!fTop.error) fRows = (fTop.data ?? []) as unknown as FRow[];
+    else {
+      const fMid = await sb
+        .from("scope_findings")
+        .select("id,kind,text,answer,resolved")
+        .eq("project_id", projectId);
+      fRows = (fMid.data ?? []) as unknown as FRow[];
+    }
+    const pending = fRows.filter(
+      (f) =>
+        !f.resolved &&
+        ((f.kind === "question" && (f.answer ?? "").trim()) ||
+          f.status === "accepted"),
+    );
+
+    if (!pending.length) {
+      await update({
+        status: "done",
+        stage: "Nothing new to apply.",
+        progress: 100,
+      });
+      return;
+    }
+
+    const findings: FindingResponse[] = pending.map((f) => ({
+      kind: f.kind,
+      text: f.text,
+      note: f.answer ?? "",
+    }));
+
+    // Cheap cached plan text (no vision, no chunking). Resilient if 0009 unrun.
+    let planText = "";
+    const shRes = await sb
+      .from("sheets")
+      .select("name,label,page_number,extracted_text")
+      .eq("project_id", projectId)
+      .order("page_number", { ascending: true });
+    if (!shRes.error) {
+      planText = (
+        (shRes.data ?? []) as unknown as {
+          name: string | null;
+          label: string | null;
+          page_number: number;
+          extracted_text: string | null;
+        }[]
+      )
+        .filter((s) => (s.extracted_text ?? "").trim())
+        .map((s) => {
+          const title = `${s.name || `Sheet ${s.page_number}`}${s.label ? ` (${s.label})` : ""}`;
+          return `=== ${title} ===\n${(s.extracted_text ?? "").trim()}`;
+        })
+        .join("\n\n");
+    }
+
+    await update({ stage: "Updating the scope…", progress: 55 });
+    const changes = await applyFindingsToScope({
+      lines,
+      findings,
+      planText,
+      signal: ac.signal,
+    });
+    if (ac.signal.aborted) throw new DOMException("Cancelled", "AbortError");
+
+    await update({ stage: "Saving the changes…", progress: 85 });
+    const validIds = new Set(lines.map((l) => l.id));
+
+    if (changes.additions.length) {
+      await sb.from("line_items").insert(
+        changes.additions.map((li, i) => ({
+          project_id: projectId,
+          owner_id: userId,
+          division_code: li.division_code,
+          division_name: li.division_name,
+          section_code: li.section_code,
+          section_name: li.section_name,
+          description: li.description,
+          quantity: li.quantity,
+          unit: li.unit,
+          source_kind: "note",
+          evidence: {
+            text: null,
+            based_on_layers: [],
+            formula: li.formula,
+            assumptions: li.assumptions,
+          },
+          status: "proposed",
+          confidence: "medium",
+          ai_generated: true,
+          user_edited: false,
+          sort_order: 900 + i,
+        })),
+      );
+    }
+
+    for (const u of changes.updates) {
+      if (!validIds.has(u.id)) continue;
+      const patch: Record<string, unknown> = { user_edited: true };
+      if (u.description != null) patch.description = u.description;
+      if (u.quantity != null) patch.quantity = u.quantity;
+      if (u.unit != null) patch.unit = u.unit;
+      await sb.from("line_items").update(patch).eq("id", u.id);
+    }
+
+    for (const id of changes.exclusions) {
+      if (!validIds.has(id)) continue;
+      await sb
+        .from("line_items")
+        .update({ status: "excluded", user_edited: true })
+        .eq("id", id);
+    }
+
+    // Mark these findings applied so a second click doesn't redo them.
+    await sb
+      .from("scope_findings")
+      .update({ resolved: true })
+      .in(
+        "id",
+        pending.map((f) => f.id),
+      );
+
+    const n =
+      changes.additions.length +
+      changes.updates.filter((u) => validIds.has(u.id)).length +
+      changes.exclusions.filter((id) => validIds.has(id)).length;
+    await update({
+      status: "done",
+      stage: n
+        ? `Applied — ${n} change${n > 1 ? "s" : ""} to the scope.`
+        : "No scope changes were needed.",
+      progress: 100,
+    });
+  } catch (e) {
+    const aborted =
+      ac.signal.aborted || (e instanceof Error && e.name === "AbortError");
+    if (aborted) {
+      await update({
+        status: "cancelled",
+        stage: "Cancelled",
+        error: null,
+        progress: 100,
+      });
+    } else {
+      await update({
+        status: "error",
+        error:
+          e instanceof Error ? e.message : "Could not apply your responses.",
+        progress: 100,
+      });
+    }
+  } finally {
+    controllers.delete(runId);
   }
 }

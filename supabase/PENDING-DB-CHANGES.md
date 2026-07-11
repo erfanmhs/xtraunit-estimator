@@ -19,6 +19,8 @@ one once in Supabase, then it moves to **Already run**.
       the improved plan-reading (layout-aware text so tables survive + schedule
       sheets sent as images). Running it makes existing projects re-read their
       plans ONCE, automatically, with the better logic. Safe to run anytime.
+- [ ] 0029_finding_status.sql — adds `status` to `scope_findings` for the clear
+      Accept / Dismiss on each assumption/gap/exclusion. Safe to run anytime.
 
 ---
 
