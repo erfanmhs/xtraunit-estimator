@@ -53,6 +53,7 @@ export default function FindingsReview({
   const router = useRouter();
   const [findings, setFindings] = useState<Finding[]>(initialFindings);
   const [error, setError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [, startTransition] = useTransition();
 
   // The "apply my responses to the scope" background job.
@@ -216,26 +217,40 @@ export default function FindingsReview({
           if (!rows.length) return null;
           return (
             <section key={kind} className="glass rounded-xl p-4">
-              <h3 className="mb-2 text-sm uppercase tracking-wider text-muted">
-                {FINDING_LABEL[kind] ?? kind}
-              </h3>
-              <ul className="space-y-3">
-                {rows.map((f) =>
-                  kind === "question" ? (
-                    <QuestionRow
-                      key={f.id}
-                      finding={f}
-                      onSave={(a) => saveAnswer(f.id, a)}
-                    />
-                  ) : (
-                    <FindingRow
-                      key={f.id}
-                      finding={f}
-                      onDecide={(status, note) => decide(f.id, status, note)}
-                    />
-                  ),
-                )}
-              </ul>
+              <button
+                type="button"
+                onClick={() =>
+                  setCollapsed((c) => ({ ...c, [kind]: !c[kind] }))
+                }
+                className="flex w-full items-center justify-between text-left"
+              >
+                <h3 className="text-sm uppercase tracking-wider text-muted">
+                  {FINDING_LABEL[kind] ?? kind}
+                  <span className="ml-2 text-muted/60">({rows.length})</span>
+                </h3>
+                <span className="text-xs text-muted">
+                  {collapsed[kind] ? "▸" : "▾"}
+                </span>
+              </button>
+              {!collapsed[kind] ? (
+                <ul className="mt-2 space-y-3">
+                  {rows.map((f) =>
+                    kind === "question" ? (
+                      <QuestionRow
+                        key={f.id}
+                        finding={f}
+                        onSave={(a) => saveAnswer(f.id, a)}
+                      />
+                    ) : (
+                      <FindingRow
+                        key={f.id}
+                        finding={f}
+                        onDecide={(status, note) => decide(f.id, status, note)}
+                      />
+                    ),
+                  )}
+                </ul>
+              ) : null}
             </section>
           );
         })}
