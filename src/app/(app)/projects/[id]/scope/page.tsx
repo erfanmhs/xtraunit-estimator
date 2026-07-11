@@ -50,33 +50,51 @@ export default async function ScopePage({
   let findingRows: Finding[] = [];
   const fTop = await supabase
     .from("scope_findings")
-    .select("id,kind,text,severity,answer,resolved,status")
+    .select("id,kind,text,severity,answer,resolved,status,options")
     .eq("project_id", id);
   if (!fTop.error) {
     findingRows = (fTop.data as Finding[]) ?? [];
   } else {
     const fMid = await supabase
       .from("scope_findings")
-      .select("id,kind,text,severity,answer,resolved")
+      .select("id,kind,text,severity,answer,resolved,status")
       .eq("project_id", id);
     if (!fMid.error) {
       findingRows = (fMid.data ?? []).map((f) => ({
-        ...(f as Omit<Finding, "status">),
-        status: null,
+        ...(f as Omit<Finding, "options">),
+        options: null,
       }));
     } else {
-      const fb = await supabase
+      const fLo = await supabase
         .from("scope_findings")
-        .select("id,kind,text,severity")
+        .select("id,kind,text,severity,answer,resolved")
         .eq("project_id", id);
-      findingRows = (fb.data ?? []).map(
-        (f: {
-          id: string;
-          kind: string;
-          text: string;
-          severity: string | null;
-        }) => ({ ...f, answer: null, resolved: false, status: null }),
-      );
+      if (!fLo.error) {
+        findingRows = (fLo.data ?? []).map((f) => ({
+          ...(f as Omit<Finding, "status" | "options">),
+          status: null,
+          options: null,
+        }));
+      } else {
+        const fb = await supabase
+          .from("scope_findings")
+          .select("id,kind,text,severity")
+          .eq("project_id", id);
+        findingRows = (fb.data ?? []).map(
+          (f: {
+            id: string;
+            kind: string;
+            text: string;
+            severity: string | null;
+          }) => ({
+            ...f,
+            answer: null,
+            resolved: false,
+            status: null,
+            options: null,
+          }),
+        );
+      }
     }
   }
 
