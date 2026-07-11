@@ -160,16 +160,24 @@ export async function runScopeGeneration(opts: {
     }
     await del;
     if (!trades.length) {
-      // Clear old findings, but KEEP answered questions — those are the user's
-      // clarifications and must survive a regenerate. Fall back to clearing all
-      // if the answer column isn't there yet (migration 0010 not run).
-      const keepAnswered = await sb
+      // Clear old findings, but KEEP any the user acted on — a saved note/answer,
+      // or an explicit Accept/Dismiss — so a regenerate never wipes decisions.
+      // Degrade gracefully if migration 0029 (status) / 0010 (answer) isn't run.
+      const keepDecided = await sb
         .from("scope_findings")
         .delete()
         .eq("project_id", projectId)
-        .is("answer", null);
-      if (keepAnswered.error) {
-        await sb.from("scope_findings").delete().eq("project_id", projectId);
+        .is("answer", null)
+        .or("status.is.null,status.eq.open");
+      if (keepDecided.error) {
+        const keepAnswered = await sb
+          .from("scope_findings")
+          .delete()
+          .eq("project_id", projectId)
+          .is("answer", null);
+        if (keepAnswered.error) {
+          await sb.from("scope_findings").delete().eq("project_id", projectId);
+        }
       }
     }
 

@@ -121,21 +121,31 @@ export async function gatherBundle(
     )
     .eq("project_id", projectId);
 
-  // Answered "question" findings → clarifications for the prompt. Resilient to
-  // migration 0010 (answer column) not being run yet.
+  // Findings with a note/answer → clarifications for the prompt, so a correction
+  // (e.g. "6-inch slab, not 4") steers the next Generate. Dismissed findings are
+  // skipped. Resilient to migration 0010 (answer) / 0029 (status) not being run.
+  type ClaRow = { text: string; answer: string | null; status?: string | null };
   let clarifications: { question: string; answer: string }[] = [];
-  const claRes = await supabase
+  let claData: ClaRow[] | null = null;
+  const claTop = await supabase
     .from("scope_findings")
-    .select("text,answer")
+    .select("text,answer,status")
     .eq("project_id", projectId)
     .not("answer", "is", null);
-  if (!claRes.error) {
-    clarifications = (claRes.data ?? [])
-      .filter((r) => ((r as { answer: string | null }).answer ?? "").trim())
-      .map((r) => {
-        const row = r as { text: string; answer: string };
-        return { question: row.text, answer: row.answer.trim() };
-      });
+  if (!claTop.error) {
+    claData = (claTop.data ?? []) as unknown as ClaRow[];
+  } else {
+    const claMid = await supabase
+      .from("scope_findings")
+      .select("text,answer")
+      .eq("project_id", projectId)
+      .not("answer", "is", null);
+    if (!claMid.error) claData = (claMid.data ?? []) as unknown as ClaRow[];
+  }
+  if (claData) {
+    clarifications = claData
+      .filter((r) => (r.answer ?? "").trim() && r.status !== "dismissed")
+      .map((r) => ({ question: r.text, answer: (r.answer as string).trim() }));
   }
 
   const allSheets = sheets ?? [];

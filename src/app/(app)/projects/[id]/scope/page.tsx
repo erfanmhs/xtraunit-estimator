@@ -34,26 +34,38 @@ export default async function ScopePage({
     .order("division_code", { ascending: true })
     .order("sort_order", { ascending: true });
 
-  // Findings — resilient to migration 0010 (answer column) not being run yet.
+  // Findings — resilient to migrations 0010 (answer) / 0029 (status) not run.
   let findingRows: Finding[] = [];
-  const fres = await supabase
+  const fTop = await supabase
     .from("scope_findings")
-    .select("id,kind,text,severity,answer,resolved")
+    .select("id,kind,text,severity,answer,resolved,status")
     .eq("project_id", id);
-  if (fres.error) {
-    const fb = await supabase
-      .from("scope_findings")
-      .select("id,kind,text,severity")
-      .eq("project_id", id);
-    findingRows = (fb.data ?? []).map(
-      (f: { id: string; kind: string; text: string; severity: string | null }) => ({
-        ...f,
-        answer: null,
-        resolved: false,
-      }),
-    );
+  if (!fTop.error) {
+    findingRows = (fTop.data as Finding[]) ?? [];
   } else {
-    findingRows = (fres.data as Finding[]) ?? [];
+    const fMid = await supabase
+      .from("scope_findings")
+      .select("id,kind,text,severity,answer,resolved")
+      .eq("project_id", id);
+    if (!fMid.error) {
+      findingRows = (fMid.data ?? []).map((f) => ({
+        ...(f as Omit<Finding, "status">),
+        status: null,
+      }));
+    } else {
+      const fb = await supabase
+        .from("scope_findings")
+        .select("id,kind,text,severity")
+        .eq("project_id", id);
+      findingRows = (fb.data ?? []).map(
+        (f: {
+          id: string;
+          kind: string;
+          text: string;
+          severity: string | null;
+        }) => ({ ...f, answer: null, resolved: false, status: null }),
+      );
+    }
   }
 
   const { count: measurementCount } = await supabase

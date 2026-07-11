@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * "What to review" — the AI's findings. Questions can be answered inline; the
- * answer is saved and fed into the next Generate (the AI treats it as
- * authoritative and won't re-ask it). Gaps / assumptions / exclusions can be
- * checked off (resolved) once you've dealt with them.
+ * "What to review" — the AI's findings.
+ *  - Questions: answer inline; the answer is fed into the next Generate.
+ *  - Assumptions / gaps / exclusions: an explicit decision — Accept (keep it,
+ *    optionally with a note/correction) or Dismiss (leave it out) — instead of a
+ *    vague checkbox. A note on an accepted finding is fed into the next Generate,
+ *    so a correction (e.g. "6-inch slab, not 4") actually changes the estimate.
  */
 import { useEffect, useState, useTransition } from "react";
-import { answerFinding, setFindingResolved } from "./actions";
+import { answerFinding, setFindingStatus } from "./actions";
 
 export type Finding = {
   id: string;
@@ -16,6 +18,7 @@ export type Finding = {
   severity: string | null;
   answer: string | null;
   resolved: boolean | null;
+  status: string | null; // 'open' | 'accepted' | 'dismissed'
 };
 
 const FINDING_LABEL: Record<string, string> = {
@@ -54,15 +57,31 @@ export default function FindingsReview({
     });
   }
 
-  function toggleResolved(id: string, resolved: boolean) {
+  // Accept / dismiss a finding, optionally saving a note/correction with it.
+  function decide(
+    id: string,
+    status: "open" | "accepted" | "dismissed",
+    note?: string,
+  ) {
     const snapshot = findings;
     setError(null);
-    patch(id, { resolved });
+    patch(id, {
+      status,
+      ...(note !== undefined ? { answer: note.trim() || null } : {}),
+    });
     startTransition(async () => {
-      const res = await setFindingResolved(id, resolved);
-      if (!res.ok) {
+      if (note !== undefined) {
+        const r1 = await answerFinding(id, note);
+        if (!r1.ok) {
+          setFindings(snapshot);
+          setError(r1.error ?? "Could not save your note.");
+          return;
+        }
+      }
+      const r2 = await setFindingStatus(id, status);
+      if (!r2.ok) {
         setFindings(snapshot);
-        setError(res.error ?? "Could not update the finding.");
+        setError(r2.error ?? "Could not update the finding.");
       }
     });
   }
@@ -108,7 +127,7 @@ export default function FindingsReview({
                     <FindingRow
                       key={f.id}
                       finding={f}
-                      onToggle={(r) => toggleResolved(f.id, r)}
+                      onDecide={(status, note) => decide(f.id, status, note)}
                     />
                   ),
                 )}
@@ -121,24 +140,119 @@ export default function FindingsReview({
   );
 }
 
+const NOTE_CLASS =
+  "w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
+
 function FindingRow({
   finding: f,
-  onToggle,
+  onDecide,
 }: {
   finding: Finding;
-  onToggle: (resolved: boolean) => void;
+  onDecide: (status: "open" | "accepted" | "dismissed", note?: string) => void;
 }) {
-  const resolved = !!f.resolved;
+  const status = f.status ?? "open";
+  const [note, setNote] = useState(f.answer ?? "");
+  const [editing, setEditing] = useState(false);
+  const savedNote = (f.answer ?? "").trim();
+
+  useEffect(() => setNote(f.answer ?? ""), [f.answer]);
+
+  // The decision form (Accept / Dismiss + note) — shown while undecided, or when
+  // editing an already-accepted finding.
+  const showForm = status === "open" || editing;
+
+  if (showForm) {
+    return (
+      <li className="text-sm">
+        <p className="text-foreground">{f.text}</p>
+        <div className="mt-1.5">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Add a note or correction (optional) — e.g. '6-inch slab, not 4'…"
+            rows={2}
+            className={NOTE_CLASS}
+          />
+          <div className="mt-1.5 flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                onDecide("accepted", note);
+                setEditing(false);
+              }}
+              className="glass-brand rounded-md px-3 py-1 font-medium text-foreground hover:bg-brand/30"
+            >
+              {status === "accepted" ? "Save" : "Accept"}
+            </button>
+            {status === "open" ? (
+              <button
+                type="button"
+                onClick={() => onDecide("dismissed", note)}
+                className="rounded-md border border-border px-3 py-1 text-muted hover:text-foreground"
+              >
+                Dismiss
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setNote(f.answer ?? "");
+                  setEditing(false);
+                }}
+                className="rounded-md px-2 py-1 text-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      </li>
+    );
+  }
+
+  if (status === "accepted") {
+    return (
+      <li className="text-sm">
+        <p className="text-foreground">{f.text}</p>
+        <div className="mt-1.5 flex items-start justify-between gap-3 rounded-md border border-green-500/20 bg-green-500/5 px-2.5 py-1.5">
+          <p className="text-sm text-green-200">
+            <span className="text-green-400">✓ Accepted</span>
+            {savedNote ? <span className="text-green-100"> — {savedNote}</span> : null}
+          </p>
+          <div className="flex shrink-0 gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="text-muted transition-colors hover:text-foreground"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecide("open")}
+              className="text-muted transition-colors hover:text-foreground"
+            >
+              Undo
+            </button>
+          </div>
+        </div>
+      </li>
+    );
+  }
+
+  // dismissed
   return (
-    <li className="flex items-start gap-2 text-sm">
-      <input
-        type="checkbox"
-        checked={resolved}
-        onChange={(e) => onToggle(e.target.checked)}
-        className="mt-1 h-3.5 w-3.5 shrink-0 accent-brand"
-      />
-      <span className={resolved ? "text-muted line-through" : "text-foreground"}>
-        {f.text}
+    <li className="flex items-start justify-between gap-3 text-sm">
+      <span className="text-muted line-through">{f.text}</span>
+      <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted">
+        Dismissed
+        <button
+          type="button"
+          onClick={() => onDecide("open")}
+          className="transition-colors hover:text-foreground"
+        >
+          Undo
+        </button>
       </span>
     </li>
   );
@@ -171,7 +285,7 @@ function QuestionRow({
             onChange={(e) => setValue(e.target.value)}
             placeholder="Your answer (e.g. '4-inch slab', 'walls are 9 ft', 'demo is in scope')…"
             rows={2}
-            className="w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+            className={NOTE_CLASS}
           />
           <div className="mt-1.5 flex items-center gap-2 text-xs">
             <button

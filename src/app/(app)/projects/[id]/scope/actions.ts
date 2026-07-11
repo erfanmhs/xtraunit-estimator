@@ -262,6 +262,31 @@ export async function setFindingResolved(
   return { ok: true };
 }
 
+// Accept / dismiss a finding (assumption, gap, exclusion). "accepted" keeps it
+// (optionally with a note/correction saved via answerFinding); "dismissed"
+// leaves it out; "open" is undecided.
+export async function setFindingStatus(
+  findingId: string,
+  status: "open" | "accepted" | "dismissed",
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error } = await supabase
+    .from("scope_findings")
+    .update({ status })
+    .eq("id", findingId);
+  if (error)
+    return {
+      ok: false,
+      error: "Could not save. (Has migration 0029 been run in Supabase?)",
+    };
+  return { ok: true };
+}
+
 // Correct a sheet's discipline (drives which sheets each CSI-division draft
 // pass reads). Persisted so the fix sticks across regenerates.
 export async function setSheetDiscipline(
