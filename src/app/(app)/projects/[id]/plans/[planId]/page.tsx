@@ -24,7 +24,7 @@ export default async function PlanViewerPage({
   const full = await supabase
     .from("sheets")
     .select(
-      "id,page_number,name,label,notes,scale_x,scale_y,scale_preset,ledger",
+      "id,page_number,name,label,notes,discipline,scale_x,scale_y,scale_preset,ledger",
     )
     .eq("plan_file_id", planId)
     .order("page_number", order);

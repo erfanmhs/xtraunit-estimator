@@ -155,19 +155,24 @@ export async function gatherBundle(
   const sheetDocs = allSheets
     .filter((s) => (s.extracted_text ?? "").trim().length > 0)
     .map((s) => {
-      // Prefer the stored discipline (a user correction, or what Prepare saved);
-      // fall back to deriving it so existing / un-prepared projects still route.
-      const discipline =
-        asDiscipline(s.discipline) ?? classifyDiscipline(s.name, s.label);
+      const stored = (s.discipline ?? "").trim();
+      const preset = asDiscipline(stored);
+      // A custom category (user-typed, not a built-in discipline) can't be
+      // routed to a specific trade — treat that sheet as core (always sent).
+      const isCustom = !preset && stored.length > 0;
+      // Prefer the stored preset discipline; else derive it so existing /
+      // un-prepared projects still route.
+      const discipline = preset ?? classifyDiscipline(s.name, s.label);
       const text = (s.extracted_text ?? "").trim();
       return {
         page_number: s.page_number,
         name: s.name,
         label: s.label,
         discipline,
-        // Table/schedule sheets are core too — their values must reach every
-        // trade that needs them, never be routed away.
+        // Custom-categorized, table/schedule, and core-discipline sheets all go
+        // to every trade — their values must never be routed away.
         is_core:
+          isCustom ||
           isCoreSheet(discipline, s.name, s.label, text) ||
           hasTableContent(text),
         text,

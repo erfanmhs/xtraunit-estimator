@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
+import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
 import type { PlanFile } from "@/types";
 
 // On-sheet takeoff legend placement (fractions of the page + a size multiplier).
@@ -29,6 +30,7 @@ type Sheet = {
   name?: string | null;
   label: string | null;
   notes: string | null;
+  discipline?: string | null;
   scale_x: number | null;
   scale_y: number | null;
   scale_preset: string | null;
@@ -439,6 +441,9 @@ export default function PlanViewer({
   const [sheetNames, setSheetNames] = useState<Record<string, string>>(() =>
     Object.fromEntries(sheets.map((s) => [s.id, s.name ?? ""])),
   );
+  const [disciplines, setDisciplines] = useState<Record<string, string>>(() =>
+    Object.fromEntries(sheets.map((s) => [s.id, s.discipline ?? ""])),
+  );
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -808,6 +813,35 @@ export default function PlanViewer({
       .update({ name: value.trim() || null })
       .eq("id", id);
   }
+  async function saveSheetDiscipline(id: string, value: string) {
+    setDisciplines((p) => ({ ...p, [id]: value }));
+    await supabase
+      .from("sheets")
+      .update({ discipline: value.trim() || null })
+      .eq("id", id);
+  }
+  function onPickDiscipline(id: string, value: string) {
+    if (value === "__add__") {
+      const custom = window
+        .prompt('Category for this sheet (e.g. "Pile schedule"):')
+        ?.trim();
+      if (custom) void saveSheetDiscipline(id, custom);
+      return;
+    }
+    void saveSheetDiscipline(id, value);
+  }
+  // The user's own categories (anything not one of the built-in disciplines),
+  // offered on every sheet so they're reusable.
+  const presetDisciplines = new Set(
+    DISCIPLINE_OPTIONS.map((o) => o.value as string),
+  );
+  const customCategories = [
+    ...new Set(
+      Object.values(disciplines)
+        .map((v) => v.trim())
+        .filter((v) => v && !presetDisciplines.has(v)),
+    ),
+  ];
 
   async function saveNotes(value: string) {
     if (!currentSheet) return;
@@ -2062,60 +2096,80 @@ export default function PlanViewer({
                         id: s.id,
                       });
                     }}
-                    className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition-colors ${
+                    className={`rounded-lg text-sm transition-colors ${
                       active
                         ? "glass-brand text-foreground"
                         : "text-muted hover:bg-white/5 hover:text-foreground"
                     }`}
                   >
-                    {editing ? (
-                      <input
-                        autoFocus
-                        defaultValue={sheetNames[s.id] ?? ""}
-                        placeholder={`Sheet ${s.page_number}`}
-                        onBlur={(e) => {
-                          saveSheetName(s.id, e.target.value);
-                          setEditingSheetId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            saveSheetName(
-                              s.id,
-                              (e.target as HTMLInputElement).value,
-                            );
+                    <div className="group flex items-center gap-1 px-2 py-1.5">
+                      {editing ? (
+                        <input
+                          autoFocus
+                          defaultValue={sheetNames[s.id] ?? ""}
+                          placeholder={`Sheet ${s.page_number}`}
+                          onBlur={(e) => {
+                            saveSheetName(s.id, e.target.value);
                             setEditingSheetId(null);
-                          } else if (e.key === "Escape") {
-                            setEditingSheetId(null);
-                          }
-                        }}
-                        className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-sm text-foreground focus:border-brand focus:outline-none"
-                      />
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setPageNum(s.page_number)}
-                          onDoubleClick={() => setEditingSheetId(s.id)}
-                          title="Click to open · double-click to rename"
-                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              saveSheetName(
+                                s.id,
+                                (e.target as HTMLInputElement).value,
+                              );
+                              setEditingSheetId(null);
+                            } else if (e.key === "Escape") {
+                              setEditingSheetId(null);
+                            }
+                          }}
+                          className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-sm text-foreground focus:border-brand focus:outline-none"
+                        />
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setPageNum(s.page_number)}
+                            onDoubleClick={() => setEditingSheetId(s.id)}
+                            title="Click to open · double-click to rename"
+                            className="min-w-0 flex-1 truncate text-left"
+                          >
+                            {sheetTitle(s)}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingSheetId(s.id)}
+                            title="Rename"
+                            className="shrink-0 rounded px-1 text-xs text-muted opacity-0 transition hover:text-brand-soft group-hover:opacity-100"
+                          >
+                            ✎
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {!editing ? (
+                      <div className="px-2 pb-1.5">
+                        <select
+                          value={disciplines[s.id] ?? ""}
+                          onChange={(e) => onPickDiscipline(s.id, e.target.value)}
+                          title="Sheet category (helps the AI read the right sheets)"
+                          className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-muted focus:border-brand focus:outline-none"
                         >
-                          <span className="truncate">{sheetTitle(s)}</span>
-                          {s.label ? (
-                            <span className="shrink-0 rounded bg-black/30 px-1.5 py-0.5 text-[10px] text-muted">
-                              {s.label}
-                            </span>
-                          ) : null}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingSheetId(s.id)}
-                          title="Rename"
-                          className="shrink-0 rounded px-1 text-xs text-muted opacity-0 transition hover:text-brand-soft group-hover:opacity-100"
-                        >
-                          ✎
-                        </button>
-                      </>
-                    )}
+                          <option value="">Uncategorized</option>
+                          {DISCIPLINE_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                          {customCategories.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                          <option value="__add__">＋ Add category…</option>
+                        </select>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
