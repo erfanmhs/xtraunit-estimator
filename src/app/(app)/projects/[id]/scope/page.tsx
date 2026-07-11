@@ -203,7 +203,7 @@ export default async function ScopePage({
           <ScopeCanvas projectId={id} initialItems={lineItems} />
         )}
 
-        <FindingsReview initialFindings={findingRows} />
+        <FindingsReview projectId={id} initialFindings={findingRows} />
       </div>
     </div>
   );

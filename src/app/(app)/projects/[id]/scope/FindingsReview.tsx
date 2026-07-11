@@ -8,8 +8,21 @@
  *    vague checkbox. A note on an accepted finding is fed into the next Generate,
  *    so a correction (e.g. "6-inch slab, not 4") actually changes the estimate.
  */
-import { useEffect, useState, useTransition } from "react";
-import { answerFinding, setFindingStatus } from "./actions";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
+import {
+  answerFinding,
+  setFindingStatus,
+  startApplyFindings,
+  getApplyRun,
+  type ScopeRun,
+} from "./actions";
 
 export type Finding = {
   id: string;
@@ -30,15 +43,76 @@ const FINDING_LABEL: Record<string, string> = {
 const ORDER = ["question", "gap", "assumption", "exclusion"];
 
 export default function FindingsReview({
+  projectId,
   initialFindings,
 }: {
+  projectId: string;
   initialFindings: Finding[];
 }) {
+  const router = useRouter();
   const [findings, setFindings] = useState<Finding[]>(initialFindings);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
+  // The "apply my responses to the scope" background job.
+  const [applyRun, setApplyRun] = useState<ScopeRun | null>(null);
+  const [applying, setApplying] = useState(false);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => setFindings(initialFindings), [initialFindings]);
+
+  const stopPolling = useCallback(() => {
+    if (timer.current) {
+      clearInterval(timer.current);
+      timer.current = null;
+    }
+  }, []);
+
+  const poll = useCallback(async () => {
+    const latest = await getApplyRun(projectId);
+    setApplyRun(latest);
+    if (!latest || latest.status !== "running") {
+      stopPolling();
+      if (latest?.status === "done") router.refresh();
+    }
+  }, [projectId, router, stopPolling]);
+
+  useEffect(() => {
+    if (applyRun?.status === "running" && !timer.current) {
+      timer.current = setInterval(poll, 2500);
+    }
+    return stopPolling;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyRun?.status]);
+
+  async function onApply() {
+    setApplying(true);
+    setError(null);
+    setApplyRun({
+      id: "pending",
+      status: "running",
+      stage: "Starting…",
+      progress: 2,
+      error: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const res = await startApplyFindings(projectId);
+    setApplying(false);
+    if (!res.ok) {
+      setApplyRun({
+        id: "err",
+        status: "error",
+        stage: null,
+        progress: 0,
+        error: res.error ?? "Could not apply your responses.",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      return;
+    }
+    poll();
+  }
 
   function patch(id: string, p: Partial<Finding>) {
     setFindings((prev) => prev.map((f) => (f.id === id ? { ...f, ...p } : f)));
@@ -47,7 +121,7 @@ export default function FindingsReview({
   function saveAnswer(id: string, answer: string) {
     const snapshot = findings;
     setError(null);
-    patch(id, { answer: answer.trim() || null, resolved: !!answer.trim() });
+    patch(id, { answer: answer.trim() || null });
     startTransition(async () => {
       const res = await answerFinding(id, answer);
       if (!res.ok) {
@@ -87,17 +161,46 @@ export default function FindingsReview({
   }
 
   if (!findings.length) return null;
-  const answeredCount = findings.filter(
-    (f) => f.kind === "question" && (f.answer ?? "").trim(),
+  // Responses the user has made but not yet applied to the scope.
+  const pendingCount = findings.filter(
+    (f) =>
+      !f.resolved &&
+      ((f.kind === "question" && (f.answer ?? "").trim()) ||
+        f.status === "accepted"),
   ).length;
+  const running = applyRun?.status === "running";
 
   return (
     <div className="mt-8">
       <h2 className="font-heading text-lg text-foreground">What to review</h2>
-      {answeredCount > 0 ? (
-        <p className="mt-1 text-xs text-muted">
-          {answeredCount} answer{answeredCount > 1 ? "s" : ""} saved — they&apos;ll
-          be used the next time you Generate.
+
+      {running ? (
+        <div className="mt-3 flex items-center gap-3 rounded-lg glass px-4 py-2.5 text-sm">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand" />
+          <span className="text-foreground">
+            {applyRun?.stage ?? "Applying your responses to the scope…"}
+          </span>
+        </div>
+      ) : pendingCount > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg glass px-4 py-2.5">
+          <span className="text-sm text-muted">
+            {pendingCount} response{pendingCount > 1 ? "s" : ""} ready to apply —
+            updates the scope directly, no full regenerate.
+          </span>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={applying}
+            className="glass-brand shrink-0 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
+          >
+            Apply to scope
+          </button>
+        </div>
+      ) : null}
+
+      {applyRun?.status === "error" && applyRun.error ? (
+        <p className="mt-2 rounded-lg border border-brand/40 bg-brand/10 px-4 py-2 text-sm text-brand-soft">
+          {applyRun.error}
         </p>
       ) : null}
       {error ? (
