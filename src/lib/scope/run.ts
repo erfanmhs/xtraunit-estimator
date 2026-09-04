@@ -186,9 +186,44 @@ export async function runScopeGeneration(opts: {
       }
     }
 
-    if (lineItems.length) {
+    // DE-DUPE. The delete above deliberately KEEPS lines the user confirmed or
+    // edited — but the fresh draft writes those same items again, so every
+    // confirmed line came back doubled on each regenerate (and inflated the
+    // bid). Skip any drafted line that matches a surviving line, and any
+    // repeat within this batch (two chunks can produce the same item).
+    const lineKey = (
+      division: string | null,
+      section: string | null,
+      description: string,
+    ) =>
+      `${(division ?? "").trim()}|${(section ?? "").trim()}|${description
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ")}`;
+
+    const { data: keptRows } = await sb
+      .from("line_items")
+      .select("division_code,section_code,description")
+      .eq("project_id", projectId);
+    const seenKeys = new Set(
+      (
+        (keptRows ?? []) as {
+          division_code: string | null;
+          section_code: string | null;
+          description: string | null;
+        }[]
+      ).map((r) => lineKey(r.division_code, r.section_code, r.description ?? "")),
+    );
+    const freshLines = lineItems.filter((li) => {
+      const k = lineKey(li.division_code, li.section_code, li.description);
+      if (seenKeys.has(k)) return false;
+      seenKeys.add(k);
+      return true;
+    });
+
+    if (freshLines.length) {
       await sb.from("line_items").insert(
-        lineItems.map((li, i) => ({
+        freshLines.map((li, i) => ({
           project_id: projectId,
           owner_id: userId,
           division_code: li.division_code,
