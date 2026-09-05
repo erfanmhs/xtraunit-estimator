@@ -30,6 +30,9 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Self-service sign-up. Set to "false" once partner accounts exist.
+      - key: NEXT_PUBLIC_ALLOW_SIGNUP
+        value: "true"
       # Error tracking (Sentry) — optional. Leave blank and nothing is sent.
       # See .env.local.example for what each one is.
       - key: SENTRY_DSN

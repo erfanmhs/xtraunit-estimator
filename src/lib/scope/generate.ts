@@ -22,6 +22,7 @@ import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
 import { taxonomyPromptText } from "./taxonomy";
 import { routedDisciplines } from "./routing";
+import { assertAiBudget, recordAiUsage } from "@/lib/ai-meter";
 
 // Anthropic's document-PDF limits. We stay safely under both, and only ever
 // send the specific image-only pages (not the whole plan file).
@@ -343,10 +344,13 @@ async function streamStructured(
     ReturnType<typeof getAnthropicClient>["beta"]["messages"]["stream"]
   >[0],
   signal?: AbortSignal,
+  what?: string,
 ): Promise<string> {
+  assertAiBudget(); // per-run dollar ceiling (ai-meter.ts)
   const client = getAnthropicClient();
   const stream = client.beta.messages.stream(params, { signal });
   const msg = await stream.finalMessage();
+  recordAiUsage(params.model, msg.usage, what);
   return textFromResponse(msg.content);
 }
 
@@ -446,6 +450,7 @@ export async function draftScope(
       ],
     },
     signal,
+    `draft ${trades.map((t) => t.split(" ")[0]).join(",") || "full"}`,
   );
   const draft = parseJson<{
     line_items: GeneratedLineItem[];
@@ -493,6 +498,7 @@ export async function findGaps(
       ],
     },
     signal,
+    "review",
   );
   const critique = parseJson<{ findings: GeneratedFinding[] }>(
     text,

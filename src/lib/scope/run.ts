@@ -23,6 +23,14 @@ import {
   type FindingResponse,
 } from "./applyFindings";
 import { log, timer } from "@/lib/log";
+import {
+  AiBudgetExceededError,
+  aiBudgetExhausted,
+  costLabel,
+  getAiMeter,
+  runWithAiBudget,
+  saveRunCost,
+} from "@/lib/ai-meter";
 
 // In-process registry of running jobs so a later request (the Cancel button)
 // can abort the AI stream immediately. Works because Next.js server actions and
@@ -55,8 +63,15 @@ export async function runScopeGeneration(opts: {
   token: string;
   runId: string;
   trades?: string[];
-}) {
+}): Promise<void> {
   const { projectId, userId, token, runId, trades = [] } = opts;
+  // Every AI call in this job reports to one dollar meter with a per-run
+  // ceiling (ai-meter.ts). Self-wrapping so a caller can't forget it.
+  if (!getAiMeter())
+    return runWithAiBudget({ label: `scope:${runId}` }, () =>
+      runScopeGeneration(opts),
+    );
+
   const sb = bgClient(token);
   const ac = new AbortController();
   controllers.set(runId, ac);
@@ -94,8 +109,16 @@ export async function runScopeGeneration(opts: {
     if (chunks.length) batches.push([chunks[0]]);
     for (let i = 1; i < chunks.length; i += 2) batches.push(chunks.slice(i, i + 2));
     let processed = 0;
+    // Set when the per-run dollar ceiling is reached mid-run: we stop drafting
+    // further groups, skip the review pass, and SAVE what was drafted — a
+    // partial scope with a clear message beats throwing the paid work away.
+    let budgetHit = false;
     for (const batch of batches) {
       stopIfCancelled();
+      if (aiBudgetExhausted()) {
+        budgetHit = true;
+        break;
+      }
       const codes = batch
         .flat()
         .map((t) => t.split(" ")[0])
@@ -117,6 +140,10 @@ export async function runScopeGeneration(opts: {
           const err = p.reason;
           if (ac.signal.aborted || (err instanceof Error && err.name === "AbortError"))
             throw new DOMException("Cancelled", "AbortError");
+          if (err instanceof AiBudgetExceededError) {
+            budgetHit = true;
+            continue; // not a failure of the AI — the ceiling; message below
+          }
           failedChunks++;
           if (!firstError) firstError = err instanceof Error ? err.message : String(err);
           log.warn("scope.chunk.failed", { runId, chunk: batch[j], err });
@@ -135,6 +162,7 @@ export async function runScopeGeneration(opts: {
     }
     // Only a total wipeout is a real failure; partial scope is still useful.
     if (!lineItems.length) {
+      if (budgetHit) throw new AiBudgetExceededError(getAiMeter()!.spentUsd, getAiMeter()!.budgetUsd);
       const detail = firstError ? ` — ${firstError}` : "";
       throw new Error(
         `The AI couldn't draft any divisions this time (${failedChunks}/${chunks.length} parts failed${detail}). Please click Generate again; if it keeps failing, send me this exact message.`,
@@ -142,14 +170,16 @@ export async function runScopeGeneration(opts: {
     }
 
     stopIfCancelled();
-    await update({ stage: "Reviewing for gaps & assumptions…", progress: 70 });
-    const gapFindings = await findGaps(
-      bundle,
-      lineItems,
-      fileIds,
-      trades,
-      ac.signal,
-    );
+    let gapFindings: GeneratedFinding[] = [];
+    if (!budgetHit && !aiBudgetExhausted()) {
+      await update({ stage: "Reviewing for gaps & assumptions…", progress: 70 });
+      try {
+        gapFindings = await findGaps(bundle, lineItems, fileIds, trades, ac.signal);
+      } catch (err) {
+        if (!(err instanceof AiBudgetExceededError)) throw err;
+        budgetHit = true; // the draft used the whole budget — save it without a review
+      }
+    }
 
     stopIfCancelled();
     await update({ stage: "Saving the scope…", progress: 90 });
@@ -243,14 +273,19 @@ export async function runScopeGeneration(opts: {
       }
     }
 
-    await update({
-      status: "done",
-      stage:
-        failedChunks > 0
-          ? `Done — but ${failedChunks} division group${failedChunks > 1 ? "s" : ""} didn't generate. Click Regenerate to fill them in.`
-          : "Done",
-      progress: 100,
-    });
+    const meter = getAiMeter();
+    const skipped = chunks.length - processed;
+    let stage = "Done";
+    if (budgetHit) {
+      stage = `Stopped early to protect the AI budget — reached the $${meter?.budgetUsd ?? 0} cap per run${
+        skipped > 0 ? ` with ${skipped} division group${skipped > 1 ? "s" : ""} still to draft` : " before the review pass"
+      }. What was drafted is saved. Regenerate the missing trades one at a time, or raise AI_JOB_BUDGET_USD if this size is expected.`;
+    } else if (failedChunks > 0) {
+      stage = `Done — but ${failedChunks} division group${failedChunks > 1 ? "s" : ""} didn't generate. Click Regenerate to fill them in.`;
+    }
+    await update({ status: "done", stage: stage + costLabel(meter), progress: 100 });
+    if (budgetHit)
+      log.warn("scope.run.budget_hit", { runId, projectId, spentUsd: meter?.spentUsd, skipped });
     log.info("scope.run.done", {
       runId,
       projectId,
@@ -259,6 +294,7 @@ export async function runScopeGeneration(opts: {
       findings: allFindings.length,
       failedChunks,
       chunks: chunks.length,
+      costUsd: meter?.spentUsd,
     });
   } catch (e) {
     const aborted =
@@ -282,6 +318,7 @@ export async function runScopeGeneration(opts: {
     }
   } finally {
     controllers.delete(runId);
+    await saveRunCost(sb, runId);
     // Tidy up the uploaded PDFs (storage is free; just keeping it clean).
     if (fileIds.length) await deletePlanFiles(fileIds);
   }
@@ -297,8 +334,13 @@ export async function runApplyFindings(opts: {
   userId: string;
   token: string;
   runId: string;
-}) {
+}): Promise<void> {
   const { projectId, userId, token, runId } = opts;
+  if (!getAiMeter())
+    return runWithAiBudget({ label: `apply:${runId}` }, () =>
+      runApplyFindings(opts),
+    );
+
   const sb = bgClient(token);
   const ac = new AbortController();
   controllers.set(runId, ac);
@@ -465,12 +507,19 @@ export async function runApplyFindings(opts: {
       changes.exclusions.filter((id) => validIds.has(id)).length;
     await update({
       status: "done",
-      stage: n
-        ? `Applied — ${n} change${n > 1 ? "s" : ""} to the scope.`
-        : "No scope changes were needed.",
+      stage:
+        (n
+          ? `Applied — ${n} change${n > 1 ? "s" : ""} to the scope.`
+          : "No scope changes were needed.") + costLabel(),
       progress: 100,
     });
-    log.info("apply.run.done", { runId, projectId, ms: elapsed(), changes: n });
+    log.info("apply.run.done", {
+      runId,
+      projectId,
+      ms: elapsed(),
+      changes: n,
+      costUsd: getAiMeter()?.spentUsd,
+    });
   } catch (e) {
     const aborted =
       ac.signal.aborted || (e instanceof Error && e.name === "AbortError");
@@ -493,5 +542,6 @@ export async function runApplyFindings(opts: {
     }
   } finally {
     controllers.delete(runId);
+    await saveRunCost(sb, runId);
   }
 }

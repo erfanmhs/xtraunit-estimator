@@ -3,12 +3,13 @@ import "server-only";
 /**
  * The guard on the Anthropic bill.
  *
- * Every action that spends AI tokens calls enforceAiLimit() first. It counts
- * the user's runs in a rolling 24-hour and 30-day window and refuses if either
- * cap is hit — so a runaway loop, an over-eager user, or a stranger who signed
- * up can't quietly rack up API cost. Caps are generous for real solo use and
- * tunable per host via env (AI_DAILY_LIMIT / AI_MONTHLY_LIMIT; set 0 to disable
- * a window).
+ * Every action that spends AI tokens calls enforceAiLimit() first. It applies
+ * a short burst limit (rate-limit.ts), then counts the user's runs in a
+ * rolling 24-hour and 30-day window and refuses if either cap is hit — so a
+ * runaway loop, an over-eager user, or a stranger who signed up can't quietly
+ * rack up API cost. Caps are generous for real solo use and tunable per host
+ * via env (AI_DAILY_LIMIT / AI_MONTHLY_LIMIT; set 0 to disable a window).
+ * The dollar ceiling INSIDE one run is a separate guard: ai-meter.ts.
  *
  * FAILS OPEN by design: if the ai_usage table is missing (migration 0027 not
  * run yet) or the DB hiccups, the user is NOT blocked — the cap simply isn't
@@ -16,6 +17,7 @@ import "server-only";
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { log } from "@/lib/log";
+import { rateLimit, LIMITS } from "@/lib/rate-limit";
 
 const DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT ?? 60);
 const MONTHLY_LIMIT = Number(process.env.AI_MONTHLY_LIMIT ?? 600);
@@ -30,6 +32,11 @@ export async function enforceAiLimit(
 ): Promise<LimitResult> {
   const now = Date.now();
   const since = (ms: number) => new Date(now - ms).toISOString();
+
+  // Burst guard first (in-memory, instant): stops a stuck retry loop or a
+  // script hammering Generate long before the daily count would.
+  const burst = rateLimit(`ai:${userId}`, LIMITS.aiBurst, "AI runs");
+  if (!burst.ok) return { ok: false, error: burst.error };
 
   try {
     const countSince = async (cutoff: string): Promise<number> => {

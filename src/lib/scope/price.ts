@@ -16,6 +16,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { findBestMatch } from "./match";
 import { log, timer } from "@/lib/log";
+import {
+  assertAiBudget,
+  recordAiUsage,
+  runWithAiBudget,
+  getAiMeter,
+  costLabel,
+  saveRunCost,
+} from "@/lib/ai-meter";
 
 import { AI_MODELS } from "@/config/ai";
 
@@ -151,6 +159,7 @@ export async function suggestPrices(opts: {
   signal?: AbortSignal;
 }): Promise<SuggestedPrice[]> {
   const { project, clarifications, lines, history, signal } = opts;
+  assertAiBudget();
   const client = getAnthropicClient();
 
   // XtraUnit's standard direct unit prices — the AI applies these when a line
@@ -250,6 +259,7 @@ ${linesText(lines)}`;
     { signal },
   );
   const msg = await stream.finalMessage();
+  recordAiUsage(PRICING_MODEL, msg.usage, "pricing");
   const textBlock = msg.content.find((b) => b.type === "text");
   const text =
     textBlock && "text" in textBlock ? (textBlock.text as string) : null;
@@ -290,8 +300,14 @@ export async function runPricingSuggestion(opts: {
   projectId: string;
   token: string;
   runId: string;
-}) {
+}): Promise<void> {
   const { projectId, token, runId } = opts;
+  // One dollar meter per run with a ceiling (ai-meter.ts); self-wrapping.
+  if (!getAiMeter())
+    return runWithAiBudget({ label: `pricing:${runId}` }, () =>
+      runPricingSuggestion(opts),
+    );
+
   const sb = bgClient(token);
   const ac = new AbortController();
   controllers.set(runId, ac);
@@ -536,13 +552,14 @@ export async function runPricingSuggestion(opts: {
       );
     }
 
-    await update({ status: "done", stage: "Done", progress: 100 });
+    await update({ status: "done", stage: "Done" + costLabel(), progress: 100 });
     log.info("pricing.run.done", {
       runId,
       projectId,
       ms: elapsed(),
       matched: matchedIds.size,
       aiPriced: valid.length,
+      costUsd: getAiMeter()?.spentUsd,
     });
   } catch (e) {
     const aborted =
@@ -565,5 +582,6 @@ export async function runPricingSuggestion(opts: {
     }
   } finally {
     controllers.delete(runId);
+    await saveRunCost(sb, runId);
   }
 }
