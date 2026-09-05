@@ -333,7 +333,7 @@ function Row({
 
   return (
     <div className={`group py-1 ${excluded ? "opacity-50" : ""}`}>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -365,10 +365,12 @@ function Row({
         <span className="w-24 shrink-0 text-right text-sm tabular-nums text-muted">
           {li.quantity != null ? `${li.quantity} ${li.unit ?? ""}` : "—"}
         </span>
-        {/* Actions: shown on hover / keyboard focus / when expanded (touch). */}
+        {/* Actions: desktop = fixed column, shown on hover / keyboard focus /
+            when expanded. Phone (no hover) = wraps under the row, only when
+            expanded, so the description keeps its width. */}
         <div
-          className={`flex w-40 shrink-0 items-center justify-end gap-0.5 text-[11px] transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 ${
-            open ? "opacity-100" : "opacity-0"
+          className={`basis-full items-center justify-end gap-0.5 text-[11px] transition-opacity sm:w-40 sm:basis-auto sm:shrink-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 ${
+            open ? "flex" : "hidden sm:flex sm:opacity-0"
           }`}
         >
           {excluded ? (
