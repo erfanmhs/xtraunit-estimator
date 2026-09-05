@@ -210,7 +210,7 @@ export default function ScopeCanvas({
         const isCollapsed = collapsed.has(g.key);
         return (
         <section key={g.key} className="glass rounded-xl p-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <button
               type="button"
               onClick={() => toggleCollapse(g.key)}

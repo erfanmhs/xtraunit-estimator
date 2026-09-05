@@ -425,6 +425,28 @@ export default function PlanViewer({
   const [panelOpen, setPanelOpen] = useState(true);
   const [panelW, setPanelW] = useState(268);
   const [notesOpen, setNotesOpen] = useState(false);
+
+  // Narrow windows (tablet, half-screen laptop): start with both side panels
+  // collapsed so the DRAWING gets the width, and collapse again if the window
+  // is shrunk past the threshold. The user can still open them by hand.
+  useEffect(() => {
+    const NARROW = 1100;
+    let wasNarrow = window.innerWidth < NARROW;
+    if (wasNarrow) {
+      setNavOpen(false);
+      setPanelOpen(false);
+    }
+    const onResize = () => {
+      const narrow = window.innerWidth < NARROW;
+      if (narrow && !wasNarrow) {
+        setNavOpen(false);
+        setPanelOpen(false);
+      }
+      wasNarrow = narrow;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   // Export-to-PDF dialog state.
   const [exportOpen, setExportOpen] = useState(false);
@@ -2180,22 +2202,23 @@ export default function PlanViewer({
             onPointerDown={(e) => startResize("left", e)}
           />
         </>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setNavOpen(true)}
-          title="Show sheets"
-          className="glass-strong absolute left-2 top-2 z-20 rounded-md px-2.5 py-1 text-sm text-foreground"
-        >
-          » Sheets
-        </button>
-      )}
+      ) : null}
 
       {/* Center */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="glass-strong z-10 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
           <div className="flex items-center gap-2 text-muted">
+            {!navOpen ? (
+              <button
+                type="button"
+                onClick={() => setNavOpen(true)}
+                title="Show sheets"
+                className="rounded-md border border-border px-2.5 py-1 text-foreground hover:border-brand"
+              >
+                » Sheets
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setPageNum((p) => Math.max(1, p - 1))}
@@ -2236,13 +2259,14 @@ export default function PlanViewer({
             </button>
           </div>
 
-          <div className="flex items-center gap-1">
+          {/* Scrolls sideways on narrow screens instead of clipping tools off. */}
+          <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto">
             {TOOLS.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => selectTool(t.id)}
-                className={`rounded-md border px-3 py-1 transition-colors ${
+                className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1 transition-colors ${
                   tool === t.id
                     ? "border-brand bg-brand/15 text-foreground"
                     : "border-border text-muted hover:border-brand"
@@ -2325,6 +2349,16 @@ export default function PlanViewer({
             >
               Export PDF
             </button>
+            {!panelOpen ? (
+              <button
+                type="button"
+                onClick={() => setPanelOpen(true)}
+                title="Show measurements"
+                className="rounded-md border border-border px-2.5 py-1 text-foreground hover:border-brand"
+              >
+                « Panel
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -3440,16 +3474,7 @@ export default function PlanViewer({
             )}
           </aside>
         </>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setPanelOpen(true)}
-          title="Show measurements"
-          className="glass-strong absolute right-2 top-2 z-20 rounded-md px-2.5 py-1 text-sm text-foreground"
-        >
-          « Panel
-        </button>
-      )}
+      ) : null}
 
       {/* Block measuring until a scale is set */}
       {needsScale ? (
