@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
 import type { Project, ProjectStatus } from "@/types";
 
@@ -28,18 +29,19 @@ export default async function ProjectsPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-border px-8 py-5">
-        <div>
-          <h1 className="font-heading text-2xl text-foreground">Projects</h1>
-          <p className="text-sm text-muted">Your jobs to bid and estimate.</p>
-        </div>
-        <Link
-          href="/projects/new"
-          className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-strong"
-        >
-          + New project
-        </Link>
-      </header>
+      <PageHeader
+        className="border-b border-border px-8 py-5"
+        title="Projects"
+        subtitle="Your jobs to bid and estimate."
+        action={
+          <Link
+            href="/projects/new"
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-strong"
+          >
+            + New project
+          </Link>
+        }
+      />
 
       <div className="p-8">
         {projects.length === 0 ? (

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
 import { getScopeRun } from "./actions";
 import GeneratePanel from "./GeneratePanel";
@@ -175,32 +175,25 @@ export default async function ScopePage({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <Link
-              href={`/projects/${id}`}
-              className="text-xs text-muted transition-colors hover:text-brand-soft"
-            >
-              ← Back to project
-            </Link>
-            <h1 className="mt-1 font-heading text-2xl text-foreground">
-              Scope of Work
-            </h1>
-            <p className="text-sm text-muted">
+        <PageHeader
+          back={{ href: `/projects/${id}`, label: "Back to project" }}
+          title="Scope of Work"
+          subtitle={
+            <>
               {project?.name ?? "Project"} · {lineItems.length} line items ·{" "}
               {measurementCount ?? 0} measurements used
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            <NextStep href={`/projects/${id}/pricing`} label="Pricing" />
+            </>
+          }
+          action={<NextStep href={`/projects/${id}/pricing`} label="Pricing" />}
+          controls={
             <GeneratePanel
               projectId={id}
               initialRun={initialRun}
               hasScope={lineItems.length > 0}
               initialTrades={genTrades}
             />
-          </div>
-        </div>
+          }
+        />
 
         {error ? (
           <p className="mt-4 rounded-lg border border-brand/40 bg-brand/10 px-4 py-2 text-sm text-brand-soft">

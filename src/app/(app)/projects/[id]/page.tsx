@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { deleteProject } from "../actions";
+import PageHeader from "@/components/PageHeader";
+import OverflowMenu from "@/components/OverflowMenu";
+import DeleteProjectItem from "./DeleteProjectItem";
 import PlanManager from "./PlanManager";
 import type { PlanFile, Project } from "@/types";
 
@@ -32,31 +34,21 @@ export default async function ProjectDetailPage({
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="flex items-start justify-between gap-4 border-b border-border px-8 py-5">
-        <div className="flex flex-col gap-1">
-          <Link
-            href="/projects"
-            className="text-xs text-muted transition-colors hover:text-brand-soft"
-          >
-            ← All projects
-          </Link>
-          <h1 className="font-heading text-2xl text-foreground">{project.name}</h1>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
-            {project.client_name ? <span>{project.client_name}</span> : null}
-            {project.address ? <span>{project.address}</span> : null}
-            {project.project_type ? <span>{project.project_type}</span> : null}
-          </div>
-        </div>
-        <form action={deleteProject}>
-          <input type="hidden" name="id" value={project.id} />
-          <button
-            type="submit"
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:border-brand hover:text-brand-soft"
-          >
-            Delete
-          </button>
-        </form>
-      </header>
+      <PageHeader
+        className="border-b border-border px-8 py-5"
+        back={{ href: "/projects", label: "All projects" }}
+        title={project.name}
+        subtitle={
+          [project.client_name, project.address, project.project_type]
+            .filter(Boolean)
+            .join(" · ") || null
+        }
+        menu={
+          <OverflowMenu>
+            <DeleteProjectItem id={project.id} name={project.name} />
+          </OverflowMenu>
+        }
+      />
 
       <div className="flex flex-col gap-6 p-8">
         {project.notes ? (

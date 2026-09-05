@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import { createProject } from "../actions";
 
 const FIELD =
@@ -14,12 +15,11 @@ export default async function NewProjectPage({
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="border-b border-border px-8 py-5">
-        <h1 className="font-heading text-2xl text-foreground">New Project</h1>
-        <p className="text-sm text-muted">
-          The basics now — plans, takeoff, and pricing come next.
-        </p>
-      </header>
+      <PageHeader
+        className="border-b border-border px-8 py-5"
+        title="New Project"
+        subtitle="The basics now — plans, takeoff, and pricing come next."
+      />
 
       <div className="p-8">
         <form

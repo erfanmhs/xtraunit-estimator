@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import PageHeader from "@/components/PageHeader";
 import { type CostEntry } from "./CostDbBrowser";
 import CostDatabaseTabs from "./CostDatabaseTabs";
 import type {
@@ -136,11 +137,10 @@ export default async function CostDatabasePage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-6">
-        <h1 className="font-heading text-2xl text-foreground">Cost Database</h1>
-        <p className="text-sm text-muted">
-          XtraUnit&apos;s cost knowledge — your confirmed price history, your cost
-          items catalog, and $/SF benchmarks. All of it feeds the pricing AI.
-        </p>
+        <PageHeader
+          title="Cost Database"
+          subtitle="XtraUnit's cost knowledge — your confirmed price history, your cost items catalog, and $/SF benchmarks. All of it feeds the pricing AI."
+        />
         <CostDatabaseTabs
           entries={entries}
           projectNames={projectNames}

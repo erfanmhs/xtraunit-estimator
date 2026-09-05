@@ -1,4 +1,4 @@
-import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
 import ProposalView, {
   type CompanyInfo,
@@ -105,19 +105,16 @@ export default async function ProposalPage({
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl px-6 py-6">
         <div className="print-hide">
-          <Link
-            href={`/projects/${id}`}
-            className="text-xs text-muted transition-colors hover:text-brand-soft"
-          >
-            ← Back to project
-          </Link>
-          <h1 className="mt-1 font-heading text-2xl text-foreground">
-            Proposal
-          </h1>
-          <p className="text-sm text-muted">
-            {project?.name ?? "Project"} · the client-ready document — letter,
-            cost summary, assumptions &amp; exclusions
-          </p>
+          <PageHeader
+            back={{ href: `/projects/${id}`, label: "Back to project" }}
+            title="Proposal"
+            subtitle={
+              <>
+                {project?.name ?? "Project"} · the client-ready document — letter,
+                cost summary, assumptions &amp; exclusions
+              </>
+            }
+          />
         </div>
 
         {migrationMissing ? (

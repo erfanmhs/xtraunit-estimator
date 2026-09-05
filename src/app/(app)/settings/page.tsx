@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import PageHeader from "@/components/PageHeader";
 import SettingsForm from "./SettingsForm";
 import type { CompanySettings } from "./actions";
 import { resolveProfile } from "@/lib/proposal/profile";
@@ -32,11 +33,10 @@ export default async function SettingsPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-6">
-        <h1 className="font-heading text-2xl text-foreground">Settings</h1>
-        <p className="text-sm text-muted">
-          Company identity for proposals, and the markup defaults every new
-          estimate starts from.
-        </p>
+        <PageHeader
+          title="Settings"
+          subtitle="Company identity for proposals, and the markup defaults every new estimate starts from."
+        />
         <SettingsForm
           initial={initial}
           profile={profile}
