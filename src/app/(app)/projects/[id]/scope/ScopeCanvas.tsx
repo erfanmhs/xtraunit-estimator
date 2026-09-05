@@ -318,95 +318,122 @@ function Row({
 }) {
   const excluded = li.status === "excluded";
   const confirmed = li.status === "confirmed";
+  // One compact line per item; the math, source and assumptions live behind a
+  // ▸ expand. Badges show only when they carry information (low confidence).
+  const [open, setOpen] = useState(false);
+  const hasDetail = !!(
+    li.evidence?.formula ||
+    li.evidence?.assumptions?.length ||
+    li.source_kind ||
+    li.confidence
+  );
+  const lowConf = li.confidence === "low";
+  const actionBtn =
+    "rounded px-1.5 py-0.5 transition-colors text-muted hover:bg-white/5 hover:text-foreground";
 
   return (
-    <div className={`group py-2.5 ${excluded ? "opacity-50" : ""}`}>
-      <div className="flex items-start justify-between gap-3">
+    <div className={`group py-1 ${excluded ? "opacity-50" : ""}`}>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={open ? "Hide details" : "Show details"}
+          className={`w-4 shrink-0 text-center text-[11px] text-muted transition-colors hover:text-foreground ${
+            hasDetail ? "" : "invisible"
+          }`}
+        >
+          {open ? "▾" : "▸"}
+        </button>
         <p
           onClick={excluded ? undefined : onEdit}
           title={excluded ? undefined : "Click to edit"}
-          className={`text-sm text-foreground ${excluded ? "line-through" : "cursor-text hover:text-brand-soft"}`}
+          className={`min-w-0 flex-1 text-sm text-foreground ${
+            excluded ? "line-through" : "cursor-text hover:text-brand-soft"
+          }`}
         >
           {confirmed ? <span className="mr-1 text-green-400">✓</span> : null}
           {li.description}
         </p>
-        <span className="shrink-0 whitespace-nowrap text-sm text-muted">
+        {lowConf && !excluded ? (
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${CONF.low ?? "bg-white/10 text-muted"}`}
+          >
+            low confidence
+          </span>
+        ) : null}
+        <span className="w-24 shrink-0 text-right text-sm tabular-nums text-muted">
           {li.quantity != null ? `${li.quantity} ${li.unit ?? ""}` : "—"}
         </span>
+        {/* Actions: shown on hover / keyboard focus / when expanded (touch). */}
+        <div
+          className={`flex w-40 shrink-0 items-center justify-end gap-0.5 text-[11px] transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 ${
+            open ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          {excluded ? (
+            <>
+              <button type="button" onClick={onRestore} className={actionBtn}>
+                Restore
+              </button>
+              <button
+                type="button"
+                onClick={onDelete}
+                className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-brand/15 hover:text-brand-soft"
+              >
+                Delete
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onConfirm}
+                className={`rounded px-1.5 py-0.5 transition-colors ${
+                  confirmed
+                    ? "text-green-400 hover:bg-green-500/10 hover:text-green-300"
+                    : "text-muted hover:bg-white/5 hover:text-foreground"
+                }`}
+              >
+                {confirmed ? "Undo" : "Confirm"}
+              </button>
+              <button type="button" onClick={onEdit} className={actionBtn}>
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={onExclude}
+                className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-brand/15 hover:text-brand-soft"
+              >
+                Exclude
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-        {li.confidence ? (
-          <span
-            className={`rounded px-1.5 py-0.5 ${CONF[li.confidence] ?? "bg-white/10 text-muted"}`}
-          >
-            {li.confidence} confidence
-          </span>
-        ) : null}
-        {li.source_kind ? (
-          <span className="rounded bg-white/10 px-1.5 py-0.5 text-muted">
-            {li.source_kind}
-          </span>
-        ) : null}
-        {li.evidence?.formula ? (
-          <span className="text-muted">· {li.evidence.formula}</span>
-        ) : null}
-      </div>
-      {li.evidence?.assumptions?.length ? (
-        <p className="mt-0.5 text-[11px] text-muted/80">
-          Assumes: {li.evidence.assumptions.join("; ")}
-        </p>
+      {open ? (
+        <div className="ml-6 mt-1 space-y-0.5 text-[11px] text-muted">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {li.confidence ? (
+              <span
+                className={`rounded px-1.5 py-0.5 ${CONF[li.confidence] ?? "bg-white/10 text-muted"}`}
+              >
+                {li.confidence} confidence
+              </span>
+            ) : null}
+            {li.source_kind ? (
+              <span className="rounded bg-white/10 px-1.5 py-0.5">{li.source_kind}</span>
+            ) : null}
+            {li.evidence?.formula ? <span>· {li.evidence.formula}</span> : null}
+          </div>
+          {li.evidence?.assumptions?.length ? (
+            <p className="text-muted/80">
+              Assumes: {li.evidence.assumptions.join("; ")}
+            </p>
+          ) : null}
+        </div>
       ) : null}
-
-      {/* Controls */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]">
-        {excluded ? (
-          <>
-            <button
-              type="button"
-              onClick={onRestore}
-              className="text-muted transition-colors hover:text-foreground"
-            >
-              Restore
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              className="text-muted transition-colors hover:text-brand-soft"
-            >
-              Delete permanently
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={onConfirm}
-              className={`transition-colors ${
-                confirmed
-                  ? "text-green-400 hover:text-green-300"
-                  : "text-muted hover:text-foreground"
-              }`}
-            >
-              {confirmed ? "Confirmed — undo" : "Confirm"}
-            </button>
-            <button
-              type="button"
-              onClick={onEdit}
-              className="text-muted transition-colors hover:text-foreground"
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={onExclude}
-              className="text-muted transition-colors hover:text-brand-soft"
-            >
-              Exclude
-            </button>
-          </>
-        )}
-      </div>
     </div>
   );
 }
