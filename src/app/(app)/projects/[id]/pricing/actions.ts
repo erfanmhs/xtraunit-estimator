@@ -12,6 +12,7 @@ import { runPricingSuggestion, abortPricingRun } from "@/lib/scope/price";
 import { readSubQuote, type QuoteExtraction } from "@/lib/scope/subquote";
 import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
 import { enforceAiLimit } from "@/lib/ai-usage";
+import { log } from "@/lib/log";
 import type { ScopeRun } from "../scope/actions";
 
 type ActionResult = { ok: boolean; error?: string };
@@ -336,6 +337,7 @@ export async function readQuoteDoc(
     const extraction = await readSubQuote({ base64, mime, fileName });
     return { ok: true, extraction };
   } catch (e) {
+    log.error("subquote.read.failed", { userId: user.id, fileName, mime, err: e });
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Could not read the quote.",

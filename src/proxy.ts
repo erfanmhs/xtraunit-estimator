@@ -6,6 +6,8 @@
  *
  * The matcher below skips Next.js internals and static files (images, the
  * logo, favicon) so those load on the login page without requiring a login.
+ * It also skips /monitoring — the Sentry tunnel that browser error reports
+ * are posted through — so a crash on the login page can still be reported.
  */
 import { type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
@@ -16,6 +18,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|favicon.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|monitoring|favicon.ico|favicon.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

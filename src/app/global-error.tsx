@@ -5,9 +5,10 @@
  * itself throws — so it replaces <html>/<body> and can't rely on the normal
  * stylesheet loading. Brand colors are therefore inlined here on purpose.
  *
- * When error tracking (Sentry) is added, report from the effect below.
+ * Reports to Sentry from the effect below (no-op until the DSN is set).
  */
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 
 export default function GlobalError({
   error,
@@ -17,7 +18,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // TODO(error-tracking): Sentry.captureException(error)
+    Sentry.captureException(error);
     console.error(error);
   }, [error]);
 

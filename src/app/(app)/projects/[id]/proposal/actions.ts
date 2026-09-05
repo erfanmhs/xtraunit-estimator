@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { enforceAiLimit } from "@/lib/ai-usage";
+import { log } from "@/lib/log";
 
 import { AI_MODELS } from "@/config/ai";
 
@@ -146,7 +147,8 @@ No signatures, no addresses, no markdown — body text only.`;
     if (!text) return { ok: false, error: "The AI returned nothing — try again." };
     const parsed = JSON.parse(text) as ProposalNarrative;
     return { ok: true, narrative: parsed };
-  } catch {
+  } catch (e) {
+    log.error("proposal.narrative.failed", { projectId, userId: user.id, err: e });
     return { ok: false, error: "Could not draft the letter — try again." };
   }
 }

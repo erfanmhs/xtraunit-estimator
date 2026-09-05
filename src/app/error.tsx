@@ -5,11 +5,12 @@
  * crash screen when a Server/Client Component under the root layout throws.
  * "reset" re-renders the segment so the user can retry without a full reload.
  *
- * When error tracking (Sentry) is added, report the error from the effect below
- * — that's the one place every unhandled page error passes through.
+ * Every unhandled page error passes through the effect below, which reports it
+ * to Sentry (a no-op until NEXT_PUBLIC_SENTRY_DSN is set).
  */
 import { useEffect } from "react";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 
 export default function Error({
   error,
@@ -19,8 +20,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Until Sentry is wired up, at least leave a trail in the server/browser log.
-    // TODO(error-tracking): Sentry.captureException(error)
+    Sentry.captureException(error);
     console.error(error);
   }, [error]);
 

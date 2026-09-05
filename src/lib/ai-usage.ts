@@ -15,6 +15,7 @@ import "server-only";
  * enforced until the migration is applied. Running 0027 is what turns it on.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { log } from "@/lib/log";
 
 const DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT ?? 60);
 const MONTHLY_LIMIT = Number(process.env.AI_MONTHLY_LIMIT ?? 600);
@@ -41,28 +42,32 @@ export async function enforceAiLimit(
       return count ?? 0;
     };
 
-    if (DAILY_LIMIT > 0 && (await countSince(since(DAY_MS))) >= DAILY_LIMIT)
+    if (DAILY_LIMIT > 0 && (await countSince(since(DAY_MS))) >= DAILY_LIMIT) {
+      log.warn("ai.cap.daily", { userId, kind, limit: DAILY_LIMIT });
       return {
         ok: false,
         error: `You've reached today's AI limit (${DAILY_LIMIT} runs). This is a safety cap on AI cost — it frees up over the next 24 hours, and the limit can be raised if this is expected usage.`,
       };
+    }
 
     if (
       MONTHLY_LIMIT > 0 &&
       (await countSince(since(30 * DAY_MS))) >= MONTHLY_LIMIT
-    )
+    ) {
+      log.warn("ai.cap.monthly", { userId, kind, limit: MONTHLY_LIMIT });
       return {
         ok: false,
         error: `You've reached this month's AI limit (${MONTHLY_LIMIT} runs). The limit can be raised if this is expected usage.`,
       };
+    }
   } catch (e) {
     // Table missing (migration 0027 pending) or a transient DB error → fail open.
-    console.error("ai-usage: cap check skipped (is migration 0027 run?):", e);
+    log.warn("ai.cap.skipped", { userId, kind, note: "is migration 0027 run?", err: e });
     return { ok: true };
   }
 
   // Record this run (best-effort — a failed insert must not block the work).
   const { error } = await sb.from("ai_usage").insert({ owner_id: userId, kind });
-  if (error) console.error("ai-usage: could not record run:", error);
+  if (error) log.warn("ai.usage.record_failed", { userId, kind, err: error });
   return { ok: true };
 }

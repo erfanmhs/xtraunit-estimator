@@ -7,6 +7,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { enforceAiLimit } from "@/lib/ai-usage";
+import { log } from "@/lib/log";
 import { AI_MODELS } from "@/config/ai";
 import {
   DEFAULT_PROFILE,
@@ -191,7 +192,8 @@ Return JSON with exactly these fields:
         closing: parsed.closing?.trim() || DEFAULT_PROFILE.closing,
       },
     };
-  } catch {
+  } catch (e) {
+    log.error("profile.draft.failed", { userId: user.id, err: e });
     return { ok: false, error: "Could not draft — try again." };
   }
 }

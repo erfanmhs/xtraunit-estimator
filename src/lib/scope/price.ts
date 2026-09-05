@@ -15,6 +15,7 @@ import { createClient as createSb } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { findBestMatch } from "./match";
+import { log, timer } from "@/lib/log";
 
 import { AI_MODELS } from "@/config/ai";
 
@@ -300,6 +301,9 @@ export async function runPricingSuggestion(opts: {
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", runId);
 
+  const elapsed = timer();
+  log.info("pricing.run.start", { runId, projectId });
+
   try {
     await update({ stage: "Gathering scope & your cost history…", progress: 10 });
 
@@ -468,6 +472,13 @@ export async function runPricingSuggestion(opts: {
         stage: `Done — all ${matchedIds.size} lines matched from your price history (no AI needed).`,
         progress: 100,
       });
+      log.info("pricing.run.done", {
+        runId,
+        projectId,
+        ms: elapsed(),
+        matched: matchedIds.size,
+        aiPriced: 0,
+      });
       return;
     }
 
@@ -526,10 +537,18 @@ export async function runPricingSuggestion(opts: {
     }
 
     await update({ status: "done", stage: "Done", progress: 100 });
+    log.info("pricing.run.done", {
+      runId,
+      projectId,
+      ms: elapsed(),
+      matched: matchedIds.size,
+      aiPriced: valid.length,
+    });
   } catch (e) {
     const aborted =
       ac.signal.aborted || (e instanceof Error && e.name === "AbortError");
     if (aborted) {
+      log.info("pricing.run.cancelled", { runId, projectId, ms: elapsed() });
       await update({
         status: "cancelled",
         stage: "Cancelled",
@@ -537,6 +556,7 @@ export async function runPricingSuggestion(opts: {
         progress: 100,
       });
     } else {
+      log.error("pricing.run.failed", { runId, projectId, ms: elapsed(), err: e });
       await update({
         status: "error",
         error: e instanceof Error ? e.message : "Price suggestion failed.",

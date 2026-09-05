@@ -22,6 +22,7 @@ import {
   type CurrentLine,
   type FindingResponse,
 } from "./applyFindings";
+import { log, timer } from "@/lib/log";
 
 // In-process registry of running jobs so a later request (the Cancel button)
 // can abort the AI stream immediately. Works because Next.js server actions and
@@ -67,6 +68,9 @@ export async function runScopeGeneration(opts: {
       .from("scope_runs")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", runId);
+
+  const elapsed = timer();
+  log.info("scope.run.start", { runId, projectId, userId, trades });
 
   let fileIds: string[] = [];
   try {
@@ -115,6 +119,7 @@ export async function runScopeGeneration(opts: {
             throw new DOMException("Cancelled", "AbortError");
           failedChunks++;
           if (!firstError) firstError = err instanceof Error ? err.message : String(err);
+          log.warn("scope.chunk.failed", { runId, chunk: batch[j], err });
           continue;
         }
         const allowed = new Set(
@@ -246,11 +251,21 @@ export async function runScopeGeneration(opts: {
           : "Done",
       progress: 100,
     });
+    log.info("scope.run.done", {
+      runId,
+      projectId,
+      ms: elapsed(),
+      lines: lineItems.length,
+      findings: allFindings.length,
+      failedChunks,
+      chunks: chunks.length,
+    });
   } catch (e) {
     const aborted =
       ac.signal.aborted ||
       (e instanceof Error && e.name === "AbortError");
     if (aborted) {
+      log.info("scope.run.cancelled", { runId, projectId, ms: elapsed() });
       await update({
         status: "cancelled",
         stage: "Cancelled",
@@ -258,6 +273,7 @@ export async function runScopeGeneration(opts: {
         progress: 100,
       });
     } else {
+      log.error("scope.run.failed", { runId, projectId, ms: elapsed(), err: e });
       await update({
         status: "error",
         error: e instanceof Error ? e.message : "Scope generation failed.",
@@ -291,6 +307,9 @@ export async function runApplyFindings(opts: {
       .from("scope_runs")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", runId);
+
+  const elapsed = timer();
+  log.info("apply.run.start", { runId, projectId, userId });
 
   try {
     await update({ stage: "Reading your responses…", progress: 20 });
@@ -451,10 +470,12 @@ export async function runApplyFindings(opts: {
         : "No scope changes were needed.",
       progress: 100,
     });
+    log.info("apply.run.done", { runId, projectId, ms: elapsed(), changes: n });
   } catch (e) {
     const aborted =
       ac.signal.aborted || (e instanceof Error && e.name === "AbortError");
     if (aborted) {
+      log.info("apply.run.cancelled", { runId, projectId, ms: elapsed() });
       await update({
         status: "cancelled",
         stage: "Cancelled",
@@ -462,6 +483,7 @@ export async function runApplyFindings(opts: {
         progress: 100,
       });
     } else {
+      log.error("apply.run.failed", { runId, projectId, ms: elapsed(), err: e });
       await update({
         status: "error",
         error:
