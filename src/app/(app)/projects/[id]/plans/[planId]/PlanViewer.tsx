@@ -21,6 +21,7 @@ import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
+import StageJump from "@/components/StageNav";
 import type { PlanFile } from "@/types";
 
 // On-sheet takeoff legend placement (fractions of the page + a size multiplier).
@@ -3964,13 +3965,18 @@ export default function PlanViewer({
             the drawing rather than floating over it, so the pager and the
             notes never fight for the same corner and nothing hides the sheet. */}
         <div className="glass-strong pb-safe z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
-          {/* Phones hide the app rail on the viewer — this is the way back. */}
-          <Link
-            href={`/projects/${projectId}`}
-            className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand md:hidden"
-          >
-            ‹ Back
-          </Link>
+          {/* Phones hide the app rail on the viewer — Back returns to the
+              project's Plans page; "Go to" reaches every other stage (Scope,
+              Pricing…) without leaving the takeoff first. */}
+          <div className="flex items-center gap-1.5 md:hidden">
+            <Link
+              href={`/projects/${projectId}`}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand"
+            >
+              ‹ Back
+            </Link>
+            <StageJump projectId={projectId} />
+          </div>
           <p className="hidden min-w-0 truncate text-[11px] text-muted md:block">
             {status === "ready" ? (
               <>
