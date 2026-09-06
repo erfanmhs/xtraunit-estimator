@@ -11,7 +11,17 @@ import {
   runApplyFindings,
   abortScopeRun,
 } from "@/lib/scope/run";
-import { lineItemPatch, tradesInput } from "@/lib/validation";
+import {
+  lineItemPatch,
+  tradesInput,
+  uuid,
+  newLineItem,
+  lineStatus,
+  findingAnswer,
+  findingStatus,
+  disciplineInput,
+  firstIssue,
+} from "@/lib/validation";
 import { enforceAiLimit } from "@/lib/ai-usage";
 import { enqueueJob, requestCancel, normalizeRun, ACTIVE_STATUSES } from "@/lib/jobs/queue";
 
@@ -128,6 +138,7 @@ export async function updateLineItem(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(lineId).success) return { ok: false, error: "That line id isn't valid." };
 
   const parsed = lineItemPatch.safeParse(patch);
   if (!parsed.success)
@@ -163,6 +174,8 @@ export async function setLineStatus(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(lineId).success || !lineStatus.safeParse(status).success)
+    return { ok: false, error: "That change wasn't valid." };
 
   const { error } = await supabase
     .from("line_items")
@@ -178,6 +191,7 @@ export async function deleteLineItem(lineId: string): Promise<ActionResult> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(lineId).success) return { ok: false, error: "That line id isn't valid." };
 
   const { error } = await supabase.from("line_items").delete().eq("id", lineId);
   if (error) return { ok: false, error: "Could not delete the line." };
@@ -201,19 +215,21 @@ export async function addLineItem(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  if (!line.description.trim())
-    return { ok: false, error: "Description can't be empty." };
+  if (!uuid.safeParse(projectId).success) return { ok: false, error: "That project id isn't valid." };
+  const parsed = newLineItem.safeParse(line);
+  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  const clean = parsed.data;
 
   const { data, error } = await supabase
     .from("line_items")
     .insert({
       project_id: projectId,
       owner_id: user.id,
-      division_code: line.division_code,
-      division_name: line.division_name,
-      description: line.description.trim(),
-      quantity: line.quantity,
-      unit: line.unit?.trim() || null,
+      division_code: clean.division_code,
+      division_name: clean.division_name,
+      description: clean.description,
+      quantity: clean.quantity,
+      unit: clean.unit || null,
       source_kind: "takeoff",
       status: "confirmed",
       confidence: "high",
@@ -236,8 +252,11 @@ export async function answerFinding(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(findingId).success) return { ok: false, error: "That finding id isn't valid." };
+  const parsedAnswer = findingAnswer.safeParse(answer);
+  if (!parsedAnswer.success) return { ok: false, error: "That answer is too long." };
 
-  const trimmed = answer.trim();
+  const trimmed = parsedAnswer.data.trim();
   // Note: `resolved` is NOT set here — it now means "applied to the scope",
   // which only the Apply job sets. Answering just saves the note/answer.
   const { error } = await supabase
@@ -286,6 +305,8 @@ export async function setFindingStatus(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(findingId).success || !findingStatus.safeParse(status).success)
+    return { ok: false, error: "That change wasn't valid." };
 
   const { error } = await supabase
     .from("scope_findings")
@@ -310,10 +331,13 @@ export async function setSheetDiscipline(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  const parsedDisc = disciplineInput.safeParse(discipline);
+  if (!uuid.safeParse(sheetId).success || !parsedDisc.success)
+    return { ok: false, error: "That change wasn't valid." };
 
   const { error } = await supabase
     .from("sheets")
-    .update({ discipline })
+    .update({ discipline: parsedDisc.data || null })
     .eq("id", sheetId);
   if (error)
     return {

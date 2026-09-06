@@ -3,9 +3,8 @@ import { withSentryConfig } from "@sentry/nextjs/config";
 
 /**
  * Security headers — sent on every response so the browser behaves more safely.
- * These are the "can't break anything" set. The stronger Content-Security-Policy
- * is deliberately deferred to its own tested step (it needs per-request nonces
- * to avoid white-screening the app).
+ * These are the static set. The Content-Security-Policy lives in src/proxy.ts
+ * because it needs a fresh nonce per request.
  *
  * Note on X-Frame-Options: SAMEORIGIN blocks OTHER sites from embedding this app
  * in an iframe (clickjacking protection). The app isn't embedded anywhere today.

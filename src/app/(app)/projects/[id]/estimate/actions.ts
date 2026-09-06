@@ -5,6 +5,7 @@
  * `estimates`; totals are always computed live from line_items on the client.
  */
 import { createClient } from "@/lib/supabase/server";
+import { uuid, markupsInput, buildingSfInput, firstIssue } from "@/lib/validation";
 
 export type Markups = {
   contingency_pct: number;
@@ -23,28 +24,22 @@ export async function saveMarkups(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(projectId).success) return { ok: false, error: "That project id isn't valid." };
 
   // Percentages: keep sane (0–100); formulas are evaluated client-side.
-  const clean: Record<string, number> = {};
-  for (const k of [
-    "contingency_pct",
-    "insurance_pct",
-    "overhead_pct",
-    "profit_pct",
-  ] as const) {
-    const v = markups[k];
-    if (!Number.isFinite(v) || v < 0 || v > 100)
-      return { ok: false, error: "Markups must be between 0 and 100 percent." };
-    clean[k] = v;
-  }
+  const parsed = markupsInput.safeParse(markups);
+  if (!parsed.success)
+    return { ok: false, error: "Markups must be between 0 and 100 percent." };
+  const sf = buildingSfInput.safeParse(buildingSf);
+  if (!sf.success) return { ok: false, error: firstIssue(sf.error, "Building size isn't valid.") };
 
   const row: Record<string, unknown> = {
     project_id: projectId,
     owner_id: user.id,
-    ...clean,
+    ...parsed.data,
     updated_at: new Date().toISOString(),
   };
-  if (buildingSf !== undefined) row.building_sf = buildingSf;
+  if (sf.data !== undefined) row.building_sf = sf.data;
 
   const { error } = await supabase
     .from("estimates")

@@ -14,6 +14,7 @@ import {
   DEFAULT_PROFILE,
   type ProposalProfile,
 } from "@/lib/proposal/profile";
+import { companySettingsInput, firstIssue } from "@/lib/validation";
 
 // Note: $/SF benchmarks and standard unit prices also live on company_settings
 // but are edited under the Cost Database tab (see cost-database/actions.ts) —
@@ -40,18 +41,15 @@ export async function saveCompanySettings(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  for (const k of [
-    "default_contingency_pct",
-    "default_insurance_pct",
-    "default_op_pct",
-  ] as const) {
-    const v = settings[k];
-    if (!Number.isFinite(v) || v < 0 || v > 100)
-      return { ok: false, error: "Markups must be between 0 and 100 percent." };
-  }
+  const parsed = companySettingsInput.safeParse(settings);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: firstIssue(parsed.error, "Markups must be between 0 and 100 percent."),
+    };
 
   const { error } = await supabase.from("company_settings").upsert(
-    { owner_id: user.id, ...settings, updated_at: new Date().toISOString() },
+    { owner_id: user.id, ...parsed.data, updated_at: new Date().toISOString() },
     { onConflict: "owner_id" },
   );
   if (error)

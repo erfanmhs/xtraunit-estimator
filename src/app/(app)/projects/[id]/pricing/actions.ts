@@ -14,6 +14,7 @@ import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
 import { enforceAiLimit } from "@/lib/ai-usage";
 import { log } from "@/lib/log";
 import { enqueueJob, requestCancel, normalizeRun, ACTIVE_STATUSES } from "@/lib/jobs/queue";
+import { uuid, pricePatch, subQuoteInput, firstIssue } from "@/lib/validation";
 import type { ScopeRun } from "../scope/actions";
 
 type ActionResult = { ok: boolean; error?: string };
@@ -162,13 +163,16 @@ export async function updateLinePrice(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(lineId).success) return { ok: false, error: "That line id isn't valid." };
+  const parsed = pricePatch.safeParse(patch);
+  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error, "That price wasn't valid.") };
 
   // Any edit makes the price "proposed" again — confirmation is an explicit,
   // separate gesture on the exact numbers being confirmed.
   const { error } = await supabase
     .from("line_items")
     .update({
-      ...patch,
+      ...parsed.data,
       price_status: "proposed",
       priced_at: new Date().toISOString(),
     })
@@ -373,11 +377,10 @@ export async function applySubQuote(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  if (!input.sub_name.trim()) return { ok: false, error: "Sub name is required." };
-  if (!Number.isFinite(input.total) || input.total <= 0)
-    return { ok: false, error: "Quote total must be a positive number." };
-  if (!input.division_codes.length)
-    return { ok: false, error: "Pick at least one division the quote covers." };
+  if (!uuid.safeParse(projectId).success) return { ok: false, error: "That project id isn't valid." };
+  const parsedQuote = subQuoteInput.safeParse(input);
+  if (!parsedQuote.success) return { ok: false, error: firstIssue(parsedQuote.error) };
+  input = { ...input, ...parsedQuote.data, extracted: input.extracted };
 
   const { data: lines, error: linesErr } = await supabase
     .from("line_items")
