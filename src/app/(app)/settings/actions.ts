@@ -7,11 +7,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { enforceAiLimit } from "@/lib/ai-usage";
+import { log } from "@/lib/log";
+import { recordAiUsage } from "@/lib/ai-meter";
 import { AI_MODELS } from "@/config/ai";
 import {
   DEFAULT_PROFILE,
   type ProposalProfile,
 } from "@/lib/proposal/profile";
+import { companySettingsInput, firstIssue } from "@/lib/validation";
 
 // Note: $/SF benchmarks and standard unit prices also live on company_settings
 // but are edited under the Cost Database tab (see cost-database/actions.ts) —
@@ -38,18 +41,15 @@ export async function saveCompanySettings(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  for (const k of [
-    "default_contingency_pct",
-    "default_insurance_pct",
-    "default_op_pct",
-  ] as const) {
-    const v = settings[k];
-    if (!Number.isFinite(v) || v < 0 || v > 100)
-      return { ok: false, error: "Markups must be between 0 and 100 percent." };
-  }
+  const parsed = companySettingsInput.safeParse(settings);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: firstIssue(parsed.error, "Markups must be between 0 and 100 percent."),
+    };
 
   const { error } = await supabase.from("company_settings").upsert(
-    { owner_id: user.id, ...settings, updated_at: new Date().toISOString() },
+    { owner_id: user.id, ...parsed.data, updated_at: new Date().toISOString() },
     { onConflict: "owner_id" },
   );
   if (error)
@@ -171,6 +171,7 @@ Return JSON with exactly these fields:
       messages: [{ role: "user", content: prompt }],
     });
     const msg = await stream.finalMessage();
+    recordAiUsage(AI_MODELS.letter, msg.usage, "profile");
     const textBlock = msg.content.find((b) => b.type === "text");
     const text =
       textBlock && "text" in textBlock ? (textBlock.text as string) : "";
@@ -195,7 +196,8 @@ Return JSON with exactly these fields:
         references: [],
       },
     };
-  } catch {
+  } catch (e) {
+    log.error("profile.draft.failed", { userId: user.id, err: e });
     return { ok: false, error: "Could not draft — try again." };
   }
 }

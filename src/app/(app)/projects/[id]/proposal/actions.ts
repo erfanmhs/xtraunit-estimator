@@ -14,6 +14,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { enforceAiLimit } from "@/lib/ai-usage";
 import { loadProposal } from "@/lib/proposal/load";
+import { log } from "@/lib/log";
+import { recordAiUsage } from "@/lib/ai-meter";
 import { AI_MODELS } from "@/config/ai";
 
 const LETTER_MODEL = AI_MODELS.letter;
@@ -191,11 +193,13 @@ Return JSON: { "executive_summary": string, "project_description": string }.`;
       messages: [{ role: "user", content: prompt }],
     });
     const msg = await stream.finalMessage();
+    recordAiUsage(LETTER_MODEL, msg.usage, "proposal");
     const textBlock = msg.content.find((b) => b.type === "text");
     const text = textBlock && "text" in textBlock ? (textBlock.text as string) : "";
     if (!text) return { ok: false, error: "The AI returned nothing — try again." };
     return { ok: true, narrative: JSON.parse(text) as ProposalNarrative };
-  } catch {
+  } catch (e) {
+    log.error("proposal.narrative.failed", { projectId, userId: user.id, err: e });
     return { ok: false, error: "Could not draft the summary — try again." };
   }
 }

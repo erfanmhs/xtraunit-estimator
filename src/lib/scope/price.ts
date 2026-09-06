@@ -15,6 +15,16 @@ import { createClient as createSb } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { findBestMatch } from "./match";
+import { log, timer } from "@/lib/log";
+import {
+  assertAiBudget,
+  recordAiUsage,
+  runWithAiBudget,
+  getAiMeter,
+  costLabel,
+  saveRunCost,
+} from "@/lib/ai-meter";
+import { wasInterrupted } from "@/lib/jobs/worker";
 
 import { AI_MODELS } from "@/config/ai";
 
@@ -150,6 +160,7 @@ export async function suggestPrices(opts: {
   signal?: AbortSignal;
 }): Promise<SuggestedPrice[]> {
   const { project, clarifications, lines, history, signal } = opts;
+  assertAiBudget();
   const client = getAnthropicClient();
 
   // XtraUnit's standard direct unit prices — the AI applies these when a line
@@ -249,6 +260,7 @@ ${linesText(lines)}`;
     { signal },
   );
   const msg = await stream.finalMessage();
+  recordAiUsage(PRICING_MODEL, msg.usage, "pricing");
   const textBlock = msg.content.find((b) => b.type === "text");
   const text =
     textBlock && "text" in textBlock ? (textBlock.text as string) : null;
@@ -287,18 +299,32 @@ function bgClient(token: string): SupabaseClient {
 
 export async function runPricingSuggestion(opts: {
   projectId: string;
-  token: string;
   runId: string;
-}) {
-  const { projectId, token, runId } = opts;
-  const sb = bgClient(token);
-  const ac = new AbortController();
+  /** In-process fallback: the user's token. Worker path: `sb` + `ac`. */
+  token?: string;
+  sb?: SupabaseClient;
+  ac?: AbortController;
+}): Promise<void> {
+  const { projectId, runId } = opts;
+  // One dollar meter per run with a ceiling (ai-meter.ts); self-wrapping.
+  if (!getAiMeter())
+    return runWithAiBudget({ label: `pricing:${runId}` }, () =>
+      runPricingSuggestion(opts),
+    );
+
+  if (!opts.sb && !opts.token)
+    throw new Error("A job needs either a Supabase client or a user token.");
+  const sb = opts.sb ?? bgClient(opts.token!);
+  const ac = opts.ac ?? new AbortController();
   controllers.set(runId, ac);
   const update = (patch: Record<string, unknown>) =>
     sb
       .from("scope_runs")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", runId);
+
+  const elapsed = timer();
+  log.info("pricing.run.start", { runId, projectId });
 
   try {
     await update({ stage: "Gathering scope & your cost history…", progress: 10 });
@@ -468,6 +494,13 @@ export async function runPricingSuggestion(opts: {
         stage: `Done — all ${matchedIds.size} lines matched from your price history (no AI needed).`,
         progress: 100,
       });
+      log.info("pricing.run.done", {
+        runId,
+        projectId,
+        ms: elapsed(),
+        matched: matchedIds.size,
+        aiPriced: 0,
+      });
       return;
     }
 
@@ -525,11 +558,22 @@ export async function runPricingSuggestion(opts: {
       );
     }
 
-    await update({ status: "done", stage: "Done", progress: 100 });
+    await update({ status: "done", stage: "Done" + costLabel(), progress: 100 });
+    log.info("pricing.run.done", {
+      runId,
+      projectId,
+      ms: elapsed(),
+      matched: matchedIds.size,
+      aiPriced: valid.length,
+      costUsd: getAiMeter()?.spentUsd,
+    });
   } catch (e) {
     const aborted =
       ac.signal.aborted || (e instanceof Error && e.name === "AbortError");
-    if (aborted) {
+    if (wasInterrupted(ac)) {
+      log.info("pricing.run.interrupted", { runId, projectId, ms: elapsed() }); // requeued by the worker
+    } else if (aborted) {
+      log.info("pricing.run.cancelled", { runId, projectId, ms: elapsed() });
       await update({
         status: "cancelled",
         stage: "Cancelled",
@@ -537,6 +581,7 @@ export async function runPricingSuggestion(opts: {
         progress: 100,
       });
     } else {
+      log.error("pricing.run.failed", { runId, projectId, ms: elapsed(), err: e });
       await update({
         status: "error",
         error: e instanceof Error ? e.message : "Price suggestion failed.",
@@ -545,5 +590,6 @@ export async function runPricingSuggestion(opts: {
     }
   } finally {
     controllers.delete(runId);
+    await saveRunCost(sb, runId);
   }
 }

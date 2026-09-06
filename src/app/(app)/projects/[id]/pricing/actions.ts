@@ -12,6 +12,9 @@ import { runPricingSuggestion, abortPricingRun } from "@/lib/scope/price";
 import { readSubQuote, type QuoteExtraction } from "@/lib/scope/subquote";
 import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
 import { enforceAiLimit } from "@/lib/ai-usage";
+import { log } from "@/lib/log";
+import { enqueueJob, requestCancel, normalizeRun, ACTIVE_STATUSES } from "@/lib/jobs/queue";
+import { uuid, pricePatch, subQuoteInput, firstIssue } from "@/lib/validation";
 import type { ScopeRun } from "../scope/actions";
 
 type ActionResult = { ok: boolean; error?: string };
@@ -160,13 +163,16 @@ export async function updateLinePrice(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(lineId).success) return { ok: false, error: "That line id isn't valid." };
+  const parsed = pricePatch.safeParse(patch);
+  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error, "That price wasn't valid.") };
 
   // Any edit makes the price "proposed" again — confirmation is an explicit,
   // separate gesture on the exact numbers being confirmed.
   const { error } = await supabase
     .from("line_items")
     .update({
-      ...patch,
+      ...parsed.data,
       price_status: "proposed",
       priced_at: new Date().toISOString(),
     })
@@ -336,6 +342,7 @@ export async function readQuoteDoc(
     const extraction = await readSubQuote({ base64, mime, fileName });
     return { ok: true, extraction };
   } catch (e) {
+    log.error("subquote.read.failed", { userId: user.id, fileName, mime, err: e });
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Could not read the quote.",
@@ -370,11 +377,10 @@ export async function applySubQuote(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  if (!input.sub_name.trim()) return { ok: false, error: "Sub name is required." };
-  if (!Number.isFinite(input.total) || input.total <= 0)
-    return { ok: false, error: "Quote total must be a positive number." };
-  if (!input.division_codes.length)
-    return { ok: false, error: "Pick at least one division the quote covers." };
+  if (!uuid.safeParse(projectId).success) return { ok: false, error: "That project id isn't valid." };
+  const parsedQuote = subQuoteInput.safeParse(input);
+  if (!parsedQuote.success) return { ok: false, error: firstIssue(parsedQuote.error) };
+  input = { ...input, ...parsedQuote.data, extracted: input.extracted };
 
   const { data: lines, error: linesErr } = await supabase
     .from("line_items")
@@ -534,8 +540,10 @@ export async function startPricing(
     .from("scope_runs")
     .select("id,updated_at")
     .eq("project_id", projectId)
-    .eq("status", "running")
+    .in("status", [...ACTIVE_STATUSES])
     .eq("kind", "pricing")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (existing) {
     const age = Date.now() - new Date(existing.updated_at).getTime();
@@ -550,31 +558,20 @@ export async function startPricing(
   const limit = await enforceAiLimit(supabase, user.id, "pricing");
   if (!limit.ok) return { ok: false, error: limit.error };
 
-  const { data: run, error } = await supabase
-    .from("scope_runs")
-    .insert({
-      project_id: projectId,
-      owner_id: user.id,
-      status: "running",
-      stage: "Starting…",
-      progress: 2,
-      kind: "pricing",
-    })
-    .select("id")
-    .single();
-  if (error || !run)
+  const job = await enqueueJob(supabase, { projectId, ownerId: user.id, kind: "pricing" });
+  if (!job.ok)
     return {
       ok: false,
       error:
         "Could not start. (Has migration 0011 been run in Supabase? The Pricing page needs it.)",
     };
-
-  void runPricingSuggestion({
-    projectId,
-    token: session.access_token,
-    runId: run.id,
-  });
-
+  if (job.mode === "direct") {
+    void runPricingSuggestion({
+      projectId,
+      token: session.access_token,
+      runId: job.id,
+    });
+  }
   return { ok: true };
 }
 
@@ -597,7 +594,7 @@ export async function getPricingRun(
     .maybeSingle();
   if (error || !data) return null;
 
-  const run = data as ScopeRun;
+  const run = normalizeRun(data as ScopeRun);
   if (run.status === "running") {
     const age = Date.now() - new Date(run.updated_at).getTime();
     if (age > 8 * 60 * 1000) {
@@ -624,7 +621,7 @@ export async function cancelPricing(
     .from("scope_runs")
     .select("id")
     .eq("project_id", projectId)
-    .eq("status", "running")
+    .in("status", [...ACTIVE_STATUSES])
     .eq("kind", "pricing")
     .order("created_at", { ascending: false })
     .limit(1)
@@ -632,6 +629,7 @@ export async function cancelPricing(
   if (!run) return { ok: true };
 
   abortPricingRun(run.id);
+  await requestCancel(supabase, run.id);
   await supabase
     .from("scope_runs")
     .update({
