@@ -448,6 +448,9 @@ export default function PlanViewer({
     return () => window.removeEventListener("resize", onResize);
   }, []);
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
+  // Sheets deleted in this session — hidden immediately, before the server
+  // re-render catches up (router.refresh keeps the old list for a beat).
+  const [removedSheetIds, setRemovedSheetIds] = useState<Set<string>>(new Set());
   // Export-to-PDF dialog state.
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSel, setExportSel] = useState<Set<string>>(new Set());
@@ -1801,8 +1804,14 @@ export default function PlanViewer({
     )
       return;
     setMenu(null);
-    await supabase.from("measurements").delete().eq("sheet_id", id);
-    await supabase.from("sheets").delete().eq("id", id);
+    const m = await supabase.from("measurements").delete().eq("sheet_id", id);
+    const s = m.error ? m : await supabase.from("sheets").delete().eq("id", id);
+    if (s.error) {
+      // Say so — a silent failure looks like "the button does nothing".
+      window.alert(`Could not delete the sheet: ${s.error.message}`);
+      return;
+    }
+    setRemovedSheetIds((prev) => new Set(prev).add(id)); // drop it from the list now
     if (pageNum === pageNumber) setPageNum(1);
     router.refresh();
   }
@@ -2103,7 +2112,7 @@ export default function PlanViewer({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
-              {sheets.map((s) => {
+              {sheets.filter((s) => !removedSheetIds.has(s.id)).map((s) => {
                 const active = s.page_number === pageNum;
                 const editing = editingSheetId === s.id;
                 return (
@@ -2128,6 +2137,8 @@ export default function PlanViewer({
                       {editing ? (
                         <input
                           autoFocus
+                          spellCheck
+                          aria-label="Sheet name"
                           defaultValue={sheetNames[s.id] ?? ""}
                           placeholder={`Sheet ${s.page_number}`}
                           onBlur={(e) => {
@@ -2219,26 +2230,6 @@ export default function PlanViewer({
                 » Sheets
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setPageNum((p) => Math.max(1, p - 1))}
-              disabled={pageNum <= 1}
-              className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand disabled:opacity-40"
-            >
-              ‹
-            </button>
-            <span>
-              {pageNum} / {numPages || "…"}
-            </span>
-            <button
-              type="button"
-              onClick={() => setPageNum((p) => Math.min(numPages, p + 1))}
-              disabled={pageNum >= numPages}
-              className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand disabled:opacity-40"
-            >
-              ›
-            </button>
-            <span className="mx-1 h-5 w-px bg-border" />
             <button
               type="button"
               onClick={undo}
@@ -2921,28 +2912,12 @@ export default function PlanViewer({
               </div>
             </div>
           )}
-          {status === "ready" ? (
-            <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-[11px] text-muted">
-              {tool === "count"
-                ? "Click each item (auto-saved) · click a marker again to remove it · Finish when done · "
-                : tool === "polyline" ||
-                    tool === "wall" ||
-                    (tool === "volume" && volMode === "linear")
-                  ? "Click to add points · double-click to finish · "
-                  : tool === "area" || (tool === "volume" && volMode === "area")
-                    ? "Click corners · click the first point or double-click to close · "
-                    : tool === "leader"
-                      ? "Click where the arrow points, then click to place the text box · "
-                      : ""}
-              Esc: cancel · Right-drag / Space / middle-drag: pan · Del: delete
-            </div>
-          ) : null}
         </div>
 
-        {/* Floating glassy notes (collapses to a chip to save space) */}
-        <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 w-[min(720px,92%)] -translate-x-1/2">
-          {notesOpen ? (
-            <div className="glass-strong pointer-events-auto rounded-2xl p-4">
+        {/* Sheet notes — floats just above the bottom bar when open */}
+        {notesOpen ? (
+          <div className="absolute bottom-11 left-1/2 z-20 w-[min(720px,92%)] -translate-x-1/2">
+            <div className="glass-strong rounded-2xl p-4">
               <div className="mb-1.5 flex items-center justify-between">
                 <label
                   htmlFor="sheet-notes"
@@ -2970,6 +2945,7 @@ export default function PlanViewer({
                 onChange={(e) => onNotesChange(e.target.value)}
                 onBlur={(e) => saveNotes(e.currentTarget.value)}
                 rows={5}
+                spellCheck
                 placeholder={
                   "Tell the AI anything it should know about this sheet, e.g.\n" +
                   "• Unit A dimensions are on this sheet\n" +
@@ -2980,20 +2956,71 @@ export default function PlanViewer({
                 className="max-h-[40vh] min-h-[7rem] w-full resize-y rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
               />
             </div>
-          ) : (
+          </div>
+        ) : null}
+
+        {/* Bottom bar: tool hint · page browser · notes toggle. It sits BELOW
+            the drawing rather than floating over it, so the pager and the
+            notes never fight for the same corner and nothing hides the sheet. */}
+        <div className="glass-strong z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
+          <p className="hidden min-w-0 truncate text-[11px] text-muted md:block">
+            {status === "ready" ? (
+              <>
+                {tool === "count"
+                  ? "Click each item (auto-saved) · click a marker again to remove it · Finish when done · "
+                  : tool === "polyline" ||
+                      tool === "wall" ||
+                      (tool === "volume" && volMode === "linear")
+                    ? "Click to add points · double-click to finish · "
+                    : tool === "area" || (tool === "volume" && volMode === "area")
+                      ? "Click corners · click the first point or double-click to close · "
+                      : tool === "leader"
+                        ? "Click where the arrow points, then click to place the text box · "
+                        : ""}
+                Esc: cancel · Right-drag / Space / middle-drag: pan · Del: delete
+              </>
+            ) : null}
+          </p>
+          <div className="flex items-center gap-1.5 text-sm text-foreground">
             <button
               type="button"
-              onClick={() => setNotesOpen(true)}
-              title="Sheet notes for the AI"
-              className="glass-strong pointer-events-auto mx-auto flex items-center gap-2 rounded-full px-6 py-3 text-base font-medium text-foreground"
+              onClick={() => setPageNum((p) => Math.max(1, p - 1))}
+              disabled={pageNum <= 1}
+              title="Previous page"
+              className="rounded-md border border-border px-2.5 py-0.5 hover:border-brand disabled:opacity-40"
             >
-              <span className="text-xl leading-none">📝</span>
-              Notes for AI
-              {currentSheet && (notes[currentSheet.id] ?? "").trim() ? (
-                <span className="text-lg leading-none text-brand-soft">•</span>
-              ) : null}
+              ‹
             </button>
-          )}
+            <span className="tabular-nums">
+              {pageNum} / {numPages || "…"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPageNum((p) => Math.min(numPages, p + 1))}
+              disabled={pageNum >= numPages}
+              title="Next page"
+              className="rounded-md border border-border px-2.5 py-0.5 hover:border-brand disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotesOpen((o) => !o)}
+            title="Sheet notes for the AI"
+            aria-expanded={notesOpen}
+            className={`justify-self-end flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              notesOpen
+                ? "border-brand bg-brand/20 text-foreground"
+                : "border-border text-foreground hover:border-brand"
+            }`}
+          >
+            <span aria-hidden>📝</span>
+            <span className="hidden sm:inline">Notes for AI</span>
+            {currentSheet && (notes[currentSheet.id] ?? "").trim() ? (
+              <span className="text-brand-soft" title="This sheet has notes">•</span>
+            ) : null}
+          </button>
         </div>
       </div>
 
@@ -3149,6 +3176,7 @@ export default function PlanViewer({
                     value={selected.text ?? ""}
                     onChange={(e) => updateLeader({ text: e.target.value })}
                     rows={2}
+                    spellCheck
                     placeholder="Note…"
                     className="rounded-md border border-border bg-background px-2 py-1 text-sm normal-case text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
                   />
@@ -3343,31 +3371,31 @@ export default function PlanViewer({
 
                       {isEditing ? (
                         <div className="flex flex-col gap-2 border-t border-white/5 px-2 pb-2 pt-2">
-                          {/* Rename — applies to every run in the layer */}
+                          {/* Rename — applies to every run in the layer.
+                              Saves by itself when you tab/click away (or
+                              press Enter); no button to remember. */}
                           <div className="flex items-center gap-1.5">
                             <input
                               value={layerName}
                               onChange={(e) => setLayerName(e.target.value)}
+                              onBlur={() => {
+                                if (layerName.trim() && layerName.trim() !== g.layer)
+                                  renameLayer(g.rows, layerName);
+                              }}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
-                                  renameLayer(g.rows, layerName);
+                                  if (layerName.trim() && layerName.trim() !== g.layer)
+                                    renameLayer(g.rows, layerName);
                                   setEditingLayer(null);
                                 }
                                 if (e.key === "Escape") setEditingLayer(null);
                               }}
                               placeholder="Layer name"
+                              spellCheck
+                              aria-label="Layer name"
                               className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
                             />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                renameLayer(g.rows, layerName);
-                                setEditingLayer(null);
-                              }}
-                              className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:border-brand"
-                            >
-                              Rename
-                            </button>
+                            <span className="shrink-0 text-[10px] text-muted">saves as you go</span>
                           </div>
 
                           {/* Color — applies to every run */}
