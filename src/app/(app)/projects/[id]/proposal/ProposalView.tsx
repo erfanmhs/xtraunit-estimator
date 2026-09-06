@@ -583,6 +583,7 @@ function EditableBlock({
       {editing ? (
         <textarea
           value={value}
+          spellCheck
           onChange={(e) => onChange(e.target.value)}
           rows={rows}
           placeholder={placeholder}

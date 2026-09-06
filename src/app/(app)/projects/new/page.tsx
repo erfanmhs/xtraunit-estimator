@@ -87,7 +87,7 @@ export default async function NewProjectPage({
             <label htmlFor="notes" className={LABEL}>
               Notes
             </label>
-            <textarea id="notes" name="notes" rows={3} className={FIELD} />
+            <textarea id="notes" name="notes" rows={3} spellCheck className={FIELD} />
           </div>
 
           <div className="flex items-center gap-3">

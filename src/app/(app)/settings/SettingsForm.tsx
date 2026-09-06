@@ -266,6 +266,7 @@ function ProposalProfileSection({
             ].map(([k, ph]) => (
               <textarea
                 key={k}
+                spellCheck
                 value={notes[k as keyof typeof notes]}
                 onChange={(e) =>
                   setNotes((s) => ({ ...s, [k]: e.target.value }))
@@ -384,6 +385,7 @@ function ProfileField({
       </span>
       <textarea
         value={value}
+        spellCheck
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
         className="rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none focus:border-brand"

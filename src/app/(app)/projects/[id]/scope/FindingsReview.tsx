@@ -287,6 +287,7 @@ function FindingRow({
         <div className="mt-1.5">
           <textarea
             value={note}
+            spellCheck
             onChange={(e) => setNote(e.target.value)}
             placeholder="Add a note or correction (optional) — e.g. '6-inch slab, not 4'…"
             rows={2}
@@ -461,6 +462,7 @@ function QuestionRow({
         <div className="mt-1.5">
           <textarea
             value={value}
+            spellCheck
             onChange={(e) => setValue(e.target.value)}
             placeholder="Your answer (e.g. '4-inch slab', 'walls are 9 ft')…"
             rows={2}
