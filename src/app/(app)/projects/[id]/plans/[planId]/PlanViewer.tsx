@@ -2393,7 +2393,7 @@ export default function PlanViewer({
                             type="button"
                             onClick={() => setEditingSheetId(s.id)}
                             title="Rename"
-                            className="shrink-0 rounded px-1 text-xs text-muted opacity-0 transition hover:text-brand-soft group-hover:opacity-100"
+                            className="shrink-0 rounded px-1 text-xs text-muted opacity-0 transition hover:text-brand-soft group-hover:opacity-100 pointer-coarse:opacity-100"
                           >
                             ✎
                           </button>
@@ -3280,7 +3280,14 @@ export default function PlanViewer({
         {/* Bottom bar: tool hint · page browser · notes toggle. It sits BELOW
             the drawing rather than floating over it, so the pager and the
             notes never fight for the same corner and nothing hides the sheet. */}
-        <div className="glass-strong z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
+        <div className="glass-strong pb-safe z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
+          {/* Phones hide the app rail on the viewer — this is the way back. */}
+          <Link
+            href={`/projects/${projectId}`}
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand md:hidden"
+          >
+            ‹ Back
+          </Link>
           <p className="hidden min-w-0 truncate text-[11px] text-muted md:block">
             {status === "ready" ? (
               <>

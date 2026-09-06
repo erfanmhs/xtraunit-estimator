@@ -159,8 +159,77 @@ export default function AppSidebar({ email }: { email: string | null }) {
       ]
     : [];
 
+  // ── Phones: a bottom tab bar (thumb-reachable) instead of the rail ────────
+  // Outside a project: the three areas + Sign out. Inside one: the six stages,
+  // with Projects as the way back. The takeoff viewer hides it (it has its own
+  // bottom bar with a Back button) so the drawing gets the whole screen.
+  const mobileItems: { key: string; label: string; href: string; icon: Icon; active: boolean; dot?: string }[] =
+    projectId
+      ? [
+          { key: "home", label: "Projects", href: "/projects", icon: FolderIcon, active: false },
+          ...stages.map((s) => ({
+            key: s.key,
+            label: s.label,
+            href: s.href,
+            icon: s.icon,
+            active: s.active,
+            dot: progress ? DOT[progress[s.key]] : "",
+          })),
+        ]
+      : NAV.map((n) => ({
+          key: n.href,
+          label: n.label === "Cost Database" ? "Costs" : n.label,
+          href: n.href,
+          icon: n.icon,
+          active: pathname === n.href || pathname.startsWith(`${n.href}/`),
+        }));
+
+  const mobileBar = compact ? null : (
+    <nav
+      aria-label="Main"
+      className="glass-strong pb-safe order-last z-20 flex w-full shrink-0 items-stretch border-t border-border sm:hidden"
+    >
+      {mobileItems.map((m) => {
+        const Ico = m.icon;
+        return (
+          <Link
+            key={m.key}
+            href={m.href}
+            aria-current={m.active ? "page" : undefined}
+            className={`flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 text-[10px] transition-colors ${
+              m.active ? "text-foreground" : "text-muted"
+            }`}
+          >
+            <span className="relative">
+              <Ico className={`h-6 w-6 ${m.active ? "text-brand-soft" : ""}`} />
+              {m.dot ? (
+                <span className={`absolute -right-1 -top-0.5 h-2 w-2 rounded-full ring-2 ring-background ${m.dot}`} aria-hidden />
+              ) : null}
+            </span>
+            <span className="truncate">{m.label}</span>
+          </Link>
+        );
+      })}
+      {!projectId ? (
+        <form action={signOut} className="flex min-w-0 flex-1">
+          <button
+            type="submit"
+            className="flex min-h-14 w-full flex-col items-center justify-center gap-0.5 px-1 text-[10px] text-muted"
+          >
+            <LogoutIcon className="h-6 w-6" />
+            <span>Sign out</span>
+          </button>
+        </form>
+      ) : null}
+    </nav>
+  );
+
   return (
-    <aside className={`group relative z-20 shrink-0 ${flow}`}>
+    <>
+    {mobileBar}
+    {/* The rail: from `sm` up. Phones use the bottom bar; on the viewer they
+        get nothing but the drawing (its bottom bar has a Back button). */}
+    <aside className={`group relative z-20 hidden shrink-0 sm:block ${flow}`}>
       <div
         className={`glass absolute inset-y-0 left-0 flex w-14 flex-col overflow-hidden border-r border-border transition-[width] duration-200 group-hover:w-60 ${
           compact ? "" : "lg:w-60"
@@ -252,5 +321,6 @@ export default function AppSidebar({ email }: { email: string | null }) {
         </div>
       </div>
     </aside>
+    </>
   );
 }

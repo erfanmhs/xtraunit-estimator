@@ -17,7 +17,9 @@ export default async function AppLayout({
   } = await supabase.auth.getUser();
 
   return (
-    <div className="relative flex flex-1 min-h-0 overflow-hidden">
+    // Column on phones (content above the bottom tab bar), row from `sm` up
+    // (rail on the left). The bar is rendered by AppSidebar with `order-last`.
+    <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden sm:flex-row">
       {/* Same garnet wash + glow as the login page — one consistent backdrop
           for the whole app; the glass panels pick it up through their blur. */}
       <div
