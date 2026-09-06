@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * "What to review" — the AI's findings.
- *  - Questions: answer inline; the answer is fed into the next Generate.
- *  - Assumptions / gaps / exclusions: an explicit decision — Accept (keep it,
- *    optionally with a note/correction) or Dismiss (leave it out) — instead of a
- *    vague checkbox. A note on an accepted finding is fed into the next Generate,
- *    so a correction (e.g. "6-inch slab, not 4") actually changes the estimate.
+ * "What to review" — the AI's findings, as one-line rows with chips.
+ *  - Questions: one-tap answer chips (or type your own); the answer feeds the
+ *    next Generate / Apply.
+ *  - Assumptions / gaps / exclusions: one line each with three chips —
+ *    ✓ Accept · ✕ Dismiss · + Note. Chips toggle (tap again to undo). A note
+ *    is a correction ("6-inch slab, not 4") and counts as an accept, so it's
+ *    applied to the scope. "Accept all" clears a section in one tap.
  */
 import {
   useCallback,
@@ -36,10 +37,16 @@ export type Finding = {
 };
 
 const FINDING_LABEL: Record<string, string> = {
-  question: "Questions for you",
-  gap: "Gaps — drawn but not scoped",
-  assumption: "Assumptions to confirm",
+  question: "Questions",
+  gap: "Gaps",
+  assumption: "Assumptions",
   exclusion: "Exclusions",
+};
+const FINDING_HINT: Record<string, string> = {
+  question: "One tap answers; they feed the next generate.",
+  gap: "Drawn on the plans but not in the scope yet.",
+  assumption: "What the price relies on — accept, or correct it with a note.",
+  exclusion: "Left out of the price on purpose.",
 };
 const ORDER = ["question", "gap", "assumption", "exclusion"];
 
@@ -162,6 +169,26 @@ export default function FindingsReview({
     });
   }
 
+  // One tap for a whole section: accept every still-open finding of a kind.
+  function acceptAll(kind: string) {
+    const ids = findings
+      .filter((f) => f.kind === kind && (f.status ?? "open") === "open")
+      .map((f) => f.id);
+    if (!ids.length) return;
+    const snapshot = findings;
+    setError(null);
+    setFindings((prev) =>
+      prev.map((f) => (ids.includes(f.id) ? { ...f, status: "accepted" } : f)),
+    );
+    startTransition(async () => {
+      const results = await Promise.all(ids.map((id) => setFindingStatus(id, "accepted")));
+      if (results.some((r) => !r.ok)) {
+        setFindings(snapshot);
+        setError("Could not accept every item — try again.");
+      }
+    });
+  }
+
   if (!findings.length) return null;
   // Responses the user has made but not yet applied to the scope.
   const pendingCount = findings.filter(
@@ -215,25 +242,44 @@ export default function FindingsReview({
         {ORDER.map((kind) => {
           const rows = findings.filter((f) => f.kind === kind);
           if (!rows.length) return null;
+          const open =
+            kind === "question"
+              ? rows.filter((f) => !(f.answer ?? "").trim()).length
+              : rows.filter((f) => (f.status ?? "open") === "open").length;
           return (
-            <section key={kind} className="glass rounded-xl p-4">
-              <button
-                type="button"
-                onClick={() =>
-                  setCollapsed((c) => ({ ...c, [kind]: !c[kind] }))
-                }
-                className="flex w-full items-center justify-between text-left"
-              >
-                <h3 className="text-sm uppercase tracking-wider text-muted">
-                  {FINDING_LABEL[kind] ?? kind}
-                  <span className="ml-2 text-muted/60">({rows.length})</span>
-                </h3>
-                <span className="text-xs text-muted">
-                  {collapsed[kind] ? "▸" : "▾"}
-                </span>
-              </button>
+            <section key={kind} className="glass rounded-xl p-3 sm:p-4">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCollapsed((c) => ({ ...c, [kind]: !c[kind] }))
+                  }
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  aria-expanded={!collapsed[kind]}
+                >
+                  <span className="text-xs text-muted">{collapsed[kind] ? "▸" : "▾"}</span>
+                  <h3 className="text-sm uppercase tracking-wider text-muted">
+                    {FINDING_LABEL[kind] ?? kind}
+                  </h3>
+                  <span className="text-[11px] text-muted/70">
+                    {open > 0 ? `${open} open` : "all decided"}
+                    {open > 0 && open < rows.length ? ` · ${rows.length - open} done` : ""}
+                  </span>
+                </button>
+                {kind !== "question" && open > 0 && !collapsed[kind] ? (
+                  <button
+                    type="button"
+                    onClick={() => acceptAll(kind)}
+                    className="rounded-full border border-green-500/40 bg-green-500/10 px-2.5 py-0.5 text-[11px] text-green-300 transition-colors hover:bg-green-500/20"
+                  >
+                    ✓ Accept all {open > 1 ? `(${open})` : ""}
+                  </button>
+                ) : null}
+              </div>
               {!collapsed[kind] ? (
-                <ul className="mt-2 space-y-3">
+                <>
+                <p className="mt-0.5 text-[11px] text-muted/60">{FINDING_HINT[kind]}</p>
+                <ul className="mt-2 divide-y divide-white/5">
                   {rows.map((f) =>
                     kind === "question" ? (
                       <QuestionRow
@@ -250,6 +296,7 @@ export default function FindingsReview({
                     ),
                   )}
                 </ul>
+                </>
               ) : null}
             </section>
           );
@@ -262,6 +309,35 @@ export default function FindingsReview({
 const NOTE_CLASS =
   "w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
 
+/** A toggle chip. `on` = selected state; tapping again is the undo. */
+function Chip({
+  on,
+  tone,
+  onClick,
+  children,
+  title,
+}: {
+  on?: boolean;
+  tone: "green" | "muted" | "plain";
+  onClick: () => void;
+  children: React.ReactNode;
+  title?: string;
+}) {
+  const base = "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors";
+  const look = on
+    ? tone === "green"
+      ? "border-green-500/50 bg-green-500/15 text-green-300"
+      : "border-border bg-white/10 text-foreground"
+    : tone === "green"
+      ? "border-border text-muted hover:border-green-500/50 hover:text-green-300"
+      : "border-border text-muted hover:border-brand hover:text-foreground";
+  return (
+    <button type="button" onClick={onClick} title={title} aria-pressed={on} className={`${base} ${look}`}>
+      {children}
+    </button>
+  );
+}
+
 function FindingRow({
   finding: f,
   onDecide,
@@ -270,110 +346,84 @@ function FindingRow({
   onDecide: (status: "open" | "accepted" | "dismissed", note?: string) => void;
 }) {
   const status = f.status ?? "open";
-  const [note, setNote] = useState(f.answer ?? "");
-  const [editing, setEditing] = useState(false);
+  const accepted = status === "accepted";
+  const dismissed = status === "dismissed";
   const savedNote = (f.answer ?? "").trim();
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState(f.answer ?? "");
 
   useEffect(() => setNote(f.answer ?? ""), [f.answer]);
 
-  // The decision form (Accept / Dismiss + note) — shown while undecided, or when
-  // editing an already-accepted finding.
-  const showForm = status === "open" || editing;
+  function saveNote() {
+    // A note is a correction, so it counts as accepting the (corrected) item.
+    onDecide("accepted", note);
+    setNoteOpen(false);
+  }
 
-  if (showForm) {
-    return (
-      <li className="text-sm">
-        <p className="text-foreground">{f.text}</p>
-        <div className="mt-1.5">
-          <textarea
+  return (
+    <li className="flex flex-wrap items-start gap-x-3 gap-y-1.5 py-2 text-sm">
+      <p
+        className={`min-w-0 flex-1 basis-56 leading-snug ${
+          dismissed ? "text-muted/70 line-through" : "text-foreground"
+        }`}
+      >
+        {f.text}
+        {accepted && savedNote && !noteOpen ? (
+          <span className="text-green-200"> — {savedNote}</span>
+        ) : null}
+      </p>
+      <div className="flex shrink-0 items-center gap-1">
+        <Chip
+          on={accepted}
+          tone="green"
+          onClick={() => onDecide(accepted ? "open" : "accepted")}
+          title={accepted ? "Tap to undo" : "Keep this in the estimate"}
+        >
+          {accepted ? "✓ Accepted" : "✓ Accept"}
+        </Chip>
+        <Chip
+          on={dismissed}
+          tone="muted"
+          onClick={() => onDecide(dismissed ? "open" : "dismissed")}
+          title={dismissed ? "Tap to undo" : "Leave this out"}
+        >
+          {dismissed ? "Dismissed" : "✕ Dismiss"}
+        </Chip>
+        <Chip
+          on={noteOpen}
+          tone="plain"
+          onClick={() => setNoteOpen((o) => !o)}
+          title="Add a correction, e.g. 6-inch slab, not 4"
+        >
+          {savedNote ? "✎ Note" : "+ Note"}
+        </Chip>
+      </div>
+      {noteOpen ? (
+        <div className="flex basis-full items-center gap-2">
+          <input
             value={note}
+            autoFocus
             spellCheck
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Add a note or correction (optional) — e.g. '6-inch slab, not 4'…"
-            rows={2}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveNote();
+              if (e.key === "Escape") {
+                setNote(f.answer ?? "");
+                setNoteOpen(false);
+              }
+            }}
+            placeholder="Correction or note — e.g. '6-inch slab, not 4' — Enter to save"
             className={NOTE_CLASS}
           />
-          <div className="mt-1.5 flex items-center gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => {
-                onDecide("accepted", note);
-                setEditing(false);
-              }}
-              className="glass-brand rounded-md px-3 py-1 font-medium text-foreground hover:bg-brand/30"
-            >
-              {status === "accepted" ? "Save" : "Accept"}
-            </button>
-            {status === "open" ? (
-              <button
-                type="button"
-                onClick={() => onDecide("dismissed", note)}
-                className="rounded-md border border-border px-3 py-1 text-muted hover:text-foreground"
-              >
-                Dismiss
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setNote(f.answer ?? "");
-                  setEditing(false);
-                }}
-                className="rounded-md px-2 py-1 text-muted hover:text-foreground"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={saveNote}
+            className="glass-brand shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-foreground hover:bg-brand/30"
+          >
+            Save
+          </button>
         </div>
-      </li>
-    );
-  }
-
-  if (status === "accepted") {
-    return (
-      <li className="text-sm">
-        <p className="text-foreground">{f.text}</p>
-        <div className="mt-1.5 flex items-start justify-between gap-3 rounded-md border border-green-500/20 bg-green-500/5 px-2.5 py-1.5">
-          <p className="text-sm text-green-200">
-            <span className="text-green-400">✓ Accepted</span>
-            {savedNote ? <span className="text-green-100"> — {savedNote}</span> : null}
-          </p>
-          <div className="flex shrink-0 gap-2 text-[11px]">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="text-muted transition-colors hover:text-foreground"
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={() => onDecide("open")}
-              className="text-muted transition-colors hover:text-foreground"
-            >
-              Undo
-            </button>
-          </div>
-        </div>
-      </li>
-    );
-  }
-
-  // dismissed
-  return (
-    <li className="flex items-start justify-between gap-3 text-sm">
-      <span className="text-muted line-through">{f.text}</span>
-      <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted">
-        Dismissed
-        <button
-          type="button"
-          onClick={() => onDecide("open")}
-          className="transition-colors hover:text-foreground"
-        >
-          Undo
-        </button>
-      </span>
+      ) : null}
     </li>
   );
 }
@@ -399,23 +449,22 @@ function QuestionRow({
     }
   }, [saved]);
 
-  // Answered → compact confirmation with Edit.
+  // Answered → one line: the question, the answer as a green chip, Edit.
   if (!editing) {
     return (
-      <li className="text-sm">
-        <p className="text-foreground">{f.text}</p>
-        <div className="mt-1.5 flex items-start justify-between gap-3 rounded-md border border-green-500/20 bg-green-500/5 px-2.5 py-1.5">
-          <p className="text-sm text-green-200">
-            <span className="text-green-400">✓ </span>
-            {saved}
-          </p>
+      <li className="flex flex-wrap items-start gap-x-3 gap-y-1.5 py-2 text-sm">
+        <p className="min-w-0 flex-1 basis-56 leading-snug text-foreground">{f.text}</p>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="rounded-full border border-green-500/50 bg-green-500/15 px-2.5 py-0.5 text-[11px] text-green-300">
+            ✓ {saved}
+          </span>
           <button
             type="button"
             onClick={() => {
               setTyping(false);
               setEditing(true);
             }}
-            className="shrink-0 text-[11px] text-muted transition-colors hover:text-foreground"
+            className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted transition-colors hover:text-foreground"
           >
             Edit
           </button>
@@ -426,8 +475,8 @@ function QuestionRow({
 
   const showChips = options.length > 0 && !typing;
   return (
-    <li className="text-sm">
-      <p className="text-foreground">{f.text}</p>
+    <li className="py-2 text-sm">
+      <p className="leading-snug text-foreground">{f.text}</p>
 
       {showChips ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
