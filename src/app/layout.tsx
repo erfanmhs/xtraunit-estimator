@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, Outfit } from "next/font/google";
 import "./globals.css";
 
@@ -21,6 +21,17 @@ export const metadata: Metadata = {
   description:
     "Construction plan estimating tool — turn plans into priced scopes and proposals.",
   icons: { icon: "/favicon.png" },
+};
+
+// Mobile viewport: real device width, 1:1 scale, and `viewport-fit=cover` so
+// the layout can extend behind notches/home bars (we pad with safe-area
+// insets). Deliberately NO maximum-scale / user-scalable=no — locking zoom is
+// an accessibility failure and iOS ignores it anyway.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#0a0a0b",
 };
 
 export default function RootLayout({

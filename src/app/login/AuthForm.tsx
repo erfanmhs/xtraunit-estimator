@@ -3,13 +3,18 @@
 /**
  * The all-in-one auth form: Sign in / Create account / Forgot password.
  *
- * It runs in the browser and talks to Supabase directly, so switching between
- * the three modes is instant (no page reloads) and messages appear inline.
- * Keeping it in one place is what makes the experience fast and simple.
+ * It runs in the browser and talks to Supabase directly for sign-in and
+ * password reset, so switching between modes is instant and messages appear
+ * inline. Creating an account goes through the `signUp` server action instead,
+ * where it's rate-limited and can be switched off (see login/actions.ts).
  */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { signUp } from "./actions";
+
+// Hide "Create an account" entirely when sign-up is closed (invite-only).
+const SIGNUP_OPEN = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
 
 type Mode = "signin" | "signup" | "forgot";
 
@@ -55,14 +60,14 @@ export default function AuthForm() {
       }
 
       if (mode === "signup") {
-        const { data, error } = await supabase.auth.signUp({
+        const res = await signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/login` },
+          origin: window.location.origin,
         });
-        if (error) throw error;
+        if (!res.ok) throw new Error(res.error ?? "Could not create the account.");
 
-        if (data.session) {
+        if (res.signedIn) {
           // Email confirmation is off → user is signed in immediately.
           router.replace("/");
           router.refresh();
@@ -188,7 +193,7 @@ export default function AuthForm() {
 
       {/* Mode toggles */}
       <div className="text-center text-sm text-muted">
-        {mode === "signin" ? (
+        {mode === "signin" && SIGNUP_OPEN ? (
           <>
             New here?{" "}
             <button

@@ -226,7 +226,7 @@ export default function CostDbBrowser({
                           <button
                             type="button"
                             onClick={() => onDelete(e.id)}
-                            className="ml-auto text-muted transition-colors hover:text-brand-soft"
+                            className="ml-auto rounded px-2 py-1 text-muted transition-colors hover:bg-white/5 hover:text-brand-soft"
                           >
                             Delete
                           </button>
@@ -307,22 +307,24 @@ function EditEntry({
           className="w-20 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
         />
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      {/* 3-column grid on phones, a wrapping row from sm up. */}
+      <div className="mt-1.5 grid grid-cols-3 items-center gap-1.5 sm:flex sm:flex-wrap">
         {BUCKETS.map(([k, label]) => (
-          <label key={k} className="flex items-center gap-1">
-            <span className="text-[10px] text-muted">{label}</span>
+          <label key={k} className="flex min-w-0 items-center gap-1">
+            <span className="shrink-0 text-[10px] text-muted">{label}</span>
             <input
               type="text"
               inputMode="decimal"
               value={vals[k]}
               onChange={(ev) => setVals((v) => ({ ...v, [k]: ev.target.value }))}
               placeholder="0"
-              className="w-[72px] rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand"
+              aria-label={label}
+              className="min-w-0 flex-1 rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand sm:w-[72px] sm:flex-none"
             />
           </label>
         ))}
-        <label className="flex items-center gap-1">
-          <span className="text-[10px] font-medium text-brand-soft">Total</span>
+        <label className="flex min-w-0 items-center gap-1">
+          <span className="shrink-0 text-[10px] font-medium text-brand-soft">Total</span>
           <input
             type="text"
             inputMode="decimal"
@@ -331,10 +333,11 @@ function EditEntry({
               setVals((v) => ({ ...v, cost_total: ev.target.value }))
             }
             placeholder="—"
-            className="w-[90px] rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand"
+            aria-label="Total"
+            className="min-w-0 flex-1 rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand sm:w-[90px] sm:flex-none"
           />
         </label>
-        <div className="ml-auto flex items-center gap-2 text-xs">
+        <div className="col-span-3 flex items-center justify-end gap-2 text-xs sm:col-span-1 sm:ml-auto">
           <button
             type="button"
             onClick={save}

@@ -11,10 +11,12 @@
  * docs/ai-drawing-reading-research.md (AEC-Bench: structured retrieval lifted
  * cross-sheet tasks +18–32 pts).
  *
- * The primary signal is the LABEL the user picks at plan triage
- * (Architectural / Structural / MEP / Schedules / Civil / Other — see
- * PlanTriage.tsx); the AIA sheet-number letter (A-101 → architectural) is a
- * fallback for when a sheet number is present but no label was chosen.
+ * The primary signal is the CATEGORY the user picks in the takeoff viewer
+ * (stored on sheets.discipline — the one place sheets are categorized). This
+ * classifier is the fallback for sheets that haven't been categorized yet:
+ * the legacy triage label (older projects), then the AIA sheet-number letter
+ * (A-101 → architectural), then keywords in the name. Anything still unknown
+ * is treated as core — sent to every AI pass — so nothing is ever dropped.
  */
 
 export type Discipline =
@@ -59,7 +61,8 @@ export function asDiscipline(v: string | null | undefined): Discipline | null {
   return v && VALID.has(v as Discipline) ? (v as Discipline) : null;
 }
 
-// The exact triage labels the user chooses in PlanTriage.tsx → discipline.
+// Legacy triage labels (projects imported before categorizing moved into the
+// viewer) → discipline. New sheets have no label.
 const TRIAGE_LABEL: Record<string, Discipline> = {
   architectural: "architectural",
   structural: "structural",
@@ -106,9 +109,9 @@ const KEYWORD_DISCIPLINE: [RegExp, Discipline][] = [
 ];
 
 /**
- * Classify a sheet's discipline. Order: the user's triage label (most reliable
- * here — sheet numbers are usually blank) → the AIA sheet-number letter →
- * a keyword scan → "unknown" (which is treated as core, i.e. never dropped).
+ * Classify a sheet's discipline when the user hasn't categorized it. Order:
+ * a legacy triage label → the AIA sheet-number letter → a keyword scan →
+ * "unknown" (which is treated as core, i.e. never dropped).
  */
 export function classifyDiscipline(
   name: string | null,

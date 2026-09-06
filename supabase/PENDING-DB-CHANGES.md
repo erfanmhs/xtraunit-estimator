@@ -15,12 +15,7 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-- [ ] 0028_sheet_ingest_version.sql — adds `ingest_version` to `sheets`. Powers
-      the improved plan-reading (layout-aware text so tables survive + schedule
-      sheets sent as images). Running it makes existing projects re-read their
-      plans ONCE, automatically, with the better logic. Safe to run anytime.
-- [ ] 0029_finding_status.sql — adds `status` to `scope_findings` for the clear
-      Accept / Dismiss on each assumption/gap/exclusion. Safe to run anytime.
+Nothing pending.
 
 ---
 
@@ -53,3 +48,11 @@ one once in Supabase, then it moves to **Already run**.
 - [x] 0025_plan_vision_pdf.sql — run 2026-07-03
 - [x] 0026_sheet_discipline.sql — run 2026-07-07
 - [x] 0027_ai_usage.sql — run 2026-07-07
+- [x] 0028_sheet_ingest_version.sql — run (columns verified present 2026-09-05)
+- [x] 0029_finding_status.sql — run (verified 2026-09-05)
+- [x] 0030_project_gen_trades.sql — run (verified 2026-09-05)
+- [x] 0031_finding_options.sql — run (verified 2026-09-05)
+- [x] 0032_scope_run_cost.sql — run 2026-09-06 (per-run AI cost columns on `scope_runs`; verified)
+- [x] 0033_proposal_redesign.sql — run 2026-09-06 (web proposal fields, share link, `get_public_proposal` / `accept_proposal`; verified)
+- [x] 0034_job_queue.sql — run 2026-09-06 (durable job queue columns, `claim_next_job` / `reclaim_orphaned_jobs`; verified)
+- [x] 0035_sheet_crop.sql — run 2026-09-06 (`sheets.crop` + `source_sheet_id`; verified)

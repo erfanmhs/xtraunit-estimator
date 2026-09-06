@@ -122,7 +122,7 @@ export default function SuggestPanel({
   }
 
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className="flex flex-col items-start gap-1.5">
       {run?.status === "error" && run.error ? (
         <p className="w-full max-w-md rounded-lg border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm leading-relaxed text-brand-soft">
           {run.error}
@@ -141,7 +141,7 @@ export default function SuggestPanel({
       >
         Suggest prices with AI
       </button>
-      <p className="max-w-xs text-right text-[11px] text-muted/70">
+      <p className="max-w-xs text-left text-[11px] text-muted/70">
         Fills unpriced &amp; unconfirmed lines only — confirmed prices are never
         touched. Every suggestion needs your confirm.
       </p>

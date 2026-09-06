@@ -7,6 +7,7 @@ import "server-only";
  * The user reviews the extraction before anything is applied.
  */
 import { getAnthropicClient } from "@/lib/anthropic";
+import { assertAiBudget, recordAiUsage } from "@/lib/ai-meter";
 
 import { AI_MODELS } from "@/config/ai";
 
@@ -75,6 +76,7 @@ export async function readSubQuote(opts: {
   fileName: string;
 }): Promise<QuoteExtraction> {
   const { base64, mime, fileName } = opts;
+  assertAiBudget();
   const client = getAnthropicClient();
 
   const docBlock = IMAGE_TYPES.has(mime)
@@ -119,6 +121,7 @@ Read every number carefully. If the document is not a quote at all, say so in su
     ],
   });
   const msg = await stream.finalMessage();
+  recordAiUsage(QUOTE_MODEL, msg.usage, "subquote");
   const textBlock = msg.content.find((b) => b.type === "text");
   const text =
     textBlock && "text" in textBlock ? (textBlock.text as string) : null;

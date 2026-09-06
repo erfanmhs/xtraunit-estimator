@@ -197,7 +197,7 @@ export default function GeneratePanel({
   const canGenerate = !busy && (mode === "full" || selected.length > 0);
 
   return (
-    <div className="flex w-full max-w-md flex-col items-end gap-2">
+    <div className="flex w-full max-w-md flex-col items-start gap-2">
       {run?.status === "error" && run.error ? (
         <p className="w-full rounded-lg border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm leading-relaxed text-brand-soft">
           {run.error}
@@ -223,7 +223,7 @@ export default function GeneratePanel({
       </div>
 
       {mode === "trades" ? (
-        <div className="flex flex-wrap justify-end gap-1">
+        <div className="flex flex-wrap justify-start gap-1">
           {DIVISIONS.map((d) => (
             <button key={d} type="button" onClick={() => toggle(d)} className={chip(selected.includes(d))}>
               {d}

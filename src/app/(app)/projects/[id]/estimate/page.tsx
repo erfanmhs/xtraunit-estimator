@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
 import EstimateView from "./EstimateView";
 import NextStep from "@/components/NextStep";
@@ -66,23 +67,14 @@ export default async function EstimatePage({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <Link
-              href={`/projects/${id}`}
-              className="text-xs text-muted transition-colors hover:text-brand-soft"
-            >
-              ← Back to project
-            </Link>
-            <h1 className="mt-1 font-heading text-2xl text-foreground">
-              Estimate
-            </h1>
-            <p className="text-sm text-muted">
-              {project?.name ?? "Project"} · direct cost + markups = the bid number
-            </p>
-          </div>
-          <NextStep href={`/projects/${id}/proposal`} label="Proposal" />
-        </div>
+        <PageHeader
+          back={{ href: `/projects/${id}`, label: "Back to project" }}
+          title="Estimate"
+          subtitle={
+            <>{project?.name ?? "Project"} · direct cost + markups = the bid number</>
+          }
+          action={<NextStep href={`/projects/${id}/proposal`} label="Proposal" />}
+        />
 
         {migrationMissing ? (
           <div className="mt-10 rounded-xl border border-brand/40 bg-brand/10 p-6">

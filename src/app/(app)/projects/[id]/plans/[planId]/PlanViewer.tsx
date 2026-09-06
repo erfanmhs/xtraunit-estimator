@@ -11,6 +11,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -24,6 +25,8 @@ import type { PlanFile } from "@/types";
 
 // On-sheet takeoff legend placement (fractions of the page + a size multiplier).
 type Ledger = { x: number; y: number; scale: number; visible: boolean };
+/** A cropped sheet's window onto its page: PDF points, top-left origin, page scale 1. */
+type Crop = { x: number; y: number; w: number; h: number };
 type Sheet = {
   id: string;
   page_number: number;
@@ -35,8 +38,32 @@ type Sheet = {
   scale_y: number | null;
   scale_preset: string | null;
   ledger?: Ledger | null;
+  crop?: Crop | null; // migration 0035 — a sheet cut from a page, non-destructively
+  source_sheet_id?: string | null;
+  created_at?: string;
 };
 type Pt = { x: number; y: number };
+
+// Standard paper shapes for the Crop tool (inches). Only the SHAPE is held —
+// the size is whatever you drag; the readout shows it in inches.
+const PAPER: { id: string; label: string; w: number; h: number }[] = [
+  { id: "free", label: "Free", w: 0, h: 0 },
+  { id: "ansi-a", label: "ANSI A · 8½×11", w: 8.5, h: 11 },
+  { id: "ansi-b", label: "ANSI B · 11×17", w: 11, h: 17 },
+  { id: "ansi-c", label: "ANSI C · 17×22", w: 17, h: 22 },
+  { id: "ansi-d", label: "ANSI D · 22×34", w: 22, h: 34 },
+  { id: "ansi-e", label: "ANSI E · 34×44", w: 34, h: 44 },
+  { id: "arch-a", label: "ARCH A · 9×12", w: 9, h: 12 },
+  { id: "arch-b", label: "ARCH B · 12×18", w: 12, h: 18 },
+  { id: "arch-c", label: "ARCH C · 18×24", w: 18, h: 24 },
+  { id: "arch-d", label: "ARCH D · 24×36", w: 24, h: 36 },
+  { id: "arch-e", label: "ARCH E · 36×48", w: 36, h: 48 },
+  { id: "a4", label: "A4 · 8.27×11.69", w: 8.27, h: 11.69 },
+  { id: "a3", label: "A3 · 11.69×16.54", w: 11.69, h: 16.54 },
+  { id: "a2", label: "A2 · 16.54×23.39", w: 16.54, h: 23.39 },
+  { id: "a1", label: "A1 · 23.39×33.11", w: 23.39, h: 33.11 },
+];
+const PT_PER_IN = 72;
 
 const DEFAULT_LEDGER: Ledger = { x: 0.7, y: 0.04, scale: 1, visible: false };
 // Base ledger size in PDF points (then × page zoom × the user's size multiplier).
@@ -70,7 +97,8 @@ type Tool =
   | "wall"
   | "volume"
   | "count"
-  | "leader";
+  | "leader"
+  | "crop";
 
 const MEAS_COLS =
   "id,type,geometry,value,unit,layer,color,wall_sided,wall_height,vol_mode,vol_width,vol_depth,text,font_size,head_size";
@@ -425,7 +453,72 @@ export default function PlanViewer({
   const [panelOpen, setPanelOpen] = useState(true);
   const [panelW, setPanelW] = useState(268);
   const [notesOpen, setNotesOpen] = useState(false);
+
+  // Narrow windows (tablet, half-screen laptop): start with both side panels
+  // collapsed so the DRAWING gets the width, and collapse again if the window
+  // is shrunk past the threshold. The user can still open them by hand.
+  useEffect(() => {
+    const NARROW = 1100;
+    let wasNarrow = window.innerWidth < NARROW;
+    if (wasNarrow) {
+      setNavOpen(false);
+      setPanelOpen(false);
+    }
+    const onResize = () => {
+      const narrow = window.innerWidth < NARROW;
+      if (narrow && !wasNarrow) {
+        setNavOpen(false);
+        setPanelOpen(false);
+      }
+      wasNarrow = narrow;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
+  // Sheets deleted in this session — hidden immediately, before the server
+  // re-render catches up (router.refresh keeps the old list for a beat).
+  const [removedSheetIds, setRemovedSheetIds] = useState<Set<string>>(new Set());
+  // Sheets cropped in this session — shown immediately, before the server
+  // re-render delivers them in `sheets`.
+  const [addedSheets, setAddedSheets] = useState<Sheet[]>([]);
+  // Which sheet is open. Several sheets can share a page (a page + its crops),
+  // so the page number alone isn't enough.
+  const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
+  // Crop tool: the rectangle being dragged (page points, relative to the
+  // current canvas), the paper shape it's held to, and its orientation.
+  const [cropDraft, setCropDraft] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [cropPreset, setCropPreset] = useState("free");
+  const [cropLandscape, setCropLandscape] = useState(true);
+  const [cropName, setCropName] = useState("");
+  const [cropBusy, setCropBusy] = useState(false);
+  const cropDragRef = useRef(false);
+
+  // ── Touch ──────────────────────────────────────────────────────────────────
+  // `coarse` = a finger, not a mouse: bigger hit targets, a capped bitmap,
+  // and the finger drawing model (place on LIFT, with a loupe to aim).
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setCoarse(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  // Fingers currently down on the viewport (client coords) → pinch when two.
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ dist0: number; scale0: number; fx: number; fy: number } | null>(null);
+  const pinchedRef = useRef(false); // a pinch happened during this touch — no point on lift
+  const zoomRafRef = useRef<number | null>(null);
+  // A finger placing a point: down → (slide, loupe) → lift = place.
+  const tapRef = useRef<{ id: number; x: number; y: number; t: number } | null>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+  const rowPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTapRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  // The magnifier that shows what's under the fingertip (center-column coords).
+  const [loupe, setLoupe] = useState<{ vx: number; vy: number; pt: Pt } | null>(null);
+  const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
   // Export-to-PDF dialog state.
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSel, setExportSel] = useState<Set<string>>(new Set());
@@ -501,7 +594,35 @@ export default function PlanViewer({
   const [layerVolW, setLayerVolW] = useState("");
   const [layerVolD, setLayerVolD] = useState("");
 
-  const currentSheet = sheets.find((s) => s.page_number === pageNum) ?? null;
+  // The sheet list: what the server sent + crops made this session − deleted,
+  // ordered by page then creation so a crop sits right under its page.
+  const sheetList = useMemo(() => {
+    const seen = new Set<string>();
+    const all: Sheet[] = [];
+    for (const s of [...sheets, ...addedSheets]) {
+      if (seen.has(s.id) || removedSheetIds.has(s.id)) continue;
+      seen.add(s.id);
+      all.push(s);
+    }
+    return all.sort(
+      (a, b) =>
+        a.page_number - b.page_number ||
+        (a.crop ? 1 : 0) - (b.crop ? 1 : 0) ||
+        (a.created_at ?? "").localeCompare(b.created_at ?? ""),
+    );
+  }, [sheets, addedSheets, removedSheetIds]);
+  const currentSheet =
+    sheetList.find((s) => s.id === activeSheetId) ??
+    sheetList.find((s) => s.page_number === pageNum && !s.crop) ??
+    sheetList.find((s) => s.page_number === pageNum) ??
+    null;
+  const crop = currentSheet?.crop ?? null;
+  const cropKey = crop ? `${crop.x},${crop.y},${crop.w},${crop.h}` : "";
+  const sheetIndex = sheetList.findIndex((s) => s.id === currentSheet?.id);
+  function openSheet(s: Sheet) {
+    setActiveSheetId(s.id);
+    setPageNum(s.page_number);
+  }
   const currentScale = currentSheet ? scales[currentSheet.id] : null;
   const currentLedger = currentSheet
     ? (ledgers[currentSheet.id] ?? DEFAULT_LEDGER)
@@ -569,12 +690,15 @@ export default function PlanViewer({
     if (!pdf || !box) return;
     const page = await pdf.getPage(pageNum);
     const base = page.getViewport({ scale: 1 });
-    const next = Math.max(0.1, Math.min((box.clientWidth - 48) / base.width, 4));
-    setBaseDims({ w: base.width, h: base.height });
+    const w = crop ? crop.w : base.width;
+    const h = crop ? crop.h : base.height;
+    const next = Math.max(0.1, Math.min((box.clientWidth - 48) / w, 4));
+    setBaseDims({ w, h });
     pendingCenterRef.current = true;
     setScale(next);
     setRasterScale(next);
-  }, [pageNum]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageNum, cropKey]);
 
   // Track the viewport size so the canvas can be padded by a full viewport on
   // every side (an "infinite canvas" — the page can be scrolled anywhere).
@@ -588,10 +712,11 @@ export default function PlanViewer({
     return () => ro.disconnect();
   }, []);
 
-  // Re-center when switching sheets/pages.
+  // Re-center when switching sheets/pages (a crop of the same page counts).
   useEffect(() => {
     pendingCenterRef.current = true;
-  }, [pageNum]);
+    setCropDraft(null);
+  }, [pageNum, activeSheetId]);
 
   useEffect(() => {
     if (status === "ready") fitWidth();
@@ -607,12 +732,21 @@ export default function PlanViewer({
       const page = await pdf.getPage(pageNum);
       if (cancelled) return;
       const base = page.getViewport({ scale: 1 });
-      setBaseDims({ w: base.width, h: base.height });
-      const viewport = page.getViewport({ scale: rasterScale });
+      // A cropped sheet shows just its window: shift the page so the crop's
+      // corner lands at the canvas origin, and size the canvas to the crop.
+      // Measurements on a cropped sheet are stored in this crop-local space.
+      const w = crop ? crop.w : base.width;
+      const h = crop ? crop.h : base.height;
+      setBaseDims({ w, h });
+      const viewport = page.getViewport({
+        scale: rasterScale,
+        offsetX: crop ? -crop.x * rasterScale : 0,
+        offsetY: crop ? -crop.y * rasterScale : 0,
+      });
       const canvas = canvasRef.current;
       if (!canvas) return;
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      canvas.width = Math.ceil(w * rasterScale);
+      canvas.height = Math.ceil(h * rasterScale);
       const ctx = canvas.getContext("2d")!;
       if (taskRef.current) {
         try {
@@ -628,7 +762,8 @@ export default function PlanViewer({
     return () => {
       cancelled = true;
     };
-  }, [status, pageNum, rasterScale]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, pageNum, rasterScale, cropKey]);
 
   // Wheel zoom toward cursor; block middle-button autoscroll.
   useEffect(() => {
@@ -693,11 +828,46 @@ export default function PlanViewer({
 
   // After zooming settles, re-rasterize the page crisply at the new scale. The
   // display size is already correct, so this swap causes no visual jump.
+  // Touch devices cap the bitmap: phones and iPads fail past ~12–16M canvas
+  // pixels (a 24×36 sheet at 3× is 40M). The CSS size still follows `scale`;
+  // only sharpness beyond the cap is traded away.
   useEffect(() => {
-    if (scale === rasterScale) return;
-    const t = setTimeout(() => setRasterScale(scale), 160);
+    const maxPixels = coarse ? 12_000_000 : 40_000_000;
+    const cap =
+      baseDims.w && baseDims.h ? Math.sqrt(maxPixels / (baseDims.w * baseDims.h)) : Infinity;
+    const target = Math.min(scale, cap);
+    if (target === rasterScale) return;
+    const t = setTimeout(() => setRasterScale(target), 160);
     return () => clearTimeout(t);
-  }, [scale, rasterScale]);
+  }, [scale, rasterScale, coarse, baseDims.w, baseDims.h]);
+
+  // Draw the loupe: the bitmap around the fingertip, magnified, with a crosshair.
+  useEffect(() => {
+    const lc = loupeCanvasRef.current;
+    const src = canvasRef.current;
+    if (!loupe || !lc || !src) return;
+    const ctx = lc.getContext("2d");
+    if (!ctx) return;
+    const SIZE = 120;
+    const MAG = 2.5;
+    const span = SIZE / MAG / scale; // page points across the loupe
+    const sx = (loupe.pt.x - span / 2) * rasterScale;
+    const sy = (loupe.pt.y - span / 2) * rasterScale;
+    const sw = span * rasterScale;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    try {
+      ctx.drawImage(src, sx, sy, sw, sw, 0, 0, SIZE, SIZE);
+    } catch {}
+    ctx.strokeStyle = "#A01C2D";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(SIZE / 2, 0);
+    ctx.lineTo(SIZE / 2, SIZE);
+    ctx.moveTo(0, SIZE / 2);
+    ctx.lineTo(SIZE, SIZE / 2);
+    ctx.stroke();
+  }, [loupe, scale, rasterScale]);
 
   // Keyboard: Esc cancels/steps back, Delete removes selection, Space pans.
   useEffect(() => {
@@ -971,7 +1141,8 @@ export default function PlanViewer({
     const rect = svgRef.current!.getBoundingClientRect();
     return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
   }
-  const TOL = () => 8 / scale; // selection tolerance, in points
+  // Selection tolerance in page points: a fingertip needs twice a cursor's.
+  const TOL = () => (coarse ? 16 : 8) / scale;
 
   async function insertMeasurement(
     type: string,
@@ -1255,36 +1426,150 @@ export default function PlanViewer({
     return best && best.d <= TOL() ? best.id : null;
   }
 
-  // ---- pointer handling on the overlay ----
-  function onPointerDown(e: React.PointerEvent) {
-    if (e.button !== 0 || spaceHeld) return; // middle/right + space-pan bubble to pan
-    const pt = evtToPoint(e);
+  // ---- crop tool helpers ----
+  // Hold the dragged corner to the chosen paper shape (w:h), keeping the drag
+  // direction. "Free" leaves it alone.
+  function constrainCrop(a: Pt, b: Pt): Pt {
+    const p = PAPER.find((x) => x.id === cropPreset);
+    if (!p || !p.w) return b;
+    const ratio = cropLandscape ? p.h / p.w : p.w / p.h; // width ÷ height
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const w = Math.max(Math.abs(dx), Math.abs(dy) * ratio);
+    const h = w / ratio;
+    return { x: a.x + Math.sign(dx || 1) * w, y: a.y + Math.sign(dy || 1) * h };
+  }
+  // The draft as a rectangle in the CURRENT canvas's page space, clamped to it.
+  const cropRect = (() => {
+    if (!cropDraft) return null;
+    const x0 = Math.max(0, Math.min(cropDraft.a.x, cropDraft.b.x));
+    const y0 = Math.max(0, Math.min(cropDraft.a.y, cropDraft.b.y));
+    const x1 = Math.min(baseDims.w, Math.max(cropDraft.a.x, cropDraft.b.x));
+    const y1 = Math.min(baseDims.h, Math.max(cropDraft.a.y, cropDraft.b.y));
+    if (x1 - x0 < 4 || y1 - y0 < 4) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  })();
 
-    if (tool === "select") {
-      // grab a vertex handle of the selected measurement?
-      if (selected) {
-        for (let i = 0; i < selected.geometry.length; i++) {
-          const v = selected.geometry[i];
-          if (Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6) {
-            dragRef.current = { id: selected.id, index: i, pointerId: e.pointerId };
-            setEditGeom(selected.geometry.map((q) => ({ ...q })));
-            try {
-              svgRef.current?.setPointerCapture(e.pointerId);
-            } catch {}
-            return;
-          }
-        }
+  /** Save the dragged rectangle as a NEW sheet of this page (the original is untouched). */
+  async function createCroppedSheet() {
+    if (!cropRect || !currentSheet || cropBusy) return;
+    setCropBusy(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Your session expired — please sign in again.");
+      // A crop of a crop: store it in full-page coordinates.
+      const abs: Crop = {
+        x: Math.round(((crop?.x ?? 0) + cropRect.x) * 100) / 100,
+        y: Math.round(((crop?.y ?? 0) + cropRect.y) * 100) / 100,
+        w: Math.round(cropRect.w * 100) / 100,
+        h: Math.round(cropRect.h * 100) / 100,
+      };
+      const name = cropName.trim() || `${sheetTitle(currentSheet)} — crop`;
+      const sc = scales[currentSheet.id];
+      const { data, error } = await supabase
+        .from("sheets")
+        .insert({
+          project_id: projectId,
+          plan_file_id: planFile.id,
+          owner_id: user.id,
+          page_number: currentSheet.page_number,
+          name,
+          label: currentSheet.label,
+          discipline: (disciplines[currentSheet.id] ?? "").trim() || null,
+          // Same page, same drawing scale — carry it over so measuring works immediately.
+          scale_x: sc?.x ?? null,
+          scale_y: sc?.y ?? null,
+          scale_preset: sc?.preset ?? null,
+          crop: abs,
+          source_sheet_id: currentSheet.id,
+        })
+        .select(
+          "id,page_number,name,label,notes,discipline,scale_x,scale_y,scale_preset,ledger,crop,source_sheet_id,created_at",
+        )
+        .single();
+      if (error || !data) {
+        const msg = error?.message ?? "";
+        throw new Error(
+          /column|schema cache/i.test(msg)
+            ? "Cropping needs one database change first: run migration 0035_sheet_crop.sql in Supabase (see PENDING-DB-CHANGES.md)."
+            : `Could not save the crop: ${msg}`,
+        );
       }
-      setSelectedId(pickMeasurementAt(pt));
-      return;
+      const s = data as Sheet;
+      setAddedSheets((prev) => [...prev, s]);
+      setSheetNames((p) => ({ ...p, [s.id]: s.name ?? "" }));
+      setDisciplines((p) => ({ ...p, [s.id]: s.discipline ?? "" }));
+      setNotes((p) => ({ ...p, [s.id]: "" }));
+      setScales((p) => ({ ...p, [s.id]: { x: s.scale_x, y: s.scale_y, preset: s.scale_preset } }));
+      setLedgers((p) => ({ ...p, [s.id]: DEFAULT_LEDGER }));
+      setCropDraft(null);
+      setCropName("");
+      setTool("select");
+      openSheet(s);
+      router.refresh();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCropBusy(false);
     }
+  }
 
-    if (tool === "browse") return;
+  // ---- touch helpers ----
+  // Long-press (500 ms, finger still) = the right-click menu.
+  function startLongPress(cx: number, cy: number) {
+    cancelLongPress();
+    longPressFiredRef.current = false;
+    longPressRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const pt = { x: (cx - rect.left) / scale, y: (cy - rect.top) / scale };
+      const id = pickMeasurementAt(pt);
+      setMenu(id ? { x: cx, y: cy, kind: "measurement", id } : { x: cx, y: cy, kind: "canvas" });
+      setLoupe(null);
+    }, 500);
+  }
+  function cancelLongPress() {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  }
+  function cancelTouchTap() {
+    tapRef.current = null;
+    cancelLongPress();
+    setLoupe(null);
+  }
+  function showLoupe(e: React.PointerEvent) {
+    const host = viewportRef.current?.parentElement; // the center column (relative)
+    if (!host) return;
+    const hr = host.getBoundingClientRect();
+    setLoupe({ vx: e.clientX - hr.left, vy: e.clientY - hr.top, pt: evtToPoint(e) });
+  }
+  // Zoom so the page point under (clientX, clientY) stays put — the tap
+  // fallback for pinch (double-tap in Pan mode, the +/− buttons).
+  function zoomAt(clientX: number, clientY: number, next: number) {
+    const vp = viewportRef.current;
+    const canvas = canvasRef.current;
+    if (!vp || !canvas) return;
+    const crect = canvas.getBoundingClientRect();
+    const vrect = vp.getBoundingClientRect();
+    focusRef.current = {
+      fx: crect.width ? (clientX - crect.left) / crect.width : 0.5,
+      fy: crect.height ? (clientY - crect.top) / crect.height : 0.5,
+      vx: clientX - vrect.left,
+      vy: clientY - vrect.top,
+    };
+    setScale(Math.max(0.1, Math.min(6, next)));
+  }
 
+  // Place a point for the current draw tool (mouse: on press; finger: on lift).
+  function placePoint(pt: Pt) {
     // starting a fresh shape clears the finalize dedupe guard
     if (draft.length === 0) finalizingRef.current = false;
 
-    // draw tools
     if (tool === "count") {
       addCountMarker(pt);
       return;
@@ -1331,7 +1616,72 @@ export default function PlanViewer({
     }
   }
 
+  // ---- pointer handling on the overlay ----
+  function onPointerDown(e: React.PointerEvent) {
+    if (e.button !== 0 || spaceHeld) return; // middle/right + space-pan bubble to pan
+    const pt = evtToPoint(e);
+
+    // Finger on a draw tool: nothing is placed yet. The point goes where the
+    // finger LIFTS (slide to aim with the loupe); a second finger turns the
+    // gesture into a pinch instead; holding still opens the menu.
+    if (e.pointerType === "touch" && tool !== "select" && tool !== "crop" && tool !== "browse") {
+      if (pointersRef.current.size > 1) return;
+      tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
+      showLoupe(e);
+      startLongPress(e.clientX, e.clientY);
+      return;
+    }
+    if (e.pointerType === "touch" && tool === "select") startLongPress(e.clientX, e.clientY);
+
+    if (tool === "select") {
+      // grab a vertex handle of the selected measurement?
+      if (selected) {
+        for (let i = 0; i < selected.geometry.length; i++) {
+          const v = selected.geometry[i];
+          if (Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6) {
+            dragRef.current = { id: selected.id, index: i, pointerId: e.pointerId };
+            setEditGeom(selected.geometry.map((q) => ({ ...q })));
+            try {
+              svgRef.current?.setPointerCapture(e.pointerId);
+            } catch {}
+            return;
+          }
+        }
+      }
+      setSelectedId(pickMeasurementAt(pt));
+      return;
+    }
+
+    if (tool === "browse") return;
+
+    // Crop: drag a rectangle (held to the chosen paper shape).
+    if (tool === "crop") {
+      cropDragRef.current = true;
+      setCropDraft({ a: pt, b: pt });
+      try {
+        svgRef.current?.setPointerCapture(e.pointerId);
+      } catch {}
+      return;
+    }
+
+    placePoint(pt);
+  }
+
   function onPointerMove(e: React.PointerEvent) {
+    // A finger aiming a point: move the loupe and the rubber-band, place later.
+    if (e.pointerType === "touch" && tapRef.current?.id === e.pointerId) {
+      if (Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10)
+        cancelLongPress();
+      showLoupe(e);
+      if (draft.length) setHover(evtToPoint(e));
+      return;
+    }
+    if (tool === "crop") {
+      if (!cropDragRef.current) return;
+      const pt = evtToPoint(e);
+      setCropDraft((d) => (d ? { a: d.a, b: constrainCrop(d.a, pt) } : d));
+      return;
+    }
     if (tool === "select") {
       if (dragRef.current) {
         const pt = evtToPoint(e);
@@ -1357,7 +1707,27 @@ export default function PlanViewer({
     }
   }
 
-  async function onPointerUp() {
+  async function onPointerUp(e: React.PointerEvent) {
+    if (e.pointerType === "touch") {
+      if (tapRef.current?.id === e.pointerId) {
+        const fired = longPressFiredRef.current;
+        const pt = evtToPoint(e);
+        cancelTouchTap();
+        // A long-press opened the menu, or a pinch happened: no point.
+        if (fired || pinchedRef.current) return;
+        placePoint(pt);
+        return;
+      }
+      cancelLongPress();
+    }
+    if (tool === "crop") {
+      cropDragRef.current = false;
+      // A click without a drag is not a crop.
+      setCropDraft((d) =>
+        d && Math.abs(d.b.x - d.a.x) > 4 && Math.abs(d.b.y - d.a.y) > 4 ? d : null,
+      );
+      return;
+    }
     if (tool === "select" && dragRef.current && editGeom) {
       const id = dragRef.current.id;
       dragRef.current = null;
@@ -1716,10 +2086,53 @@ export default function PlanViewer({
     await applyHistory(target, "undo");
   }
 
-  // ---- pan ----
+  // ---- pan + touch gestures ----
+  // Mouse: right/middle drag (or Space) pans; the wheel zooms. Finger: ONE
+  // finger draws (or pans in Pan mode); TWO fingers pinch-zoom and pan in ANY
+  // tool. Touch pointers are implicitly captured by the element they started
+  // on and bubble here, so the viewport sees every finger without capturing.
+  function midAndDist(): { mx: number; my: number; d: number } | null {
+    const pts = [...pointersRef.current.values()];
+    if (pts.length < 2) return null;
+    const [a, b] = pts;
+    return { mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
+  }
   function onPanDown(e: React.PointerEvent) {
     const vp = viewportRef.current;
     if (!vp) return;
+    if (e.pointerType === "touch") {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointersRef.current.size === 2) {
+        // Second finger: whatever the first was doing becomes a pinch.
+        const g = midAndDist()!;
+        const crect = canvasRef.current?.getBoundingClientRect();
+        pinchRef.current = {
+          dist0: Math.max(g.d, 1),
+          scale0: scale,
+          fx: crect && crect.width ? (g.mx - crect.left) / crect.width : 0.5,
+          fy: crect && crect.height ? (g.my - crect.top) / crect.height : 0.5,
+        };
+        pinchedRef.current = true;
+        panRef.current = null;
+        cancelTouchTap();
+        return;
+      }
+      if (pointersRef.current.size > 2) return;
+      pinchedRef.current = false;
+      if (tool === "browse" || spaceHeld) {
+        // Double-tap = zoom in here (the tap fallback for pinch).
+        const last = lastTapRef.current;
+        const now = Date.now();
+        if (last && now - last.t < 300 && Math.hypot(last.x - e.clientX, last.y - e.clientY) < 24) {
+          lastTapRef.current = null;
+          zoomAt(e.clientX, e.clientY, scale * 2);
+          return;
+        }
+        lastTapRef.current = { x: e.clientX, y: e.clientY, t: now };
+        panRef.current = { x: e.clientX, y: e.clientY, sl: vp.scrollLeft, st: vp.scrollTop };
+      }
+      return;
+    }
     if (e.button === 2) panMovedRef.current = false; // track right-drag vs right-click
     if (
       e.button === 1 || // middle
@@ -1732,7 +2145,36 @@ export default function PlanViewer({
   }
   function onPanMove(e: React.PointerEvent) {
     const vp = viewportRef.current;
-    if (!vp || !panRef.current) return;
+    if (!vp) return;
+    if (e.pointerType === "touch") {
+      if (pointersRef.current.has(e.pointerId))
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const p = pinchRef.current;
+      const g = midAndDist();
+      if (p && g) {
+        const next = Math.max(0.1, Math.min(6, (p.scale0 * g.d) / p.dist0));
+        const vrect = vp.getBoundingClientRect();
+        const canvas = canvasRef.current;
+        if (Math.abs(next - scale) / scale > 0.004) {
+          // Zoom: the layout effect keeps fx/fy under the fingers' midpoint.
+          focusRef.current = { fx: p.fx, fy: p.fy, vx: g.mx - vrect.left, vy: g.my - vrect.top };
+          if (zoomRafRef.current == null)
+            zoomRafRef.current = requestAnimationFrame(() => {
+              zoomRafRef.current = null;
+              setScale(next);
+            });
+        } else if (canvas) {
+          // Two-finger pan at steady zoom: keep the anchored point under the midpoint.
+          const crect = canvas.getBoundingClientRect();
+          const originX = crect.left - vrect.left + vp.scrollLeft;
+          const originY = crect.top - vrect.top + vp.scrollTop;
+          vp.scrollLeft = originX + p.fx * crect.width - (g.mx - vrect.left);
+          vp.scrollTop = originY + p.fy * crect.height - (g.my - vrect.top);
+        }
+        return;
+      }
+    }
+    if (!panRef.current) return;
     if (
       Math.abs(e.clientX - panRef.current.x) > 4 ||
       Math.abs(e.clientY - panRef.current.y) > 4
@@ -1744,6 +2186,12 @@ export default function PlanViewer({
   }
   function onPanEnd(e: React.PointerEvent) {
     const vp = viewportRef.current;
+    if (e.pointerType === "touch") {
+      pointersRef.current.delete(e.pointerId);
+      if (pointersRef.current.size < 2) pinchRef.current = null;
+      if (pointersRef.current.size === 0) panRef.current = null;
+      return;
+    }
     if (panRef.current && vp) {
       try {
         vp.releasePointerCapture(e.pointerId);
@@ -1779,8 +2227,15 @@ export default function PlanViewer({
     )
       return;
     setMenu(null);
-    await supabase.from("measurements").delete().eq("sheet_id", id);
-    await supabase.from("sheets").delete().eq("id", id);
+    const m = await supabase.from("measurements").delete().eq("sheet_id", id);
+    const s = m.error ? m : await supabase.from("sheets").delete().eq("id", id);
+    if (s.error) {
+      // Say so — a silent failure looks like "the button does nothing".
+      window.alert(`Could not delete the sheet: ${s.error.message}`);
+      return;
+    }
+    setRemovedSheetIds((prev) => new Set(prev).add(id)); // drop it from the list now
+    if (activeSheetId === id) setActiveSheetId(null);
     if (pageNum === pageNumber) setPageNum(1);
     router.refresh();
   }
@@ -1976,17 +2431,20 @@ export default function PlanViewer({
     }
   }
 
+  // Order matters on a phone: the tools row scrolls sideways, so the ones used
+  // most sit first and stay visible.
   const TOOLS: { id: Tool; label: string }[] = [
     { id: "select", label: "Select" },
     { id: "browse", label: "Pan" },
-    { id: "calibrate", label: "Calibrate" },
     { id: "line", label: "Line" },
-    { id: "polyline", label: "Polyline" },
     { id: "area", label: "Area" },
+    { id: "count", label: "Count" },
+    { id: "polyline", label: "Polyline" },
     { id: "wall", label: "Wall" },
     { id: "volume", label: "Volume" },
-    { id: "count", label: "Count" },
     { id: "leader", label: "Leader" },
+    { id: "calibrate", label: "Calibrate" },
+    { id: "crop", label: "Crop" },
   ];
 
   // Running totals for this sheet, grouped by layer and summed per unit.
@@ -2026,10 +2484,10 @@ export default function PlanViewer({
           })()
         : menu.kind === "sheet"
           ? (() => {
-              const s = sheets.find((x) => x.id === menu.id);
+              const s = sheetList.find((x) => x.id === menu.id);
               return s
                 ? [
-                    { label: "Open", onClick: () => setPageNum(s.page_number) },
+                    { label: "Open", onClick: () => openSheet(s) },
                     {
                       label: "Rename",
                       onClick: () => setEditingSheetId(s.id),
@@ -2070,6 +2528,18 @@ export default function PlanViewer({
                 >
                   {planFile.file_name}
                 </p>
+                {/* Categorizing happens here (only here). Uncategorized sheets
+                    are still read — by EVERY AI pass — so this is a cost nudge. */}
+                {(() => {
+                  const n = sheetList.filter(
+                    (s) => !(disciplines[s.id] ?? "").trim(),
+                  ).length;
+                  return n > 0 ? (
+                    <p className="mt-0.5 text-[11px] text-amber-300/90">
+                      {n} sheet{n > 1 ? "s" : ""} to categorize — routes the AI to the right sheets
+                    </p>
+                  ) : null;
+                })()}
               </div>
               <button
                 type="button"
@@ -2081,8 +2551,8 @@ export default function PlanViewer({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
-              {sheets.map((s) => {
-                const active = s.page_number === pageNum;
+              {sheetList.map((s) => {
+                const active = s.id === currentSheet?.id;
                 const editing = editingSheetId === s.id;
                 return (
                   <div
@@ -2096,16 +2566,45 @@ export default function PlanViewer({
                         id: s.id,
                       });
                     }}
-                    className={`rounded-lg text-sm transition-colors ${
+                    // Long-press (finger held ~0.5 s) = the same menu as right-click.
+                    onPointerDown={(e) => {
+                      if (e.pointerType !== "touch") return;
+                      const { clientX: x, clientY: y } = e;
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
+                      rowPressRef.current = setTimeout(
+                        () => setMenu({ x, y, kind: "sheet", id: s.id }),
+                        500,
+                      );
+                    }}
+                    onPointerUp={() => {
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
+                    }}
+                    onPointerMove={() => {
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
+                    }}
+                    onPointerCancel={() => {
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
+                    }}
+                    className={`rounded-lg text-sm transition-colors ${s.crop ? "ml-3" : ""} ${
                       active
                         ? "glass-brand text-foreground"
                         : "text-muted hover:bg-white/5 hover:text-foreground"
                     }`}
                   >
                     <div className="group flex items-center gap-1 px-2 py-1.5">
+                      {s.crop ? (
+                        <span
+                          className="shrink-0 rounded border border-white/15 px-1 text-[9px] uppercase tracking-wider text-muted"
+                          title="Cropped from this page — the original is untouched"
+                        >
+                          crop
+                        </span>
+                      ) : null}
                       {editing ? (
                         <input
                           autoFocus
+                          spellCheck
+                          aria-label="Sheet name"
                           defaultValue={sheetNames[s.id] ?? ""}
                           placeholder={`Sheet ${s.page_number}`}
                           onBlur={(e) => {
@@ -2129,7 +2628,7 @@ export default function PlanViewer({
                         <>
                           <button
                             type="button"
-                            onClick={() => setPageNum(s.page_number)}
+                            onClick={() => openSheet(s)}
                             onDoubleClick={() => setEditingSheetId(s.id)}
                             title="Click to open · double-click to rename"
                             className="min-w-0 flex-1 truncate text-left"
@@ -2140,7 +2639,7 @@ export default function PlanViewer({
                             type="button"
                             onClick={() => setEditingSheetId(s.id)}
                             title="Rename"
-                            className="shrink-0 rounded px-1 text-xs text-muted opacity-0 transition hover:text-brand-soft group-hover:opacity-100"
+                            className="shrink-0 rounded px-1 text-xs text-muted opacity-0 transition hover:text-brand-soft group-hover:opacity-100 pointer-coarse:opacity-100"
                           >
                             ✎
                           </button>
@@ -2180,42 +2679,23 @@ export default function PlanViewer({
             onPointerDown={(e) => startResize("left", e)}
           />
         </>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setNavOpen(true)}
-          title="Show sheets"
-          className="glass-strong absolute left-2 top-2 z-20 rounded-md px-2.5 py-1 text-sm text-foreground"
-        >
-          » Sheets
-        </button>
-      )}
+      ) : null}
 
       {/* Center */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="glass-strong z-10 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
           <div className="flex items-center gap-2 text-muted">
-            <button
-              type="button"
-              onClick={() => setPageNum((p) => Math.max(1, p - 1))}
-              disabled={pageNum <= 1}
-              className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand disabled:opacity-40"
-            >
-              ‹
-            </button>
-            <span>
-              {pageNum} / {numPages || "…"}
-            </span>
-            <button
-              type="button"
-              onClick={() => setPageNum((p) => Math.min(numPages, p + 1))}
-              disabled={pageNum >= numPages}
-              className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand disabled:opacity-40"
-            >
-              ›
-            </button>
-            <span className="mx-1 h-5 w-px bg-border" />
+            {!navOpen ? (
+              <button
+                type="button"
+                onClick={() => setNavOpen(true)}
+                title="Show sheets"
+                className="rounded-md border border-border px-2.5 py-1 text-foreground hover:border-brand"
+              >
+                » Sheets
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={undo}
@@ -2236,13 +2716,14 @@ export default function PlanViewer({
             </button>
           </div>
 
-          <div className="flex items-center gap-1">
+          {/* Scrolls sideways on narrow screens instead of clipping tools off. */}
+          <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto">
             {TOOLS.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => selectTool(t.id)}
-                className={`rounded-md border px-3 py-1 transition-colors ${
+                className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1 transition-colors ${
                   tool === t.id
                     ? "border-brand bg-brand/15 text-foreground"
                     : "border-border text-muted hover:border-brand"
@@ -2325,6 +2806,16 @@ export default function PlanViewer({
             >
               Export PDF
             </button>
+            {!panelOpen ? (
+              <button
+                type="button"
+                onClick={() => setPanelOpen(true)}
+                title="Show measurements"
+                className="rounded-md border border-border px-2.5 py-1 text-foreground hover:border-brand"
+              >
+                « Panel
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -2508,10 +2999,17 @@ export default function PlanViewer({
           onPointerDown={onPanDown}
           onPointerMove={onPanMove}
           onPointerUp={onPanEnd}
+          onPointerCancel={onPanEnd}
           onPointerLeave={onPanEnd}
           onContextMenu={onCanvasContextMenu}
           className="relative min-h-0 flex-1 overflow-auto bg-black/40"
-          style={{ cursor: spaceHeld || tool === "browse" ? "grab" : "default" }}
+          // touch-action none: the browser hands us every finger instead of
+          // scrolling/zooming the page itself — required for pinch + draw.
+          style={{
+            cursor: spaceHeld || tool === "browse" ? "grab" : "default",
+            touchAction: "none",
+            overscrollBehavior: "contain",
+          }}
         >
           {status === "error" ? (
             <p className="absolute inset-0 flex items-center justify-center text-sm text-brand-soft">
@@ -2557,6 +3055,38 @@ export default function PlanViewer({
                           : "crosshair",
                   }}
                 >
+                  {/* Crop tool: the dragged window, with the rest dimmed */}
+                  {tool === "crop" && cropRect ? (
+                    <g pointerEvents="none">
+                      <path
+                        d={`M0 0H${displayW}V${displayH}H0Z M${cropRect.x * scale} ${cropRect.y * scale}h${cropRect.w * scale}v${cropRect.h * scale}h${-cropRect.w * scale}Z`}
+                        fill="rgba(0,0,0,0.45)"
+                        fillRule="evenodd"
+                      />
+                      <rect
+                        x={cropRect.x * scale}
+                        y={cropRect.y * scale}
+                        width={cropRect.w * scale}
+                        height={cropRect.h * scale}
+                        fill="none"
+                        stroke="#A01C2D"
+                        strokeWidth={2}
+                        strokeDasharray="6 4"
+                      />
+                      <text
+                        x={cropRect.x * scale + 6}
+                        y={cropRect.y * scale + 16}
+                        fontSize={12}
+                        fontWeight={700}
+                        fill="#fff"
+                        stroke="#000"
+                        strokeWidth={3}
+                        style={{ paintOrder: "stroke" }}
+                      >
+                        {(cropRect.w / PT_PER_IN).toFixed(1)}″ × {(cropRect.h / PT_PER_IN).toFixed(1)}″
+                      </text>
+                    </g>
+                  ) : null}
                   {measurements
                     .filter((m) => !hiddenLayers.has(layerKeyOf(m.layer)))
                     .map((m) => {
@@ -2699,7 +3229,7 @@ export default function PlanViewer({
                                 key={i}
                                 cx={p.x}
                                 cy={p.y}
-                                r={5}
+                                r={coarse ? 11 : 5}
                                 fill="#fff"
                                 stroke={m.color ?? "#A01C2D"}
                                 strokeWidth={2}
@@ -2887,28 +3417,133 @@ export default function PlanViewer({
               </div>
             </div>
           )}
-          {status === "ready" ? (
-            <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-[11px] text-muted">
-              {tool === "count"
-                ? "Click each item (auto-saved) · click a marker again to remove it · Finish when done · "
-                : tool === "polyline" ||
-                    tool === "wall" ||
-                    (tool === "volume" && volMode === "linear")
-                  ? "Click to add points · double-click to finish · "
-                  : tool === "area" || (tool === "volume" && volMode === "area")
-                    ? "Click corners · click the first point or double-click to close · "
-                    : tool === "leader"
-                      ? "Click where the arrow points, then click to place the text box · "
-                      : ""}
-              Esc: cancel · Right-drag / Space / middle-drag: pan · Del: delete
-            </div>
-          ) : null}
         </div>
 
-        {/* Floating glassy notes (collapses to a chip to save space) */}
-        <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 w-[min(720px,92%)] -translate-x-1/2">
-          {notesOpen ? (
-            <div className="glass-strong pointer-events-auto rounded-2xl p-4">
+        {/* Loupe: what's under the fingertip, magnified, above the finger */}
+        {loupe ? (
+          <div
+            className="pointer-events-none absolute z-30 overflow-hidden rounded-full border-2 border-brand bg-white shadow-xl"
+            style={{ left: loupe.vx - 60, top: loupe.vy - 60 - 90, width: 120, height: 120 }}
+            aria-hidden
+          >
+            <canvas ref={loupeCanvasRef} width={120} height={120} className="block" />
+          </div>
+        ) : null}
+
+        {/* While drawing: Finish / Undo point / Cancel — no double-tap or
+            precise "tap the last vertex" needed. Works for mouse too. */}
+        {draft.length > 0 && tool !== "crop" ? (
+          (() => {
+            const multi = tool === "polyline" || tool === "area" || tool === "wall" || tool === "volume";
+            const fill = tool === "area" || (tool === "volume" && volMode === "area");
+            const minPts = fill ? 3 : 2;
+            return (
+              <div className="glass-strong absolute bottom-12 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full px-2 py-1 text-xs">
+                <span className="px-1.5 text-muted tabular-nums">
+                  {draft.length} pt{draft.length > 1 ? "s" : ""}
+                </span>
+                {multi ? (
+                  <button
+                    type="button"
+                    onClick={onDoubleClick}
+                    disabled={draft.length < minPts}
+                    className="rounded-full bg-brand px-3 py-1 font-medium text-white disabled:opacity-40"
+                  >
+                    ✓ {fill ? "Close shape" : "Finish"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setDraft((d) => d.slice(0, -1))}
+                  className="rounded-full border border-border px-2.5 py-1 text-foreground"
+                >
+                  Undo point
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft([]);
+                    setHover(null);
+                  }}
+                  className="rounded-full px-2 py-1 text-muted"
+                >
+                  Cancel
+                </button>
+              </div>
+            );
+          })()
+        ) : null}
+
+        {/* Crop tool panel: paper shape, orientation, name, create */}
+        {tool === "crop" ? (
+          <div className="glass-strong absolute bottom-12 left-3 z-20 w-[min(18rem,calc(100%-1.5rem))] rounded-xl p-3 text-sm">
+            <p className="text-xs uppercase tracking-wider text-muted">Crop to a new sheet</p>
+            <p className="mt-0.5 text-[11px] text-muted">
+              Drag a box on the drawing. The original sheet stays as it is; the crop becomes its own sheet
+              with its own name, category, notes and measurements.
+            </p>
+            <div className="mt-2 flex items-center gap-1.5">
+              <select
+                value={cropPreset}
+                onChange={(e) => setCropPreset(e.target.value)}
+                aria-label="Paper shape"
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
+              >
+                {PAPER.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              {cropPreset !== "free" ? (
+                <button
+                  type="button"
+                  onClick={() => setCropLandscape((v) => !v)}
+                  title="Rotate the shape"
+                  className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:border-brand"
+                >
+                  {cropLandscape ? "▭ Landscape" : "▯ Portrait"}
+                </button>
+              ) : null}
+            </div>
+            <input
+              value={cropName}
+              onChange={(e) => setCropName(e.target.value)}
+              placeholder={currentSheet ? `${sheetTitle(currentSheet)} — crop` : "New sheet name"}
+              spellCheck
+              aria-label="New sheet name"
+              className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={createCroppedSheet}
+                disabled={!cropRect || cropBusy}
+                className="glass-brand rounded-md px-3 py-1.5 text-xs font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
+              >
+                {cropBusy ? "Saving…" : "Create sheet from crop"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCropDraft(null)}
+                disabled={!cropRect}
+                className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted hover:text-foreground disabled:opacity-40"
+              >
+                Clear
+              </button>
+              {cropRect ? (
+                <span className="ml-auto text-[11px] text-muted tabular-nums">
+                  {(cropRect.w / PT_PER_IN).toFixed(1)}″ × {(cropRect.h / PT_PER_IN).toFixed(1)}″
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Sheet notes — floats just above the bottom bar when open */}
+        {notesOpen ? (
+          <div className="absolute bottom-11 left-1/2 z-20 w-[min(720px,92%)] -translate-x-1/2">
+            <div className="glass-strong rounded-2xl p-4">
               <div className="mb-1.5 flex items-center justify-between">
                 <label
                   htmlFor="sheet-notes"
@@ -2936,6 +3571,7 @@ export default function PlanViewer({
                 onChange={(e) => onNotesChange(e.target.value)}
                 onBlur={(e) => saveNotes(e.currentTarget.value)}
                 rows={5}
+                spellCheck
                 placeholder={
                   "Tell the AI anything it should know about this sheet, e.g.\n" +
                   "• Unit A dimensions are on this sheet\n" +
@@ -2946,20 +3582,88 @@ export default function PlanViewer({
                 className="max-h-[40vh] min-h-[7rem] w-full resize-y rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
               />
             </div>
-          ) : (
+          </div>
+        ) : null}
+
+        {/* Bottom bar: tool hint · page browser · notes toggle. It sits BELOW
+            the drawing rather than floating over it, so the pager and the
+            notes never fight for the same corner and nothing hides the sheet. */}
+        <div className="glass-strong pb-safe z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
+          {/* Phones hide the app rail on the viewer — this is the way back. */}
+          <Link
+            href={`/projects/${projectId}`}
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand md:hidden"
+          >
+            ‹ Back
+          </Link>
+          <p className="hidden min-w-0 truncate text-[11px] text-muted md:block">
+            {status === "ready" ? (
+              <>
+                {tool === "count"
+                  ? "Click each item (auto-saved) · click a marker again to remove it · Finish when done · "
+                  : tool === "polyline" ||
+                      tool === "wall" ||
+                      (tool === "volume" && volMode === "linear")
+                    ? "Click to add points · double-click to finish · "
+                    : tool === "area" || (tool === "volume" && volMode === "area")
+                      ? "Click corners · click the first point or double-click to close · "
+                      : tool === "leader"
+                        ? "Click where the arrow points, then click to place the text box · "
+                        : ""}
+                Esc: cancel · Right-drag / Space / middle-drag: pan · Del: delete
+              </>
+            ) : null}
+          </p>
+          {/* Pager walks the SHEET list (pages + their crops), not raw page numbers. */}
+          <div className="flex items-center gap-1.5 text-sm text-foreground">
             <button
               type="button"
-              onClick={() => setNotesOpen(true)}
-              title="Sheet notes for the AI"
-              className="glass-strong pointer-events-auto mx-auto flex items-center gap-2 rounded-full px-6 py-3 text-base font-medium text-foreground"
+              onClick={() =>
+                sheetList.length
+                  ? sheetIndex > 0 && openSheet(sheetList[sheetIndex - 1])
+                  : setPageNum((p) => Math.max(1, p - 1))
+              }
+              disabled={sheetList.length ? sheetIndex <= 0 : pageNum <= 1}
+              title="Previous sheet"
+              className="rounded-md border border-border px-2.5 py-0.5 hover:border-brand disabled:opacity-40"
             >
-              <span className="text-xl leading-none">📝</span>
-              Notes for AI
-              {currentSheet && (notes[currentSheet.id] ?? "").trim() ? (
-                <span className="text-lg leading-none text-brand-soft">•</span>
-              ) : null}
+              ‹
             </button>
-          )}
+            <span className="tabular-nums" title={crop ? `Crop of page ${pageNum}` : `Page ${pageNum}`}>
+              {sheetList.length ? `${sheetIndex + 1} / ${sheetList.length}` : `${pageNum} / ${numPages || "…"}`}
+              {crop ? <span className="ml-1 text-[10px] uppercase text-muted">crop</span> : null}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                sheetList.length
+                  ? sheetIndex < sheetList.length - 1 && openSheet(sheetList[sheetIndex + 1])
+                  : setPageNum((p) => Math.min(numPages, p + 1))
+              }
+              disabled={sheetList.length ? sheetIndex >= sheetList.length - 1 : pageNum >= numPages}
+              title="Next sheet"
+              className="rounded-md border border-border px-2.5 py-0.5 hover:border-brand disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotesOpen((o) => !o)}
+            title="Sheet notes for the AI"
+            aria-expanded={notesOpen}
+            className={`justify-self-end flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              notesOpen
+                ? "border-brand bg-brand/20 text-foreground"
+                : "border-border text-foreground hover:border-brand"
+            }`}
+          >
+            <span aria-hidden>📝</span>
+            <span className="hidden sm:inline">Notes for AI</span>
+            {currentSheet && (notes[currentSheet.id] ?? "").trim() ? (
+              <span className="text-brand-soft" title="This sheet has notes">•</span>
+            ) : null}
+          </button>
         </div>
       </div>
 
@@ -3115,6 +3819,7 @@ export default function PlanViewer({
                     value={selected.text ?? ""}
                     onChange={(e) => updateLeader({ text: e.target.value })}
                     rows={2}
+                    spellCheck
                     placeholder="Note…"
                     className="rounded-md border border-border bg-background px-2 py-1 text-sm normal-case text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
                   />
@@ -3309,31 +4014,31 @@ export default function PlanViewer({
 
                       {isEditing ? (
                         <div className="flex flex-col gap-2 border-t border-white/5 px-2 pb-2 pt-2">
-                          {/* Rename — applies to every run in the layer */}
+                          {/* Rename — applies to every run in the layer.
+                              Saves by itself when you tab/click away (or
+                              press Enter); no button to remember. */}
                           <div className="flex items-center gap-1.5">
                             <input
                               value={layerName}
                               onChange={(e) => setLayerName(e.target.value)}
+                              onBlur={() => {
+                                if (layerName.trim() && layerName.trim() !== g.layer)
+                                  renameLayer(g.rows, layerName);
+                              }}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
-                                  renameLayer(g.rows, layerName);
+                                  if (layerName.trim() && layerName.trim() !== g.layer)
+                                    renameLayer(g.rows, layerName);
                                   setEditingLayer(null);
                                 }
                                 if (e.key === "Escape") setEditingLayer(null);
                               }}
                               placeholder="Layer name"
+                              spellCheck
+                              aria-label="Layer name"
                               className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
                             />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                renameLayer(g.rows, layerName);
-                                setEditingLayer(null);
-                              }}
-                              className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:border-brand"
-                            >
-                              Rename
-                            </button>
+                            <span className="shrink-0 text-[10px] text-muted">saves as you go</span>
                           </div>
 
                           {/* Color — applies to every run */}
@@ -3440,16 +4145,7 @@ export default function PlanViewer({
             )}
           </aside>
         </>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setPanelOpen(true)}
-          title="Show measurements"
-          className="glass-strong absolute right-2 top-2 z-20 rounded-md px-2.5 py-1 text-sm text-foreground"
-        >
-          « Panel
-        </button>
-      )}
+      ) : null}
 
       {/* Block measuring until a scale is set */}
       {needsScale ? (

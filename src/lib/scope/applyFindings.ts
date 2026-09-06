@@ -11,6 +11,7 @@ import "server-only";
  */
 import { getAnthropicClient } from "@/lib/anthropic";
 import { AI_MODELS } from "@/config/ai";
+import { assertAiBudget, recordAiUsage } from "@/lib/ai-meter";
 
 const APPLY_MODEL = AI_MODELS.scopeDraft; // Opus — accuracy matters; call is small
 
@@ -156,6 +157,7 @@ export async function applyFindingsToScope(input: {
   signal?: AbortSignal;
 }): Promise<ScopeChanges> {
   const { lines, findings, planText, signal } = input;
+  assertAiBudget();
   const client = getAnthropicClient();
 
   const planBlock = planText.trim()
@@ -179,6 +181,7 @@ export async function applyFindingsToScope(input: {
     { signal },
   );
   const msg = await stream.finalMessage();
+  recordAiUsage(APPLY_MODEL, msg.usage, "apply");
   let text = "";
   for (const block of msg.content as { type: string; text?: string }[]) {
     if (block.type === "text" && typeof block.text === "string") {

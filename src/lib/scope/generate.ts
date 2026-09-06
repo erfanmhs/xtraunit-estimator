@@ -22,6 +22,7 @@ import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
 import { taxonomyPromptText } from "./taxonomy";
 import { routedDisciplines } from "./routing";
+import { assertAiBudget, recordAiUsage } from "@/lib/ai-meter";
 
 // Anthropic's document-PDF limits. We stay safely under both, and only ever
 // send the specific image-only pages (not the whole plan file).
@@ -343,10 +344,13 @@ async function streamStructured(
     ReturnType<typeof getAnthropicClient>["beta"]["messages"]["stream"]
   >[0],
   signal?: AbortSignal,
+  what?: string,
 ): Promise<string> {
+  assertAiBudget(); // per-run dollar ceiling (ai-meter.ts)
   const client = getAnthropicClient();
   const stream = client.beta.messages.stream(params, { signal });
   const msg = await stream.finalMessage();
+  recordAiUsage(params.model, msg.usage, what);
   return textFromResponse(msg.content);
 }
 
@@ -425,7 +429,7 @@ export async function draftScope(
             //    block 3 (per chunk) to keep this cache prefix stable.
             {
               type: "text",
-              text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${coreContentText(bundle)}`,
+              text: `${COMPANY_CONTEXT}\n\n${RULES}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${bundle.crossRefs ? bundle.crossRefs + "\n\n" : ""}${coreContentText(bundle)}`,
               cache_control: { type: "ephemeral" as const },
             },
             // 3) Chunk-specific content: the sheets routed to this chunk's
@@ -446,6 +450,7 @@ export async function draftScope(
       ],
     },
     signal,
+    `draft ${trades.map((t) => t.split(" ")[0]).join(",") || "full"}`,
   );
   const draft = parseJson<{
     line_items: GeneratedLineItem[];
@@ -486,13 +491,14 @@ export async function findGaps(
             ...planBlocks(fileIds),
             {
               type: "text",
-              text: `${COMPANY_CONTEXT}\n\nA draft scope was generated from the user's takeoff and the attached plans. Act as a senior estimator giving it a final review. Report ONLY the things that genuinely matter to a bid — be selective, not exhaustive. A short list of real issues is far more useful than a long list of nitpicks.\n\nHARD LIMITS: return at most 6 findings TOTAL, and at most 3 of kind "question". Every finding's "text" is ONE short line (≤ ~15 words), never a paragraph. Only HIGH/MEDIUM cost impact; consolidate related points; if the draft is solid, return very few.\n\nFinding kinds:\n- "gap": real, cost-significant work drawn/implied but missing (e.g. "3 baths, no plumbing fixtures scoped").\n- "exclusion": owner-furnished / out-of-contract items to call out.\n- "question": a genuinely ambiguous, cost-moving decision. For EACH question also fill "options": 2–4 very short answer choices, most-likely FIRST (e.g. ["4-inch","6-inch"] or ["In contract","By owner"]).\n- "assumption": a load-bearing assumption that materially changes the price if wrong.\nFor every non-question finding set "options" to []. Be specific, reference sheets where possible, set severity high/medium/low (rarely "low"). Do NOT re-ask anything already answered in the USER CLARIFICATIONS below.\n\n${scopeFocusText(trades)}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${planContentText(bundle)}\n\nDRAFT SCOPE:\n${draftSummary}`,
+              text: `${COMPANY_CONTEXT}\n\nA draft scope was generated from the user's takeoff and the attached plans. Act as a senior estimator giving it a final review. Report ONLY the things that genuinely matter to a bid — be selective, not exhaustive. A short list of real issues is far more useful than a long list of nitpicks.\n\nHARD LIMITS: return at most 6 findings TOTAL, and at most 3 of kind "question". Every finding's "text" is ONE short line (≤ ~15 words), never a paragraph. Only HIGH/MEDIUM cost impact; consolidate related points; if the draft is solid, return very few.\n\nFinding kinds:\n- "gap": real, cost-significant work drawn/implied but missing (e.g. "3 baths, no plumbing fixtures scoped").\n- "exclusion": owner-furnished / out-of-contract items to call out.\n- "question": a genuinely ambiguous, cost-moving decision. For EACH question also fill "options": 2–4 very short answer choices, most-likely FIRST (e.g. ["4-inch","6-inch"] or ["In contract","By owner"]).\n- "assumption": a load-bearing assumption that materially changes the price if wrong.\nFor every non-question finding set "options" to []. Be specific, reference sheets where possible, set severity high/medium/low (rarely "low"). Do NOT re-ask anything already answered in the USER CLARIFICATIONS below.\n\n${scopeFocusText(trades)}\n\n${clarificationsText(bundle)}\n\n${notesText(bundle)}\n\n${takeoffText(bundle)}\n\n${bundle.crossRefs ? bundle.crossRefs + "\n\n" : ""}${planContentText(bundle)}\n\nDRAFT SCOPE:\n${draftSummary}`,
             },
           ],
         },
       ],
     },
     signal,
+    "review",
   );
   const critique = parseJson<{ findings: GeneratedFinding[] }>(
     text,

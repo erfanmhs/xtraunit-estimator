@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import { createProject } from "../actions";
 
 const FIELD =
@@ -14,17 +15,16 @@ export default async function NewProjectPage({
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="border-b border-border px-8 py-5">
-        <h1 className="font-heading text-2xl text-foreground">New Project</h1>
-        <p className="text-sm text-muted">
-          The basics now — plans, takeoff, and pricing come next.
-        </p>
-      </header>
+      <PageHeader
+        className="border-b border-border px-6 py-5 sm:px-8"
+        title="New Project"
+        subtitle="The basics now — plans, takeoff, and pricing come next."
+      />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <form
           action={createProject}
-          className="flex max-w-2xl flex-col gap-5 rounded-xl glass p-6"
+          className="flex max-w-2xl flex-col gap-5 rounded-xl glass p-4 sm:p-6"
         >
           {error ? (
             <p
@@ -53,7 +53,7 @@ export default async function NewProjectPage({
               <label htmlFor="client_name" className={LABEL}>
                 Client
               </label>
-              <input id="client_name" name="client_name" className={FIELD} />
+              <input id="client_name" name="client_name" autoComplete="organization" className={FIELD} />
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="project_type" className={LABEL}>
@@ -80,14 +80,14 @@ export default async function NewProjectPage({
             <label htmlFor="address" className={LABEL}>
               Address
             </label>
-            <input id="address" name="address" className={FIELD} />
+            <input id="address" name="address" autoComplete="street-address" className={FIELD} />
           </div>
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="notes" className={LABEL}>
               Notes
             </label>
-            <textarea id="notes" name="notes" rows={3} className={FIELD} />
+            <textarea id="notes" name="notes" rows={3} spellCheck className={FIELD} />
           </div>
 
           <div className="flex items-center gap-3">

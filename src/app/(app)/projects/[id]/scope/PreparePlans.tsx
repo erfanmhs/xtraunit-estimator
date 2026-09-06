@@ -36,6 +36,8 @@ type SheetLite = {
   name: string | null;
   label: string | null;
   discipline: string | null;
+  // A cropped sheet (migration 0035): only this window of the page is read.
+  crop?: { x: number; y: number; w: number; h: number } | null;
 };
 
 // Bump this when the plan-reading logic improves — already-prepared projects
@@ -103,30 +105,46 @@ export default function PreparePlans({
         }).promise;
 
         const planSheets = sheets.filter((s) => s.plan_file_id === plan.id);
-        // Pages the AI must SEE, with the resolution to use.
-        const renderPages: { page: number; kind: "scanned" | "table" }[] = [];
+        // Pages the AI must SEE, with the resolution to use (and, for a cropped
+        // sheet, the window of the page to render).
+        type Crop = { x: number; y: number; w: number; h: number };
+        const renderPages: { page: number; kind: "scanned" | "table"; crop: Crop | null }[] = [];
         for (const s of planSheets) {
           const page = await pdf.getPage(s.page_number);
           const content = await page.getTextContent();
+          // A cropped sheet keeps only the text inside its window. Text items
+          // sit in PDF user space (y up); the crop is in viewport space (y down,
+          // top-left origin), so convert each item before testing.
+          let items: unknown[] = content.items;
+          const crop = s.crop ?? null;
+          if (crop) {
+            const base = page.getViewport({ scale: 1 });
+            items = content.items.filter((it) => {
+              const t = (it as { transform?: number[] }).transform;
+              if (!Array.isArray(t) || t.length < 6) return false;
+              const [vx, vy] = base.convertToViewportPoint(t[4], t[5]);
+              return vx >= crop.x && vx <= crop.x + crop.w && vy >= crop.y && vy <= crop.y + crop.h;
+            });
+          }
           // Layout-aware text (tables keep rows/columns); fall back to the flat
           // join if reconstruction yields nothing.
           let text = "";
           try {
-            text = layoutText(content.items);
+            text = layoutText(items);
           } catch {
             text = "";
           }
           if (!text) {
-            text = content.items
-              .map((it) => ("str" in it ? (it as { str: string }).str : ""))
+            text = items
+              .map((it) => ("str" in (it as object) ? (it as { str: string }).str : ""))
               .join(" ")
               .replace(/\s+/g, " ")
               .trim();
           }
           const method = text.length >= 25 ? "text" : "image";
-          if (method === "image") renderPages.push({ page: s.page_number, kind: "scanned" });
+          if (method === "image") renderPages.push({ page: s.page_number, kind: "scanned", crop });
           else if (hasTableContent(text))
-            renderPages.push({ page: s.page_number, kind: "table" });
+            renderPages.push({ page: s.page_number, kind: "table", crop });
 
           await supabase
             .from("sheets")
@@ -160,7 +178,7 @@ export default function PreparePlans({
         if (toRender.length) {
           const out = await PDFDocument.create();
           let done = 0;
-          for (const { page: pn, kind } of toRender) {
+          for (const { page: pn, kind, crop } of toRender) {
             done++;
             setMsg(
               `Rendering sheets for the AI — ${plan.file_name} (${done}/${toRender.length})…`,
@@ -169,11 +187,19 @@ export default function PreparePlans({
             const quality = kind === "table" ? TABLE_JPEG_Q : VISION_JPEG_Q;
             const page = await pdf.getPage(pn);
             const base = page.getViewport({ scale: 1 });
-            const scale = Math.min(4, longEdge / Math.max(base.width, base.height));
-            const viewport = page.getViewport({ scale });
+            // For a cropped sheet, render only its window (so the detail gets
+            // the full resolution budget instead of the whole page).
+            const w = crop ? crop.w : base.width;
+            const h = crop ? crop.h : base.height;
+            const scale = Math.min(4, longEdge / Math.max(w, h));
+            const viewport = page.getViewport({
+              scale,
+              offsetX: crop ? -crop.x * scale : 0,
+              offsetY: crop ? -crop.y * scale : 0,
+            });
             const canvas = document.createElement("canvas");
-            canvas.width = Math.ceil(viewport.width);
-            canvas.height = Math.ceil(viewport.height);
+            canvas.width = Math.ceil(w * scale);
+            canvas.height = Math.ceil(h * scale);
             const ctx = canvas.getContext("2d");
             if (!ctx) continue;
             ctx.fillStyle = "#ffffff";

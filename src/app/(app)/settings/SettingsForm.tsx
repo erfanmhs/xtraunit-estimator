@@ -12,7 +12,15 @@ import {
   type CompanySettings,
 } from "./actions";
 import { evalFormula } from "@/lib/formula";
-import type { ProposalProfile } from "@/lib/proposal/profile";
+import {
+  TERM_LABELS,
+  type ProposalProfile,
+  type ProposalTerms,
+  type ProjectReference,
+} from "@/lib/proposal/profile";
+
+const REF_FIELD =
+  "rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
 
 const IDENTITY_FIELDS = [
   ["company_name", "Company name", "XtraUnit Construction"],
@@ -23,6 +31,20 @@ const IDENTITY_FIELDS = [
   ["signer_name", "Proposal signer — name", "Erfan Mirza"],
   ["signer_title", "Proposal signer — title", "Principal"],
 ] as const;
+
+// The right mobile keyboard + autofill for each identity field.
+const INPUT_TYPE: Record<string, string> = {
+  company_phone: "tel",
+  company_email: "email",
+};
+const AUTOCOMPLETE: Record<string, string> = {
+  company_name: "organization",
+  company_address: "street-address",
+  company_phone: "tel",
+  company_email: "email",
+  signer_name: "name",
+  signer_title: "organization-title",
+};
 
 const MARKUP_FIELDS = [
   ["default_contingency_pct", "Contingency"],
@@ -103,7 +125,8 @@ export default function SettingsForm({
                 {label}
               </span>
               <input
-                type="text"
+                type={INPUT_TYPE[k] ?? "text"}
+                autoComplete={AUTOCOMPLETE[k]}
                 value={identity[k]}
                 onChange={(e) =>
                   setIdentity((s) => ({ ...s, [k]: e.target.value }))
@@ -196,6 +219,13 @@ function ProposalProfileSection({
 
   const setField = (k: keyof ProposalProfile, v: string) =>
     setP((s) => ({ ...s, [k]: v }));
+  const setTerm = (k: keyof ProposalTerms, v: string) =>
+    setP((s) => ({ ...s, terms: { ...s.terms, [k]: v } }));
+  const setRef = (i: number, f: keyof ProjectReference, v: string) =>
+    setP((s) => ({
+      ...s,
+      references: s.references.map((r, j) => (j === i ? { ...r, [f]: v } : r)),
+    }));
   const setBullet = (i: number, f: "title" | "body", v: string) =>
     setP((s) => ({
       ...s,
@@ -212,7 +242,15 @@ function ProposalProfileSection({
         setError(res.error ?? "Could not draft.");
         return;
       }
-      setP(res.profile);
+      // The AI drafts the narrative sections only; keep the owner's terms,
+      // exclusions and references as they are.
+      const drafted = res.profile;
+      setP((s) => ({
+        ...drafted,
+        terms: s.terms,
+        standard_exclusions: s.standard_exclusions,
+        references: s.references,
+      }));
       setShowNotes(false);
     });
   }
@@ -266,6 +304,7 @@ function ProposalProfileSection({
             ].map(([k, ph]) => (
               <textarea
                 key={k}
+                spellCheck
                 value={notes[k as keyof typeof notes]}
                 onChange={(e) =>
                   setNotes((s) => ({ ...s, [k]: e.target.value }))
@@ -346,6 +385,93 @@ function ProposalProfileSection({
           onChange={(v) => setField("closing", v)}
           rows={2}
         />
+
+        {/* Excluded / by others — the standard list every proposal carries */}
+        <div>
+          <span className="text-[11px] uppercase tracking-wider text-muted">
+            Standard &ldquo;Excluded / by others&rdquo; list (one per line)
+          </span>
+          <p className="text-xs text-muted/70">
+            Permits, utility work, third-party inspections… Ambiguity here is the #1 source of disputes, so
+            this list goes on every proposal. Project-specific exclusions are added from the Scope page.
+          </p>
+          <textarea
+            value={p.standard_exclusions.join("\n")}
+            onChange={(e) =>
+              setP((s) => ({ ...s, standard_exclusions: e.target.value.split("\n") }))
+            }
+            rows={6}
+            spellCheck
+            className="mt-1.5 w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+          />
+        </div>
+
+        {/* Terms & conditions */}
+        <div>
+          <span className="text-[11px] uppercase tracking-wider text-muted">Terms &amp; conditions</span>
+          <p className="text-xs text-muted/70">
+            Pre-filled with plain-language defaults. Have your attorney review before the first real send.
+          </p>
+          <div className="mt-1.5 space-y-2">
+            {(Object.keys(TERM_LABELS) as (keyof ProposalTerms)[]).map((k) => (
+              <ProfileField
+                key={k}
+                label={TERM_LABELS[k]}
+                value={p.terms[k]}
+                onChange={(v) => setTerm(k, v)}
+                rows={2}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* References — social proof */}
+        <div>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-muted">
+              Project references (recent work)
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setP((s) => ({
+                  ...s,
+                  references: [
+                    ...s.references,
+                    { title: "", type_scale: "", challenge: "", delivered: "", photo_url: "" },
+                  ],
+                }))
+              }
+              className="text-xs text-brand-soft hover:underline"
+            >
+              + Add reference
+            </button>
+          </div>
+          <p className="text-xs text-muted/70">
+            Specific beats generic: the type and scale, what made it hard, what you delivered. A photo link
+            of the finished work shows on the proposal.
+          </p>
+          {p.references.length ? (
+            <div className="mt-2 space-y-2">
+              {p.references.map((r, i) => (
+                <div key={i} className="grid gap-1.5 rounded-lg border border-border p-2 sm:grid-cols-2">
+                  <input value={r.title} onChange={(e) => setRef(i, "title", e.target.value)} placeholder="Project (e.g. 24-unit multifamily, Van Nuys)" spellCheck className={REF_FIELD} />
+                  <input value={r.type_scale} onChange={(e) => setRef(i, "type_scale", e.target.value)} placeholder="Type · scale (new build · 4 stories · 32,000 SF)" spellCheck className={REF_FIELD} />
+                  <input value={r.challenge} onChange={(e) => setRef(i, "challenge", e.target.value)} placeholder="The challenge" spellCheck className={REF_FIELD} />
+                  <input value={r.delivered} onChange={(e) => setRef(i, "delivered", e.target.value)} placeholder="What you delivered" spellCheck className={REF_FIELD} />
+                  <input value={r.photo_url} onChange={(e) => setRef(i, "photo_url", e.target.value)} placeholder="Photo link (https://…) — optional" className={REF_FIELD} />
+                  <button
+                    type="button"
+                    onClick={() => setP((s) => ({ ...s, references: s.references.filter((_, j) => j !== i) }))}
+                    className="justify-self-end text-xs text-muted hover:text-brand-soft"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-4 flex items-center justify-end gap-3">
@@ -384,6 +510,7 @@ function ProfileField({
       </span>
       <textarea
         value={value}
+        spellCheck
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
         className="rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none focus:border-brand"

@@ -171,8 +171,8 @@ export default function SubQuotes({
 
   return (
     <section className="glass mt-6 rounded-xl p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-56">
           <h2 className="font-heading text-sm uppercase tracking-wider text-brand-soft">
             Sub quotes
           </h2>
@@ -274,6 +274,7 @@ export default function SubQuotes({
               value={subName}
               onChange={(e) => setSubName(e.target.value)}
               placeholder="Sub name (ABC Plumbing)"
+              spellCheck
               className="w-48 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
             />
             <input
@@ -281,6 +282,7 @@ export default function SubQuotes({
               value={trade}
               onChange={(e) => setTrade(e.target.value)}
               placeholder="Trade"
+              spellCheck
               className="w-32 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
             />
             <input

@@ -10,6 +10,14 @@ import {
   recomputeItemStd,
   normKey,
 } from "@/lib/scope/items";
+import {
+  uuid,
+  costEntryPatch,
+  itemOverride,
+  itemRename,
+  benchmarksInput,
+  firstIssue,
+} from "@/lib/validation";
 
 type ActionResult = { ok: boolean; error?: string };
 
@@ -36,12 +44,13 @@ export async function updateCostEntry(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  if (patch.description !== undefined && !patch.description.trim())
-    return { ok: false, error: "Description can't be empty." };
+  if (!uuid.safeParse(entryId).success) return { ok: false, error: "That entry id isn't valid." };
+  const parsed = costEntryPatch.safeParse(patch);
+  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
 
   const { error } = await supabase
     .from("cost_database")
-    .update(patch)
+    .update(parsed.data)
     .eq("id", entryId);
   if (error) return { ok: false, error: "Could not save the entry." };
   return { ok: true };
@@ -110,8 +119,10 @@ async function saveSettingsColumn(
 export async function saveBenchmarks(
   benchmarks: Benchmark[],
 ): Promise<ActionResult> {
-  const clean = benchmarks.filter(
-    (b) => b.label.trim() && (b.sell_low != null || b.sell_high != null),
+  const parsed = benchmarksInput.safeParse(benchmarks);
+  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error, "A benchmark isn't valid.") };
+  const clean = parsed.data.filter(
+    (b) => b.label && (b.sell_low != null || b.sell_high != null),
   );
   return saveSettingsColumn("benchmarks", clean);
 }
@@ -144,6 +155,8 @@ export async function setItemOverride(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(itemId).success || !itemOverride.safeParse(override).success)
+    return { ok: false, error: "That price isn't valid." };
   const { error } = await supabase
     .from("cost_items")
     .update({ std_cost_override: override })
@@ -163,10 +176,12 @@ export async function renameItem(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  if (!name.trim()) return { ok: false, error: "Name can't be empty." };
+  if (!uuid.safeParse(itemId).success) return { ok: false, error: "That item id isn't valid." };
+  const parsed = itemRename.safeParse({ name, unit });
+  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
   const { error } = await supabase
     .from("cost_items")
-    .update({ name: name.trim(), norm_key: normKey(name), unit: unit?.trim() || null })
+    .update({ name: parsed.data.name, norm_key: normKey(parsed.data.name), unit: parsed.data.unit || null })
     .eq("id", itemId);
   if (error) return { ok: false, error: "Could not rename the item." };
   return { ok: true };

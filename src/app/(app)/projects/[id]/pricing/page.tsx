@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
 import { getPricingRun } from "./actions";
 import PricingTable, { type PricedLine } from "./PricingTable";
@@ -69,29 +70,22 @@ export default async function PricingPage({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl px-6 py-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <Link
-              href={`/projects/${id}`}
-              className="text-xs text-muted transition-colors hover:text-brand-soft"
-            >
-              ← Back to project
-            </Link>
-            <h1 className="mt-1 font-heading text-2xl text-foreground">
-              Pricing
-            </h1>
-            <p className="text-sm text-muted">
+        <PageHeader
+          back={{ href: `/projects/${id}`, label: "Back to project" }}
+          title="Pricing"
+          subtitle={
+            <>
               {project?.name ?? "Project"} · {lines.length} scope lines · direct
-              cost in five buckets (labor / material / sub / equipment / other)
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            <NextStep href={`/projects/${id}/estimate`} label="Estimate" />
-            {!migrationMissing ? (
+              cost per line
+            </>
+          }
+          action={<NextStep href={`/projects/${id}/estimate`} label="Estimate" />}
+          controls={
+            !migrationMissing ? (
               <SuggestPanel projectId={id} initialRun={initialRun} />
-            ) : null}
-          </div>
-        </div>
+            ) : null
+          }
+        />
 
         {migrationMissing ? (
           <div className="mt-10 rounded-xl border border-brand/40 bg-brand/10 p-6">
