@@ -144,9 +144,9 @@ export default function PlanManager({
           {files.map((f) => (
             <li
               key={f.id}
-              className="flex items-center justify-between gap-3 px-4 py-3"
+              className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
             >
-              <div className="flex min-w-0 flex-col">
+              <div className="flex min-w-0 flex-1 basis-48 flex-col">
                 <span className="truncate text-sm text-foreground" title={f.file_name}>
                   {f.file_name}
                 </span>
@@ -155,6 +155,7 @@ export default function PlanManager({
                   {new Date(f.created_at).toLocaleDateString()}
                 </span>
               </div>
+              {/* Wraps under the name on a phone instead of clipping */}
               <div className="flex shrink-0 items-center gap-2">
                 <Link
                   href={`/projects/${projectId}/plans/${f.id}`}

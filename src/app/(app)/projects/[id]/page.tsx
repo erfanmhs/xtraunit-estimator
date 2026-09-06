@@ -58,10 +58,13 @@ export default async function ProjectDetailPage({
         {/* Phase 2 — live */}
         <PlanManager projectId={project.id} files={files} />
 
+        {/* The four stage cards side by side on a laptop (they also live in the
+            rail's stage tabs), stacked on a phone. */}
+        <div className="grid gap-4 md:grid-cols-2">
         {/* Phase 7 — live */}
         <Link
           href={`/projects/${project.id}/scope`}
-          className="glass-brand flex items-center justify-between rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Scope of Work</h2>
@@ -75,7 +78,7 @@ export default async function ProjectDetailPage({
         {/* Phase 9 — live */}
         <Link
           href={`/projects/${project.id}/pricing`}
-          className="glass-brand flex items-center justify-between rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Pricing</h2>
@@ -90,7 +93,7 @@ export default async function ProjectDetailPage({
         {/* Phase 10 — live */}
         <Link
           href={`/projects/${project.id}/estimate`}
-          className="glass-brand flex items-center justify-between rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Estimate</h2>
@@ -105,7 +108,7 @@ export default async function ProjectDetailPage({
         {/* Phase 11 — live */}
         <Link
           href={`/projects/${project.id}/proposal`}
-          className="glass-brand flex items-center justify-between rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Proposal</h2>
@@ -116,6 +119,7 @@ export default async function ProjectDetailPage({
           </div>
           <span className="text-foreground">→</span>
         </Link>
+        </div>
       </div>
     </div>
   );

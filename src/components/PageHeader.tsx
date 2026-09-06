@@ -39,7 +39,7 @@ export default function PageHeader({
   return (
     <div className={className}>
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-56">
           {back ? (
             <Link
               href={back.href}
@@ -54,7 +54,9 @@ export default function PageHeader({
           {subtitle ? <p className="text-sm text-muted">{subtitle}</p> : null}
         </div>
         {action || menu ? (
-          <div className="flex shrink-0 items-center gap-2">
+          // On phones the action drops onto its own line under the title so
+          // the title never gets squeezed into a two-word column.
+          <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
             {action}
             {menu}
           </div>

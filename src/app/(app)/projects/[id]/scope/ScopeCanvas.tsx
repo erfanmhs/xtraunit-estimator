@@ -362,7 +362,7 @@ function Row({
             low confidence
           </span>
         ) : null}
-        <span className="w-24 shrink-0 text-right text-sm tabular-nums text-muted">
+        <span className="w-16 shrink-0 text-right text-sm tabular-nums text-muted sm:w-24">
           {li.quantity != null ? `${li.quantity} ${li.unit ?? ""}` : "—"}
         </span>
         {/* Actions: desktop = fixed column, shown on hover / keyboard focus /
@@ -476,6 +476,7 @@ function EditRow({
         onChange={(e) => setDescription(e.target.value)}
         placeholder={adding ? "New scope line…" : "Description"}
         autoFocus
+        spellCheck
         className="w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
       />
       <div className="mt-1.5 flex items-center gap-2">

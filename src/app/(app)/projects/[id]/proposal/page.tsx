@@ -110,8 +110,7 @@ export default async function ProposalPage({
             title="Proposal"
             subtitle={
               <>
-                {project?.name ?? "Project"} · the client-ready document — letter,
-                cost summary, assumptions &amp; exclusions
+                {project?.name ?? "Project"} · the client-ready document
               </>
             }
           />
