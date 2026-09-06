@@ -18,6 +18,11 @@ import {
   type Discipline,
 } from "./discipline";
 import { hasTableContent } from "./tables";
+import {
+  buildCrossRefIndex,
+  crossRefPromptText,
+  normalizeSheetNumber,
+} from "./callouts";
 
 export type BundleMeasurement = {
   sheet_id: string;
@@ -64,6 +69,10 @@ export type ScopeBundle = {
     is_core: boolean;
     text: string;
   }[];
+  // Deterministic cross-reference map: the detail callouts ("5/S4.1") the plans
+  // make, resolved to their sheets. Injected into the draft prompt so the AI
+  // reads the right detail; referenced detail sheets are forced into context.
+  crossRefs: string;
   // Plan files with image-only sheets that need an AI vision read: a reference
   // plus the exact page numbers needing vision. Only those pages (capped) are
   // sent to the AI — never the whole multi-page file. Streamed at upload time.
@@ -179,6 +188,20 @@ export async function gatherBundle(
       };
     });
 
+  // Free cross-reference index: find the detail callouts, force every REFERENCED
+  // detail sheet into the shared context (so the AI can read what a callout
+  // points at), and summarize the map for the prompt.
+  const crossIndex = buildCrossRefIndex(
+    sheetDocs.map((s) => ({ name: s.name, label: s.label, text: s.text })),
+  );
+  if (crossIndex.targetSheetNumbers.size) {
+    for (const s of sheetDocs) {
+      const num = normalizeSheetNumber(s.name, s.label);
+      if (num && crossIndex.targetSheetNumbers.has(num)) s.is_core = true;
+    }
+  }
+  const crossRefs = crossRefPromptText(crossIndex, sheetDocs);
+
   const planText = sheetDocs
     .map((s) => {
       const title = `${s.name || `Sheet ${s.page_number}`}${s.label ? ` (${s.label})` : ""}`;
@@ -256,6 +279,7 @@ export async function gatherBundle(
     measurements: (measurements as BundleMeasurement[]) ?? [],
     planText,
     sheetDocs,
+    crossRefs,
     plans,
     clarifications,
   };
