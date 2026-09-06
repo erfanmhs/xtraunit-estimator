@@ -13,6 +13,7 @@ import {
 } from "@/lib/scope/run";
 import { lineItemPatch, tradesInput } from "@/lib/validation";
 import { enforceAiLimit } from "@/lib/ai-usage";
+import { enqueueJob, requestCancel, normalizeRun, ACTIVE_STATUSES } from "@/lib/jobs/queue";
 
 export type ScopeRun = {
   id: string;
@@ -58,8 +59,10 @@ export async function startScope(
     .from("scope_runs")
     .select("id,updated_at")
     .eq("project_id", projectId)
-    .eq("status", "running")
+    .in("status", [...ACTIVE_STATUSES])
     .eq("kind", "scope")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (existing.error) {
     existing = await supabase
@@ -73,6 +76,7 @@ export async function startScope(
     const age = Date.now() - new Date(existing.data.updated_at).getTime();
     if (age < 3 * 60 * 1000) return { ok: true }; // a live run is in progress
     // Stale row from a dead process — clear it so this Regenerate can proceed.
+    // (Queued jobs heartbeat updated_at every 30 s, so a live one never trips this.)
     await supabase
       .from("scope_runs")
       .update({ status: "error", error: "Interrupted.", updated_at: new Date().toISOString() })
@@ -83,28 +87,24 @@ export async function startScope(
   const limit = await enforceAiLimit(supabase, user.id, "scope");
   if (!limit.ok) return { ok: false, error: limit.error };
 
-  const { data: run, error } = await supabase
-    .from("scope_runs")
-    .insert({
-      project_id: projectId,
-      owner_id: user.id,
-      status: "running",
-      stage: "Starting…",
-      progress: 2,
-    })
-    .select("id")
-    .single();
-  if (error || !run) return { ok: false, error: "Could not start generation." };
-
-  // Fire-and-forget: continues after this action returns.
-  void runScopeGeneration({
+  // Durable queue when it's on (the worker runs it, survives restarts);
+  // otherwise the in-process path, exactly as before.
+  const job = await enqueueJob(supabase, {
     projectId,
-    userId: user.id,
-    token: session.access_token,
-    runId: run.id,
-    trades,
+    ownerId: user.id,
+    kind: "scope",
+    payload: { trades },
   });
-
+  if (!job.ok) return { ok: false, error: "Could not start generation." };
+  if (job.mode === "direct") {
+    void runScopeGeneration({
+      projectId,
+      userId: user.id,
+      token: session.access_token,
+      runId: job.id,
+      trades,
+    });
+  }
   return { ok: true };
 }
 
@@ -337,7 +337,7 @@ export async function cancelScope(
     .from("scope_runs")
     .select("id")
     .eq("project_id", projectId)
-    .eq("status", "running")
+    .in("status", [...ACTIVE_STATUSES])
     .eq("kind", "scope")
     .order("created_at", { ascending: false })
     .limit(1)
@@ -355,9 +355,10 @@ export async function cancelScope(
   const run = runRes.data;
   if (!run) return { ok: true }; // nothing running
 
-  // Abort the AI stream in-process (immediate) and mark the run cancelled in the
-  // DB (covers the case where the process restarted and the controller is gone).
+  // Abort the AI stream in-process (immediate), flag it for a worker on another
+  // instance, and mark the run cancelled in the DB.
   abortScopeRun(run.id);
+  await requestCancel(supabase, run.id);
   await supabase
     .from("scope_runs")
     .update({
@@ -399,9 +400,10 @@ export async function getScopeRun(projectId: string): Promise<ScopeRun | null> {
   const data = res.data;
   if (!data) return null;
 
-  const run = data as ScopeRun;
+  const run = normalizeRun(data as ScopeRun);
   // If a "running" job hasn't updated in 8 minutes, treat it as failed
-  // (the process likely restarted mid-run).
+  // (the process likely restarted mid-run). A queued/worker job heartbeats
+  // updated_at every 30 s and is requeued automatically, so it never trips this.
   if (run.status === "running") {
     const age = Date.now() - new Date(run.updated_at).getTime();
     if (age > 8 * 60 * 1000) {
@@ -440,8 +442,10 @@ export async function startApplyFindings(
     .from("scope_runs")
     .select("id,updated_at")
     .eq("project_id", projectId)
-    .eq("status", "running")
+    .in("status", [...ACTIVE_STATUSES])
     .eq("kind", "apply")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (existing.error) {
     existing = await supabase
@@ -464,27 +468,16 @@ export async function startApplyFindings(
       .eq("id", existing.data.id);
   }
 
-  const { data: run, error } = await supabase
-    .from("scope_runs")
-    .insert({
-      project_id: projectId,
-      owner_id: user.id,
-      status: "running",
-      stage: "Starting…",
-      progress: 2,
-      kind: "apply",
-    })
-    .select("id")
-    .single();
-  if (error || !run)
-    return { ok: false, error: "Could not start applying your responses." };
-
-  void runApplyFindings({
-    projectId,
-    userId: user.id,
-    token: session.access_token,
-    runId: run.id,
-  });
+  const job = await enqueueJob(supabase, { projectId, ownerId: user.id, kind: "apply" });
+  if (!job.ok) return { ok: false, error: "Could not start applying your responses." };
+  if (job.mode === "direct") {
+    void runApplyFindings({
+      projectId,
+      userId: user.id,
+      token: session.access_token,
+      runId: job.id,
+    });
+  }
   return { ok: true };
 }
 
@@ -505,7 +498,7 @@ export async function getApplyRun(projectId: string): Promise<ScopeRun | null> {
     .maybeSingle();
   if (error || !data) return null;
 
-  const run = data as ScopeRun;
+  const run = normalizeRun(data as ScopeRun);
   if (run.status === "running") {
     const age = Date.now() - new Date(run.updated_at).getTime();
     if (age > 5 * 60 * 1000)

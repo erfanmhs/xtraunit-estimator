@@ -7,10 +7,12 @@
 # Secrets are set in the Render dashboard (Environment tab), never in git —
 # that's what `sync: false` means below: "a human fills this in."
 #
-# FUTURE: this is a single web instance — correct and cheap for now. The
-# background AI jobs live in this one process, so don't scale to multiple
-# instances until the planned job-queue + background-worker upgrade. Database
-# (Supabase) scales independently by tier. See DEPLOY.md.
+# SCALING: with SUPABASE_SERVICE_ROLE_KEY set (and migration 0034 run), AI
+# runs are durable queued jobs claimed from Postgres by an in-process worker
+# on each instance — so this service CAN run more than one instance (set
+# numInstances, or scale in the dashboard) and jobs survive deploys. Without
+# the key, jobs run inside the one process as before. Database (Supabase)
+# scales independently by tier. See DEPLOY.md and docs/jobs.md.
 
 services:
   - type: web
@@ -29,6 +31,9 @@ services:
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      # Turns on the durable job queue (see docs/jobs.md). Supabase → Settings → API.
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       # Self-service sign-up. Set to "false" once partner accounts exist.
       - key: NEXT_PUBLIC_ALLOW_SIGNUP

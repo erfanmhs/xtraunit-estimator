@@ -24,6 +24,7 @@ import {
   costLabel,
   saveRunCost,
 } from "@/lib/ai-meter";
+import { wasInterrupted } from "@/lib/jobs/worker";
 
 import { AI_MODELS } from "@/config/ai";
 
@@ -298,18 +299,23 @@ function bgClient(token: string): SupabaseClient {
 
 export async function runPricingSuggestion(opts: {
   projectId: string;
-  token: string;
   runId: string;
+  /** In-process fallback: the user's token. Worker path: `sb` + `ac`. */
+  token?: string;
+  sb?: SupabaseClient;
+  ac?: AbortController;
 }): Promise<void> {
-  const { projectId, token, runId } = opts;
+  const { projectId, runId } = opts;
   // One dollar meter per run with a ceiling (ai-meter.ts); self-wrapping.
   if (!getAiMeter())
     return runWithAiBudget({ label: `pricing:${runId}` }, () =>
       runPricingSuggestion(opts),
     );
 
-  const sb = bgClient(token);
-  const ac = new AbortController();
+  if (!opts.sb && !opts.token)
+    throw new Error("A job needs either a Supabase client or a user token.");
+  const sb = opts.sb ?? bgClient(opts.token!);
+  const ac = opts.ac ?? new AbortController();
   controllers.set(runId, ac);
   const update = (patch: Record<string, unknown>) =>
     sb
@@ -564,7 +570,9 @@ export async function runPricingSuggestion(opts: {
   } catch (e) {
     const aborted =
       ac.signal.aborted || (e instanceof Error && e.name === "AbortError");
-    if (aborted) {
+    if (wasInterrupted(ac)) {
+      log.info("pricing.run.interrupted", { runId, projectId, ms: elapsed() }); // requeued by the worker
+    } else if (aborted) {
       log.info("pricing.run.cancelled", { runId, projectId, ms: elapsed() });
       await update({
         status: "cancelled",

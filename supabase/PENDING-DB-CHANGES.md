@@ -19,6 +19,14 @@ one once in Supabase, then it moves to **Already run**.
       `ai_calls` to `scope_runs` so each AI run records what it cost. The
       per-run spending cap works without it (it lives in the app); this just
       keeps the numbers. Safe to run anytime.
+- [ ] 0034_job_queue.sql — the durable job queue. Turns the AI-run rows into
+      real queue entries (queued → running → done) with heartbeats, attempts,
+      a checkpoint of finished division groups, and two functions the worker
+      uses to claim jobs and requeue orphaned ones. Together with the
+      SUPABASE_SERVICE_ROLE_KEY on Render this makes Generate / Apply /
+      Suggest prices survive a deploy or crash and lets the app run on more
+      than one server. Without it the app keeps the old in-process behavior.
+      Safe to run anytime.
 
 ---
 

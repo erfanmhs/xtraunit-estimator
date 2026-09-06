@@ -13,6 +13,7 @@ import { readSubQuote, type QuoteExtraction } from "@/lib/scope/subquote";
 import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
 import { enforceAiLimit } from "@/lib/ai-usage";
 import { log } from "@/lib/log";
+import { enqueueJob, requestCancel, normalizeRun, ACTIVE_STATUSES } from "@/lib/jobs/queue";
 import type { ScopeRun } from "../scope/actions";
 
 type ActionResult = { ok: boolean; error?: string };
@@ -536,8 +537,10 @@ export async function startPricing(
     .from("scope_runs")
     .select("id,updated_at")
     .eq("project_id", projectId)
-    .eq("status", "running")
+    .in("status", [...ACTIVE_STATUSES])
     .eq("kind", "pricing")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (existing) {
     const age = Date.now() - new Date(existing.updated_at).getTime();
@@ -552,31 +555,20 @@ export async function startPricing(
   const limit = await enforceAiLimit(supabase, user.id, "pricing");
   if (!limit.ok) return { ok: false, error: limit.error };
 
-  const { data: run, error } = await supabase
-    .from("scope_runs")
-    .insert({
-      project_id: projectId,
-      owner_id: user.id,
-      status: "running",
-      stage: "Starting…",
-      progress: 2,
-      kind: "pricing",
-    })
-    .select("id")
-    .single();
-  if (error || !run)
+  const job = await enqueueJob(supabase, { projectId, ownerId: user.id, kind: "pricing" });
+  if (!job.ok)
     return {
       ok: false,
       error:
         "Could not start. (Has migration 0011 been run in Supabase? The Pricing page needs it.)",
     };
-
-  void runPricingSuggestion({
-    projectId,
-    token: session.access_token,
-    runId: run.id,
-  });
-
+  if (job.mode === "direct") {
+    void runPricingSuggestion({
+      projectId,
+      token: session.access_token,
+      runId: job.id,
+    });
+  }
   return { ok: true };
 }
 
@@ -599,7 +591,7 @@ export async function getPricingRun(
     .maybeSingle();
   if (error || !data) return null;
 
-  const run = data as ScopeRun;
+  const run = normalizeRun(data as ScopeRun);
   if (run.status === "running") {
     const age = Date.now() - new Date(run.updated_at).getTime();
     if (age > 8 * 60 * 1000) {
@@ -626,7 +618,7 @@ export async function cancelPricing(
     .from("scope_runs")
     .select("id")
     .eq("project_id", projectId)
-    .eq("status", "running")
+    .in("status", [...ACTIVE_STATUSES])
     .eq("kind", "pricing")
     .order("created_at", { ascending: false })
     .limit(1)
@@ -634,6 +626,7 @@ export async function cancelPricing(
   if (!run) return { ok: true };
 
   abortPricingRun(run.id);
+  await requestCancel(supabase, run.id);
   await supabase
     .from("scope_runs")
     .update({

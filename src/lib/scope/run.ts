@@ -1,9 +1,12 @@
 import "server-only";
 
 /**
- * Background scope generation. Runs AFTER the request returns (fire-and-forget),
- * so it can't rely on request cookies — it authenticates with the user's access
- * token instead, and reports progress by updating the scope_runs row.
+ * Background scope generation. Runs AFTER the request returns, so it can't
+ * rely on request cookies. Two ways to run it:
+ *   - via the job worker (jobs/worker.ts): it passes the admin client `sb`,
+ *     its AbortController, and any `checkpoint` from an interrupted attempt;
+ *   - in-process fallback (queue off): the caller passes the user's `token`.
+ * Progress is reported by updating the scope_runs row either way.
  */
 import { createClient as createSb } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -31,6 +34,35 @@ import {
   runWithAiBudget,
   saveRunCost,
 } from "@/lib/ai-meter";
+import { wasInterrupted } from "@/lib/jobs/worker";
+
+/** How a job gets its database access + abort signal (see file header). */
+export type JobRunOpts = {
+  projectId: string;
+  userId: string;
+  runId: string;
+  /** In-process fallback: the user's access token. */
+  token?: string;
+  /** Worker path: an already-built client (admin) and the worker's controller. */
+  sb?: SupabaseClient;
+  ac?: AbortController;
+};
+
+function clientFor(opts: JobRunOpts): SupabaseClient {
+  if (opts.sb) return opts.sb;
+  if (!opts.token) throw new Error("A job needs either a Supabase client or a user token.");
+  return bgClient(opts.token);
+}
+
+/** Drafted division groups saved as they finish, so a resumed run skips them. */
+type ScopeCheckpoint = {
+  chunks: Record<string, { lineItems: GeneratedLineItem[]; findings: GeneratedFinding[] }>;
+};
+function readCheckpoint(raw: unknown): ScopeCheckpoint {
+  const c = (raw ?? {}) as Partial<ScopeCheckpoint>;
+  return { chunks: c.chunks && typeof c.chunks === "object" ? { ...c.chunks } : {} };
+}
+const chunkKey = (chunk: string[]) => chunk.join("|");
 
 // In-process registry of running jobs so a later request (the Cancel button)
 // can abort the AI stream immediately. Works because Next.js server actions and
@@ -57,14 +89,15 @@ function bgClient(token: string): SupabaseClient {
   );
 }
 
-export async function runScopeGeneration(opts: {
-  projectId: string;
-  userId: string;
-  token: string;
-  runId: string;
-  trades?: string[];
-}): Promise<void> {
-  const { projectId, userId, token, runId, trades = [] } = opts;
+export async function runScopeGeneration(
+  opts: JobRunOpts & {
+    trades?: string[];
+    /** From an interrupted attempt: the division groups already drafted. */
+    checkpoint?: unknown;
+    attempt?: number;
+  },
+): Promise<void> {
+  const { projectId, userId, runId, trades = [] } = opts;
   // Every AI call in this job reports to one dollar meter with a per-run
   // ceiling (ai-meter.ts). Self-wrapping so a caller can't forget it.
   if (!getAiMeter())
@@ -72,8 +105,8 @@ export async function runScopeGeneration(opts: {
       runScopeGeneration(opts),
     );
 
-  const sb = bgClient(token);
-  const ac = new AbortController();
+  const sb = clientFor(opts);
+  const ac = opts.ac ?? new AbortController();
   controllers.set(runId, ac);
   const stopIfCancelled = () => {
     if (ac.signal.aborted) throw new DOMException("Cancelled", "AbortError");
@@ -83,9 +116,22 @@ export async function runScopeGeneration(opts: {
       .from("scope_runs")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", runId);
+  // Best-effort (the column exists after migration 0034); never blocks the run.
+  const checkpoint = readCheckpoint(opts.checkpoint);
+  const saveCheckpoint = async () => {
+    const { error } = await sb.from("scope_runs").update({ checkpoint }).eq("id", runId);
+    if (error) log.debug("scope.checkpoint.skipped", { runId, note: "is migration 0034 run?" });
+  };
 
   const elapsed = timer();
-  log.info("scope.run.start", { runId, projectId, userId, trades });
+  log.info("scope.run.start", {
+    runId,
+    projectId,
+    userId,
+    trades,
+    attempt: opts.attempt,
+    resumedChunks: Object.keys(checkpoint.chunks).length,
+  });
 
   let fileIds: string[] = [];
   try {
@@ -102,13 +148,28 @@ export async function runScopeGeneration(opts: {
     const findings: GeneratedFinding[] = [];
     let failedChunks = 0;
     let firstError: string | null = null;
+    // Resume: groups already drafted before an interruption are taken from the
+    // checkpoint (already paid for) — only the rest go to the AI.
+    const todo: string[][] = [];
+    for (const chunk of chunks) {
+      const done = checkpoint.chunks[chunkKey(chunk)];
+      if (done) {
+        lineItems.push(...done.lineItems);
+        findings.push(...done.findings);
+      } else todo.push(chunk);
+    }
+    if (chunks.length - todo.length > 0)
+      await update({
+        stage: `Resuming — ${chunks.length - todo.length} of ${chunks.length} division groups were already drafted…`,
+        progress: 20,
+      });
     // Run the first chunk alone to WARM the prompt cache (writes the plan +
     // rules), then the rest in pairs so they READ the cache instead of
     // re-sending the drawings — much cheaper and faster.
     const batches: string[][][] = [];
-    if (chunks.length) batches.push([chunks[0]]);
-    for (let i = 1; i < chunks.length; i += 2) batches.push(chunks.slice(i, i + 2));
-    let processed = 0;
+    if (todo.length) batches.push([todo[0]]);
+    for (let i = 1; i < todo.length; i += 2) batches.push(todo.slice(i, i + 2));
+    let processed = chunks.length - todo.length;
     // Set when the per-run dollar ceiling is reached mid-run: we stop drafting
     // further groups, skip the review pass, and SAVE what was drafted — a
     // partial scope with a clear message beats throwing the paid work away.
@@ -152,13 +213,14 @@ export async function runScopeGeneration(opts: {
         const allowed = new Set(
           batch[j].map((t) => t.split(" ")[0].padStart(2, "0")),
         );
-        lineItems.push(
-          ...p.value.lineItems.filter((li) =>
-            allowed.has((li.division_code ?? "").padStart(2, "0")),
-          ),
+        const kept = p.value.lineItems.filter((li) =>
+          allowed.has((li.division_code ?? "").padStart(2, "0")),
         );
+        lineItems.push(...kept);
         findings.push(...p.value.findings);
+        checkpoint.chunks[chunkKey(batch[j])] = { lineItems: kept, findings: p.value.findings };
       }
+      await saveCheckpoint();
     }
     // Only a total wipeout is a real failure; partial scope is still useful.
     if (!lineItems.length) {
@@ -284,6 +346,7 @@ export async function runScopeGeneration(opts: {
       stage = `Done — but ${failedChunks} division group${failedChunks > 1 ? "s" : ""} didn't generate. Click Regenerate to fill them in.`;
     }
     await update({ status: "done", stage: stage + costLabel(meter), progress: 100 });
+    await sb.from("scope_runs").update({ finished_at: new Date().toISOString(), checkpoint: null }).eq("id", runId); // best-effort (0034)
     if (budgetHit)
       log.warn("scope.run.budget_hit", { runId, projectId, spentUsd: meter?.spentUsd, skipped });
     log.info("scope.run.done", {
@@ -300,7 +363,11 @@ export async function runScopeGeneration(opts: {
     const aborted =
       ac.signal.aborted ||
       (e instanceof Error && e.name === "AbortError");
-    if (aborted) {
+    if (wasInterrupted(ac)) {
+      // Server restarting: the worker already put the job back in the queue
+      // (with the checkpoint). Don't touch the row.
+      log.info("scope.run.interrupted", { runId, projectId, ms: elapsed() });
+    } else if (aborted) {
       log.info("scope.run.cancelled", { runId, projectId, ms: elapsed() });
       await update({
         status: "cancelled",
@@ -329,20 +396,15 @@ export async function runScopeGeneration(opts: {
  * avoids a full regenerate (no plans re-read, no division chunks). One focused
  * AI call turns the current scope + decisions into targeted edits.
  */
-export async function runApplyFindings(opts: {
-  projectId: string;
-  userId: string;
-  token: string;
-  runId: string;
-}): Promise<void> {
-  const { projectId, userId, token, runId } = opts;
+export async function runApplyFindings(opts: JobRunOpts): Promise<void> {
+  const { projectId, userId, runId } = opts;
   if (!getAiMeter())
     return runWithAiBudget({ label: `apply:${runId}` }, () =>
       runApplyFindings(opts),
     );
 
-  const sb = bgClient(token);
-  const ac = new AbortController();
+  const sb = clientFor(opts);
+  const ac = opts.ac ?? new AbortController();
   controllers.set(runId, ac);
   const update = (patch: Record<string, unknown>) =>
     sb
@@ -523,7 +585,9 @@ export async function runApplyFindings(opts: {
   } catch (e) {
     const aborted =
       ac.signal.aborted || (e instanceof Error && e.name === "AbortError");
-    if (aborted) {
+    if (wasInterrupted(ac)) {
+      log.info("apply.run.interrupted", { runId, projectId, ms: elapsed() }); // requeued by the worker
+    } else if (aborted) {
       log.info("apply.run.cancelled", { runId, projectId, ms: elapsed() });
       await update({
         status: "cancelled",
