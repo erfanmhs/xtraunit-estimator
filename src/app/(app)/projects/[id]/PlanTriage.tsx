@@ -2,16 +2,20 @@
 
 /**
  * Page triage. Renders thumbnails of a dropped PDF (all pages start DROPPED),
- * lets the user keep + label the sheets that matter, then builds a trimmed PDF
- * of only the kept pages, uploads ONLY that, and records each kept sheet.
+ * lets the user keep the sheets that matter, then builds a trimmed PDF of only
+ * the kept pages, uploads ONLY that, and records each kept sheet.
+ *
+ * Naming and categorizing happen ONCE, in the takeoff viewer (sheet list →
+ * rename / category), not here — so there's no second place to keep in sync.
+ * Until a sheet is categorized it's treated as "core" and sent to every AI
+ * pass, so nothing is ever dropped; categorizing just makes the reading
+ * cheaper and more focused.
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PDFDocument } from "pdf-lib";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
-
-const LABELS = ["Architectural", "Structural", "MEP", "Schedules", "Civil", "Other"];
 
 type Thumb = { page: number; url: string };
 
@@ -33,7 +37,6 @@ export default function PlanTriage({
   const [thumbs, setThumbs] = useState<Thumb[]>([]);
   const [total, setTotal] = useState(0);
   const [kept, setKept] = useState<Set<number>>(new Set());
-  const [labels, setLabels] = useState<Record<number, string>>({});
   const [phase, setPhase] = useState<"rendering" | "ready" | "saving">("rendering");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
@@ -152,7 +155,6 @@ export default function PlanTriage({
         owner_id: user.id,
         page_number: idx + 1,
         original_page_number: orig,
-        label: labels[orig] ?? null,
       }));
       const { error: shErr } = await supabase.from("sheets").insert(rows);
       if (shErr) {
@@ -187,6 +189,11 @@ export default function PlanTriage({
                 ? `Loading thumbnails… ${thumbs.length}/${total || "?"}`
                 : `${kept.size} of ${total} pages kept — ${file.name}`}
           </p>
+          {!rendering && !saving ? (
+            <p className="mt-0.5 text-xs text-muted/70">
+              Name and categorize the kept sheets in the viewer next — one place, once.
+            </p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -251,23 +258,6 @@ export default function PlanTriage({
                   </span>
                 ) : null}
               </button>
-              {on ? (
-                <select
-                  value={labels[t.page] ?? ""}
-                  onChange={(e) =>
-                    setLabels((prev) => ({ ...prev, [t.page]: e.target.value }))
-                  }
-                  disabled={saving}
-                  className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
-                >
-                  <option value="">Label…</option>
-                  {LABELS.map((l) => (
-                    <option key={l} value={l}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
             </div>
           );
         })}

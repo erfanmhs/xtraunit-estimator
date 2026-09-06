@@ -2101,6 +2101,18 @@ export default function PlanViewer({
                 >
                   {planFile.file_name}
                 </p>
+                {/* Categorizing happens here (only here). Uncategorized sheets
+                    are still read — by EVERY AI pass — so this is a cost nudge. */}
+                {(() => {
+                  const n = sheets.filter(
+                    (s) => !removedSheetIds.has(s.id) && !(disciplines[s.id] ?? "").trim(),
+                  ).length;
+                  return n > 0 ? (
+                    <p className="mt-0.5 text-[11px] text-amber-300/90">
+                      {n} sheet{n > 1 ? "s" : ""} to categorize — routes the AI to the right sheets
+                    </p>
+                  ) : null;
+                })()}
               </div>
               <button
                 type="button"
