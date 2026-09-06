@@ -16,15 +16,15 @@ export default async function NewProjectPage({
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader
-        className="border-b border-border px-8 py-5"
+        className="border-b border-border px-6 py-5 sm:px-8"
         title="New Project"
         subtitle="The basics now — plans, takeoff, and pricing come next."
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <form
           action={createProject}
-          className="flex max-w-2xl flex-col gap-5 rounded-xl glass p-6"
+          className="flex max-w-2xl flex-col gap-5 rounded-xl glass p-4 sm:p-6"
         >
           {error ? (
             <p
@@ -53,7 +53,7 @@ export default async function NewProjectPage({
               <label htmlFor="client_name" className={LABEL}>
                 Client
               </label>
-              <input id="client_name" name="client_name" className={FIELD} />
+              <input id="client_name" name="client_name" autoComplete="organization" className={FIELD} />
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="project_type" className={LABEL}>
@@ -80,7 +80,7 @@ export default async function NewProjectPage({
             <label htmlFor="address" className={LABEL}>
               Address
             </label>
-            <input id="address" name="address" className={FIELD} />
+            <input id="address" name="address" autoComplete="street-address" className={FIELD} />
           </div>
 
           <div className="flex flex-col gap-1.5">

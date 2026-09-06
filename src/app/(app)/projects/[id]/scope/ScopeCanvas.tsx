@@ -369,7 +369,7 @@ function Row({
             when expanded. Phone (no hover) = wraps under the row, only when
             expanded, so the description keeps its width. */}
         <div
-          className={`basis-full items-center justify-end gap-0.5 text-[11px] transition-opacity sm:w-40 sm:basis-auto sm:shrink-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 ${
+          className={`basis-full items-center justify-end gap-0.5 text-[11px] transition-opacity sm:w-40 sm:basis-auto sm:shrink-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 pointer-coarse:sm:opacity-100 ${
             open ? "flex" : "hidden sm:flex sm:opacity-0"
           }`}
         >

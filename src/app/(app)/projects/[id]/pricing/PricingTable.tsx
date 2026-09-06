@@ -643,7 +643,7 @@ function Row({
               Confirm
             </button>
           ) : null}
-          <span className="flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+          <span className="flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100 pointer-coarse:sm:opacity-100">
             {proposed || confirmed ? (
               <button
                 type="button"
@@ -665,14 +665,16 @@ function Row({
         </div>
       </div>
 
-      {/* Line 2 below xl: the price cells. At xl they become grid cells too. */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 xl:contents">
+      {/* Line 2 below xl: the price cells — a tidy 3-column grid on phones
+          (Labor·Material·Sub / Equip·Other·Total, source beneath), a wrapping
+          row on laptops. At xl they become grid cells of the one-line row. */}
+      <div className="mt-1.5 grid grid-cols-3 items-center gap-1.5 sm:flex sm:flex-wrap xl:contents">
         {BUCKETS.map(([k, label]) => (
           <label
             key={k}
-            className={`flex items-center gap-1 ${usingTotal ? "opacity-40" : ""}`}
+            className={`flex min-w-0 items-center gap-1 ${usingTotal ? "opacity-40" : ""}`}
           >
-            <span className="text-[10px] text-muted xl:hidden">{label}</span>
+            <span className="shrink-0 text-[10px] text-muted xl:hidden">{label}</span>
             <input
               type="text"
               inputMode="decimal"
@@ -681,13 +683,13 @@ function Row({
               onBlur={saveIfChanged}
               placeholder="0"
               aria-label={label}
-              className={`w-14 xl:w-full ${CELL}`}
+              className={`min-w-0 flex-1 sm:w-14 sm:flex-none xl:w-full ${CELL}`}
             />
           </label>
         ))}
 
-        <label className="flex items-center gap-1">
-          <span className="text-[10px] font-medium text-brand-soft xl:hidden">Total</span>
+        <label className="flex min-w-0 items-center gap-1">
+          <span className="shrink-0 text-[10px] font-medium text-brand-soft xl:hidden">Total</span>
           <input
             type="text"
             inputMode="decimal"
@@ -697,7 +699,7 @@ function Row({
             placeholder="—"
             aria-label="Total"
             title="One final price for this line — overrides the buckets"
-            className={`w-[4.5rem] xl:w-full ${CELL}`}
+            className={`min-w-0 flex-1 sm:w-[4.5rem] sm:flex-none xl:w-full ${CELL}`}
           />
         </label>
 
@@ -706,7 +708,7 @@ function Row({
           onChange={(e) => setSource(e.target.value)}
           onBlur={saveIfChanged}
           aria-label="Price source"
-          className="rounded-md border border-border bg-black/20 px-1 py-1 text-[11px] text-muted outline-none focus:border-brand xl:w-full"
+          className="col-span-3 rounded-md border border-border bg-black/20 px-1 py-1 text-[11px] text-muted outline-none focus:border-brand sm:col-span-1 xl:w-full"
         >
           {SOURCES.map(([v, label]) => (
             <option key={v} value={v}>

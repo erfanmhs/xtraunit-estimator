@@ -292,8 +292,9 @@ function ItemRow({
   }
 
   return (
-    <div className="flex items-center gap-3 py-2.5">
-      <div className="min-w-0 flex-1">
+    // Phone: the name takes the line, the override + delete wrap beneath it.
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5">
+      <div className="min-w-0 flex-1 basis-56">
         <p
           onClick={onEditName}
           title="Click to rename"
@@ -315,7 +316,7 @@ function ItemRow({
           {it.last_observed ? ` · last ${fmtDate(it.last_observed)}` : ""}
         </p>
       </div>
-      <div className="flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-1">
         <span className="text-[10px] text-muted">override</span>
         <input
           type="text"
@@ -336,7 +337,8 @@ function ItemRow({
         type="button"
         onClick={onDelete}
         title="Delete item"
-        className="text-muted transition-colors hover:text-brand-soft"
+        aria-label="Delete item"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-lg text-muted transition-colors hover:bg-white/5 hover:text-brand-soft"
       >
         ×
       </button>

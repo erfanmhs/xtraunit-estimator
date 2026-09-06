@@ -32,6 +32,20 @@ const IDENTITY_FIELDS = [
   ["signer_title", "Proposal signer — title", "Principal"],
 ] as const;
 
+// The right mobile keyboard + autofill for each identity field.
+const INPUT_TYPE: Record<string, string> = {
+  company_phone: "tel",
+  company_email: "email",
+};
+const AUTOCOMPLETE: Record<string, string> = {
+  company_name: "organization",
+  company_address: "street-address",
+  company_phone: "tel",
+  company_email: "email",
+  signer_name: "name",
+  signer_title: "organization-title",
+};
+
 const MARKUP_FIELDS = [
   ["default_contingency_pct", "Contingency"],
   ["default_insurance_pct", "Insurance"],
@@ -111,7 +125,8 @@ export default function SettingsForm({
                 {label}
               </span>
               <input
-                type="text"
+                type={INPUT_TYPE[k] ?? "text"}
+                autoComplete={AUTOCOMPLETE[k]}
                 value={identity[k]}
                 onChange={(e) =>
                   setIdentity((s) => ({ ...s, [k]: e.target.value }))
