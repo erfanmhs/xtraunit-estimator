@@ -132,10 +132,13 @@ export default async function ScopePage({
       hasVisionPdf: !!p.vision_pdf_path,
     }),
   );
-  // Resilient to migrations 0026 (discipline) / 0028 (ingest_version) not run.
+  // Resilient to migrations 0026 (discipline) / 0028 (ingest_version) / 0035 (crop) not run.
   const sheetSel =
     "id,page_number,plan_file_id,ingest_method,name,label,discipline,ingest_version";
-  const shRes = await supabase.from("sheets").select(sheetSel).eq("project_id", id);
+  const withCrop = await supabase.from("sheets").select(`${sheetSel},crop`).eq("project_id", id);
+  const shRes = withCrop.error
+    ? await supabase.from("sheets").select(sheetSel).eq("project_id", id)
+    : withCrop;
   const sheetRows = (
     shRes.error
       ? (
@@ -145,7 +148,7 @@ export default async function ScopePage({
             .eq("project_id", id)
         ).data
       : shRes.data
-  ) as
+  ) as unknown as
     | {
         id: string;
         page_number: number;
@@ -155,6 +158,7 @@ export default async function ScopePage({
         label: string | null;
         discipline?: string | null;
         ingest_version?: number | null;
+        crop?: { x: number; y: number; w: number; h: number } | null;
       }[]
     | null;
   const ingestSheets = (sheetRows ?? [])
@@ -167,6 +171,7 @@ export default async function ScopePage({
       name: s.name,
       label: s.label,
       discipline: s.discipline ?? null,
+      crop: s.crop ?? null,
     }))
     .sort((a, b) => a.page_number - b.page_number);
 

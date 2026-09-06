@@ -20,32 +20,45 @@ export default async function PlanViewerPage({
 
   // Tiered select so the page works whatever migrations have run:
   // full (with ledger, 0024) → named (with name, 0006) → minimal.
+  // Ordered by page, then creation — so a cropped sheet (0035) lists right
+  // after the page it was cut from.
   const order = { ascending: true } as const;
-  const full = await supabase
+  const cropped = await supabase
     .from("sheets")
     .select(
-      "id,page_number,name,label,notes,discipline,scale_x,scale_y,scale_preset,ledger",
+      "id,page_number,name,label,notes,discipline,scale_x,scale_y,scale_preset,ledger,crop,source_sheet_id,created_at",
     )
     .eq("plan_file_id", planId)
-    .order("page_number", order);
-  let sheetsData = full.data;
-  if (full.error) {
-    const named = await supabase
+    .order("page_number", order)
+    .order("created_at", order);
+  let sheetsData = cropped.data;
+  if (cropped.error) {
+    const full = await supabase
       .from("sheets")
-      .select("id,page_number,name,label,notes,scale_x,scale_y,scale_preset")
+      .select(
+        "id,page_number,name,label,notes,discipline,scale_x,scale_y,scale_preset,ledger",
+      )
       .eq("plan_file_id", planId)
       .order("page_number", order);
-    sheetsData = (
-      named.error
-        ? (
-            await supabase
-              .from("sheets")
-              .select("id,page_number,label,notes,scale_x,scale_y,scale_preset")
-              .eq("plan_file_id", planId)
-              .order("page_number", order)
-          ).data
-        : named.data
-    ) as typeof full.data; // older shapes lack name/ledger — optional on Sheet
+    sheetsData = full.data as typeof cropped.data;
+    if (full.error) {
+      const named = await supabase
+        .from("sheets")
+        .select("id,page_number,name,label,notes,scale_x,scale_y,scale_preset")
+        .eq("plan_file_id", planId)
+        .order("page_number", order);
+      sheetsData = (
+        named.error
+          ? (
+              await supabase
+                .from("sheets")
+                .select("id,page_number,label,notes,scale_x,scale_y,scale_preset")
+                .eq("plan_file_id", planId)
+                .order("page_number", order)
+            ).data
+          : named.data
+      ) as typeof cropped.data; // older shapes lack name/ledger/crop — optional on Sheet
+    }
   }
 
   return (

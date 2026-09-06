@@ -22,13 +22,10 @@ one once in Supabase, then it moves to **Already run**.
       read it and to click Accept. Until it's run: the proposal page still
       works and prints, but "Publish link" is disabled and the new fields
       don't save. Safe to run anytime.
-
-- [ ] 0028_sheet_ingest_version.sql — adds `ingest_version` to `sheets`. Powers
-      the improved plan-reading (layout-aware text so tables survive + schedule
-      sheets sent as images). Running it makes existing projects re-read their
-      plans ONCE, automatically, with the better logic. Safe to run anytime.
-- [ ] 0029_finding_status.sql — adds `status` to `scope_findings` for the clear
-      Accept / Dismiss on each assumption/gap/exclusion. Safe to run anytime.
+- [ ] 0035_sheet_crop.sql — the viewer's Crop tool: a cropped region becomes a
+      NEW sheet (the original and the PDF are never changed). Adds `crop` and
+      `source_sheet_id` to `sheets`. Until it's run, "Create sheet from crop"
+      explains it needs this. Safe to run anytime.
 
 ---
 
@@ -61,3 +58,7 @@ one once in Supabase, then it moves to **Already run**.
 - [x] 0025_plan_vision_pdf.sql — run 2026-07-03
 - [x] 0026_sheet_discipline.sql — run 2026-07-07
 - [x] 0027_ai_usage.sql — run 2026-07-07
+- [x] 0028_sheet_ingest_version.sql — run (columns verified present 2026-09-05)
+- [x] 0029_finding_status.sql — run (verified 2026-09-05)
+- [x] 0030_project_gen_trades.sql — run (verified 2026-09-05)
+- [x] 0031_finding_options.sql — run (verified 2026-09-05)
