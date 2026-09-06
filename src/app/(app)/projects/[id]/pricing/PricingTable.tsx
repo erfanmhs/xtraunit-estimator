@@ -20,8 +20,9 @@ import {
   clearAllPrices,
   type PricePatch,
 } from "./actions";
-import { updateLineItem, setLineStatus, addLineItem } from "../scope/actions";
+import { updateLineItem, setLineStatus, addLineItem, deleteLineItem } from "../scope/actions";
 import { evalFormula } from "@/lib/formula";
+import SwipeRow from "@/components/SwipeRow";
 
 export type PricedLine = {
   id: string;
@@ -222,6 +223,14 @@ export default function PricingTable({
     run(
       () => setItems((prev) => prev.filter((li) => li.id !== id)),
       () => setLineStatus(id, "excluded"),
+    );
+  }
+
+  // Remove the line for good (Exclude keeps it, struck through, on Scope).
+  function onDelete(id: string) {
+    run(
+      () => setItems((prev) => prev.filter((li) => li.id !== id)),
+      () => deleteLineItem(id),
     );
   }
 
@@ -456,6 +465,7 @@ export default function PricingTable({
                       onClear={() => onClear(li.id)}
                       onEditDesc={(d) => onEditDesc(li.id, d)}
                       onExclude={() => onExclude(li.id)}
+                      onDelete={() => onDelete(li.id)}
                     />
                   ))}
                   {addingDiv === g.key ? (
@@ -481,6 +491,7 @@ function Row({
   onClear,
   onEditDesc,
   onExclude,
+  onDelete,
 }: {
   item: PricedLine;
   onSave: (patch: PricePatch) => void;
@@ -488,6 +499,7 @@ function Row({
   onClear: () => void;
   onEditDesc: (description: string) => void;
   onExclude: () => void;
+  onDelete: () => void;
 }) {
   const [vals, setVals] = useState<Record<string, string>>(() => fromItem(li));
   const [total, setTotal] = useState(li.cost_total ? String(li.cost_total) : "");
@@ -578,7 +590,20 @@ function Row({
     .join(" · ");
   const statusText = proposed ? "needs confirm" : confirmed ? "confirmed" : "unpriced";
 
+  // Touch: swipe left for Exclude / Delete; hold for every action. The
+  // visible buttons stay for everyone.
+  const swipe = [
+    { label: "Exclude", onClick: onExclude },
+    { label: "Delete", onClick: onDelete, tone: "danger" as const },
+  ];
+  const sheet = [
+    ...(proposed ? [{ label: "Confirm price", onClick: onConfirm, tone: "primary" as const }] : []),
+    ...(proposed || confirmed ? [{ label: "Clear price", onClick: onClear }] : []),
+    ...swipe,
+  ];
+
   return (
+    <SwipeRow actions={swipe} sheetActions={sheet}>
     <div className={`group py-1.5 ${GRID}`}>
       {/* Line 1 below xl: description (+ note) with the amount and actions at
           the right. At xl this wrapper dissolves (display: contents) and the
@@ -718,6 +743,7 @@ function Row({
         </select>
       </div>
     </div>
+    </SwipeRow>
   );
 }
 
