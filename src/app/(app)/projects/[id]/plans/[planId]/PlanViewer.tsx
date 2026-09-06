@@ -493,6 +493,32 @@ export default function PlanViewer({
   const [cropName, setCropName] = useState("");
   const [cropBusy, setCropBusy] = useState(false);
   const cropDragRef = useRef(false);
+
+  // ── Touch ──────────────────────────────────────────────────────────────────
+  // `coarse` = a finger, not a mouse: bigger hit targets, a capped bitmap,
+  // and the finger drawing model (place on LIFT, with a loupe to aim).
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setCoarse(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  // Fingers currently down on the viewport (client coords) → pinch when two.
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ dist0: number; scale0: number; fx: number; fy: number } | null>(null);
+  const pinchedRef = useRef(false); // a pinch happened during this touch — no point on lift
+  const zoomRafRef = useRef<number | null>(null);
+  // A finger placing a point: down → (slide, loupe) → lift = place.
+  const tapRef = useRef<{ id: number; x: number; y: number; t: number } | null>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+  const rowPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTapRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  // The magnifier that shows what's under the fingertip (center-column coords).
+  const [loupe, setLoupe] = useState<{ vx: number; vy: number; pt: Pt } | null>(null);
+  const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
   // Export-to-PDF dialog state.
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSel, setExportSel] = useState<Set<string>>(new Set());
@@ -802,11 +828,46 @@ export default function PlanViewer({
 
   // After zooming settles, re-rasterize the page crisply at the new scale. The
   // display size is already correct, so this swap causes no visual jump.
+  // Touch devices cap the bitmap: phones and iPads fail past ~12–16M canvas
+  // pixels (a 24×36 sheet at 3× is 40M). The CSS size still follows `scale`;
+  // only sharpness beyond the cap is traded away.
   useEffect(() => {
-    if (scale === rasterScale) return;
-    const t = setTimeout(() => setRasterScale(scale), 160);
+    const maxPixels = coarse ? 12_000_000 : 40_000_000;
+    const cap =
+      baseDims.w && baseDims.h ? Math.sqrt(maxPixels / (baseDims.w * baseDims.h)) : Infinity;
+    const target = Math.min(scale, cap);
+    if (target === rasterScale) return;
+    const t = setTimeout(() => setRasterScale(target), 160);
     return () => clearTimeout(t);
-  }, [scale, rasterScale]);
+  }, [scale, rasterScale, coarse, baseDims.w, baseDims.h]);
+
+  // Draw the loupe: the bitmap around the fingertip, magnified, with a crosshair.
+  useEffect(() => {
+    const lc = loupeCanvasRef.current;
+    const src = canvasRef.current;
+    if (!loupe || !lc || !src) return;
+    const ctx = lc.getContext("2d");
+    if (!ctx) return;
+    const SIZE = 120;
+    const MAG = 2.5;
+    const span = SIZE / MAG / scale; // page points across the loupe
+    const sx = (loupe.pt.x - span / 2) * rasterScale;
+    const sy = (loupe.pt.y - span / 2) * rasterScale;
+    const sw = span * rasterScale;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    try {
+      ctx.drawImage(src, sx, sy, sw, sw, 0, 0, SIZE, SIZE);
+    } catch {}
+    ctx.strokeStyle = "#A01C2D";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(SIZE / 2, 0);
+    ctx.lineTo(SIZE / 2, SIZE);
+    ctx.moveTo(0, SIZE / 2);
+    ctx.lineTo(SIZE, SIZE / 2);
+    ctx.stroke();
+  }, [loupe, scale, rasterScale]);
 
   // Keyboard: Esc cancels/steps back, Delete removes selection, Space pans.
   useEffect(() => {
@@ -1080,7 +1141,8 @@ export default function PlanViewer({
     const rect = svgRef.current!.getBoundingClientRect();
     return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
   }
-  const TOL = () => 8 / scale; // selection tolerance, in points
+  // Selection tolerance in page points: a fingertip needs twice a cursor's.
+  const TOL = () => (coarse ? 16 : 8) / scale;
 
   async function insertMeasurement(
     type: string,
@@ -1454,46 +1516,60 @@ export default function PlanViewer({
     }
   }
 
-  // ---- pointer handling on the overlay ----
-  function onPointerDown(e: React.PointerEvent) {
-    if (e.button !== 0 || spaceHeld) return; // middle/right + space-pan bubble to pan
-    const pt = evtToPoint(e);
-
-    if (tool === "select") {
-      // grab a vertex handle of the selected measurement?
-      if (selected) {
-        for (let i = 0; i < selected.geometry.length; i++) {
-          const v = selected.geometry[i];
-          if (Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6) {
-            dragRef.current = { id: selected.id, index: i, pointerId: e.pointerId };
-            setEditGeom(selected.geometry.map((q) => ({ ...q })));
-            try {
-              svgRef.current?.setPointerCapture(e.pointerId);
-            } catch {}
-            return;
-          }
-        }
-      }
-      setSelectedId(pickMeasurementAt(pt));
-      return;
+  // ---- touch helpers ----
+  // Long-press (500 ms, finger still) = the right-click menu.
+  function startLongPress(cx: number, cy: number) {
+    cancelLongPress();
+    longPressFiredRef.current = false;
+    longPressRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const pt = { x: (cx - rect.left) / scale, y: (cy - rect.top) / scale };
+      const id = pickMeasurementAt(pt);
+      setMenu(id ? { x: cx, y: cy, kind: "measurement", id } : { x: cx, y: cy, kind: "canvas" });
+      setLoupe(null);
+    }, 500);
+  }
+  function cancelLongPress() {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
     }
+  }
+  function cancelTouchTap() {
+    tapRef.current = null;
+    cancelLongPress();
+    setLoupe(null);
+  }
+  function showLoupe(e: React.PointerEvent) {
+    const host = viewportRef.current?.parentElement; // the center column (relative)
+    if (!host) return;
+    const hr = host.getBoundingClientRect();
+    setLoupe({ vx: e.clientX - hr.left, vy: e.clientY - hr.top, pt: evtToPoint(e) });
+  }
+  // Zoom so the page point under (clientX, clientY) stays put — the tap
+  // fallback for pinch (double-tap in Pan mode, the +/− buttons).
+  function zoomAt(clientX: number, clientY: number, next: number) {
+    const vp = viewportRef.current;
+    const canvas = canvasRef.current;
+    if (!vp || !canvas) return;
+    const crect = canvas.getBoundingClientRect();
+    const vrect = vp.getBoundingClientRect();
+    focusRef.current = {
+      fx: crect.width ? (clientX - crect.left) / crect.width : 0.5,
+      fy: crect.height ? (clientY - crect.top) / crect.height : 0.5,
+      vx: clientX - vrect.left,
+      vy: clientY - vrect.top,
+    };
+    setScale(Math.max(0.1, Math.min(6, next)));
+  }
 
-    if (tool === "browse") return;
-
-    // Crop: drag a rectangle (held to the chosen paper shape).
-    if (tool === "crop") {
-      cropDragRef.current = true;
-      setCropDraft({ a: pt, b: pt });
-      try {
-        svgRef.current?.setPointerCapture(e.pointerId);
-      } catch {}
-      return;
-    }
-
+  // Place a point for the current draw tool (mouse: on press; finger: on lift).
+  function placePoint(pt: Pt) {
     // starting a fresh shape clears the finalize dedupe guard
     if (draft.length === 0) finalizingRef.current = false;
 
-    // draw tools
     if (tool === "count") {
       addCountMarker(pt);
       return;
@@ -1540,7 +1616,66 @@ export default function PlanViewer({
     }
   }
 
+  // ---- pointer handling on the overlay ----
+  function onPointerDown(e: React.PointerEvent) {
+    if (e.button !== 0 || spaceHeld) return; // middle/right + space-pan bubble to pan
+    const pt = evtToPoint(e);
+
+    // Finger on a draw tool: nothing is placed yet. The point goes where the
+    // finger LIFTS (slide to aim with the loupe); a second finger turns the
+    // gesture into a pinch instead; holding still opens the menu.
+    if (e.pointerType === "touch" && tool !== "select" && tool !== "crop" && tool !== "browse") {
+      if (pointersRef.current.size > 1) return;
+      tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
+      showLoupe(e);
+      startLongPress(e.clientX, e.clientY);
+      return;
+    }
+    if (e.pointerType === "touch" && tool === "select") startLongPress(e.clientX, e.clientY);
+
+    if (tool === "select") {
+      // grab a vertex handle of the selected measurement?
+      if (selected) {
+        for (let i = 0; i < selected.geometry.length; i++) {
+          const v = selected.geometry[i];
+          if (Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6) {
+            dragRef.current = { id: selected.id, index: i, pointerId: e.pointerId };
+            setEditGeom(selected.geometry.map((q) => ({ ...q })));
+            try {
+              svgRef.current?.setPointerCapture(e.pointerId);
+            } catch {}
+            return;
+          }
+        }
+      }
+      setSelectedId(pickMeasurementAt(pt));
+      return;
+    }
+
+    if (tool === "browse") return;
+
+    // Crop: drag a rectangle (held to the chosen paper shape).
+    if (tool === "crop") {
+      cropDragRef.current = true;
+      setCropDraft({ a: pt, b: pt });
+      try {
+        svgRef.current?.setPointerCapture(e.pointerId);
+      } catch {}
+      return;
+    }
+
+    placePoint(pt);
+  }
+
   function onPointerMove(e: React.PointerEvent) {
+    // A finger aiming a point: move the loupe and the rubber-band, place later.
+    if (e.pointerType === "touch" && tapRef.current?.id === e.pointerId) {
+      if (Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10)
+        cancelLongPress();
+      showLoupe(e);
+      if (draft.length) setHover(evtToPoint(e));
+      return;
+    }
     if (tool === "crop") {
       if (!cropDragRef.current) return;
       const pt = evtToPoint(e);
@@ -1572,7 +1707,19 @@ export default function PlanViewer({
     }
   }
 
-  async function onPointerUp() {
+  async function onPointerUp(e: React.PointerEvent) {
+    if (e.pointerType === "touch") {
+      if (tapRef.current?.id === e.pointerId) {
+        const fired = longPressFiredRef.current;
+        const pt = evtToPoint(e);
+        cancelTouchTap();
+        // A long-press opened the menu, or a pinch happened: no point.
+        if (fired || pinchedRef.current) return;
+        placePoint(pt);
+        return;
+      }
+      cancelLongPress();
+    }
     if (tool === "crop") {
       cropDragRef.current = false;
       // A click without a drag is not a crop.
@@ -1939,10 +2086,53 @@ export default function PlanViewer({
     await applyHistory(target, "undo");
   }
 
-  // ---- pan ----
+  // ---- pan + touch gestures ----
+  // Mouse: right/middle drag (or Space) pans; the wheel zooms. Finger: ONE
+  // finger draws (or pans in Pan mode); TWO fingers pinch-zoom and pan in ANY
+  // tool. Touch pointers are implicitly captured by the element they started
+  // on and bubble here, so the viewport sees every finger without capturing.
+  function midAndDist(): { mx: number; my: number; d: number } | null {
+    const pts = [...pointersRef.current.values()];
+    if (pts.length < 2) return null;
+    const [a, b] = pts;
+    return { mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
+  }
   function onPanDown(e: React.PointerEvent) {
     const vp = viewportRef.current;
     if (!vp) return;
+    if (e.pointerType === "touch") {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointersRef.current.size === 2) {
+        // Second finger: whatever the first was doing becomes a pinch.
+        const g = midAndDist()!;
+        const crect = canvasRef.current?.getBoundingClientRect();
+        pinchRef.current = {
+          dist0: Math.max(g.d, 1),
+          scale0: scale,
+          fx: crect && crect.width ? (g.mx - crect.left) / crect.width : 0.5,
+          fy: crect && crect.height ? (g.my - crect.top) / crect.height : 0.5,
+        };
+        pinchedRef.current = true;
+        panRef.current = null;
+        cancelTouchTap();
+        return;
+      }
+      if (pointersRef.current.size > 2) return;
+      pinchedRef.current = false;
+      if (tool === "browse" || spaceHeld) {
+        // Double-tap = zoom in here (the tap fallback for pinch).
+        const last = lastTapRef.current;
+        const now = Date.now();
+        if (last && now - last.t < 300 && Math.hypot(last.x - e.clientX, last.y - e.clientY) < 24) {
+          lastTapRef.current = null;
+          zoomAt(e.clientX, e.clientY, scale * 2);
+          return;
+        }
+        lastTapRef.current = { x: e.clientX, y: e.clientY, t: now };
+        panRef.current = { x: e.clientX, y: e.clientY, sl: vp.scrollLeft, st: vp.scrollTop };
+      }
+      return;
+    }
     if (e.button === 2) panMovedRef.current = false; // track right-drag vs right-click
     if (
       e.button === 1 || // middle
@@ -1955,7 +2145,36 @@ export default function PlanViewer({
   }
   function onPanMove(e: React.PointerEvent) {
     const vp = viewportRef.current;
-    if (!vp || !panRef.current) return;
+    if (!vp) return;
+    if (e.pointerType === "touch") {
+      if (pointersRef.current.has(e.pointerId))
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const p = pinchRef.current;
+      const g = midAndDist();
+      if (p && g) {
+        const next = Math.max(0.1, Math.min(6, (p.scale0 * g.d) / p.dist0));
+        const vrect = vp.getBoundingClientRect();
+        const canvas = canvasRef.current;
+        if (Math.abs(next - scale) / scale > 0.004) {
+          // Zoom: the layout effect keeps fx/fy under the fingers' midpoint.
+          focusRef.current = { fx: p.fx, fy: p.fy, vx: g.mx - vrect.left, vy: g.my - vrect.top };
+          if (zoomRafRef.current == null)
+            zoomRafRef.current = requestAnimationFrame(() => {
+              zoomRafRef.current = null;
+              setScale(next);
+            });
+        } else if (canvas) {
+          // Two-finger pan at steady zoom: keep the anchored point under the midpoint.
+          const crect = canvas.getBoundingClientRect();
+          const originX = crect.left - vrect.left + vp.scrollLeft;
+          const originY = crect.top - vrect.top + vp.scrollTop;
+          vp.scrollLeft = originX + p.fx * crect.width - (g.mx - vrect.left);
+          vp.scrollTop = originY + p.fy * crect.height - (g.my - vrect.top);
+        }
+        return;
+      }
+    }
+    if (!panRef.current) return;
     if (
       Math.abs(e.clientX - panRef.current.x) > 4 ||
       Math.abs(e.clientY - panRef.current.y) > 4
@@ -1967,6 +2186,12 @@ export default function PlanViewer({
   }
   function onPanEnd(e: React.PointerEvent) {
     const vp = viewportRef.current;
+    if (e.pointerType === "touch") {
+      pointersRef.current.delete(e.pointerId);
+      if (pointersRef.current.size < 2) pinchRef.current = null;
+      if (pointersRef.current.size === 0) panRef.current = null;
+      return;
+    }
     if (panRef.current && vp) {
       try {
         vp.releasePointerCapture(e.pointerId);
@@ -2206,17 +2431,19 @@ export default function PlanViewer({
     }
   }
 
+  // Order matters on a phone: the tools row scrolls sideways, so the ones used
+  // most sit first and stay visible.
   const TOOLS: { id: Tool; label: string }[] = [
     { id: "select", label: "Select" },
     { id: "browse", label: "Pan" },
-    { id: "calibrate", label: "Calibrate" },
     { id: "line", label: "Line" },
-    { id: "polyline", label: "Polyline" },
     { id: "area", label: "Area" },
+    { id: "count", label: "Count" },
+    { id: "polyline", label: "Polyline" },
     { id: "wall", label: "Wall" },
     { id: "volume", label: "Volume" },
-    { id: "count", label: "Count" },
     { id: "leader", label: "Leader" },
+    { id: "calibrate", label: "Calibrate" },
     { id: "crop", label: "Crop" },
   ];
 
@@ -2338,6 +2565,25 @@ export default function PlanViewer({
                         kind: "sheet",
                         id: s.id,
                       });
+                    }}
+                    // Long-press (finger held ~0.5 s) = the same menu as right-click.
+                    onPointerDown={(e) => {
+                      if (e.pointerType !== "touch") return;
+                      const { clientX: x, clientY: y } = e;
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
+                      rowPressRef.current = setTimeout(
+                        () => setMenu({ x, y, kind: "sheet", id: s.id }),
+                        500,
+                      );
+                    }}
+                    onPointerUp={() => {
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
+                    }}
+                    onPointerMove={() => {
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
+                    }}
+                    onPointerCancel={() => {
+                      if (rowPressRef.current) clearTimeout(rowPressRef.current);
                     }}
                     className={`rounded-lg text-sm transition-colors ${s.crop ? "ml-3" : ""} ${
                       active
@@ -2753,10 +2999,17 @@ export default function PlanViewer({
           onPointerDown={onPanDown}
           onPointerMove={onPanMove}
           onPointerUp={onPanEnd}
+          onPointerCancel={onPanEnd}
           onPointerLeave={onPanEnd}
           onContextMenu={onCanvasContextMenu}
           className="relative min-h-0 flex-1 overflow-auto bg-black/40"
-          style={{ cursor: spaceHeld || tool === "browse" ? "grab" : "default" }}
+          // touch-action none: the browser hands us every finger instead of
+          // scrolling/zooming the page itself — required for pinch + draw.
+          style={{
+            cursor: spaceHeld || tool === "browse" ? "grab" : "default",
+            touchAction: "none",
+            overscrollBehavior: "contain",
+          }}
         >
           {status === "error" ? (
             <p className="absolute inset-0 flex items-center justify-center text-sm text-brand-soft">
@@ -2976,7 +3229,7 @@ export default function PlanViewer({
                                 key={i}
                                 cx={p.x}
                                 cy={p.y}
-                                r={5}
+                                r={coarse ? 11 : 5}
                                 fill="#fff"
                                 stroke={m.color ?? "#A01C2D"}
                                 strokeWidth={2}
@@ -3165,6 +3418,61 @@ export default function PlanViewer({
             </div>
           )}
         </div>
+
+        {/* Loupe: what's under the fingertip, magnified, above the finger */}
+        {loupe ? (
+          <div
+            className="pointer-events-none absolute z-30 overflow-hidden rounded-full border-2 border-brand bg-white shadow-xl"
+            style={{ left: loupe.vx - 60, top: loupe.vy - 60 - 90, width: 120, height: 120 }}
+            aria-hidden
+          >
+            <canvas ref={loupeCanvasRef} width={120} height={120} className="block" />
+          </div>
+        ) : null}
+
+        {/* While drawing: Finish / Undo point / Cancel — no double-tap or
+            precise "tap the last vertex" needed. Works for mouse too. */}
+        {draft.length > 0 && tool !== "crop" ? (
+          (() => {
+            const multi = tool === "polyline" || tool === "area" || tool === "wall" || tool === "volume";
+            const fill = tool === "area" || (tool === "volume" && volMode === "area");
+            const minPts = fill ? 3 : 2;
+            return (
+              <div className="glass-strong absolute bottom-12 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full px-2 py-1 text-xs">
+                <span className="px-1.5 text-muted tabular-nums">
+                  {draft.length} pt{draft.length > 1 ? "s" : ""}
+                </span>
+                {multi ? (
+                  <button
+                    type="button"
+                    onClick={onDoubleClick}
+                    disabled={draft.length < minPts}
+                    className="rounded-full bg-brand px-3 py-1 font-medium text-white disabled:opacity-40"
+                  >
+                    ✓ {fill ? "Close shape" : "Finish"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setDraft((d) => d.slice(0, -1))}
+                  className="rounded-full border border-border px-2.5 py-1 text-foreground"
+                >
+                  Undo point
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft([]);
+                    setHover(null);
+                  }}
+                  className="rounded-full px-2 py-1 text-muted"
+                >
+                  Cancel
+                </button>
+              </div>
+            );
+          })()
+        ) : null}
 
         {/* Crop tool panel: paper shape, orientation, name, create */}
         {tool === "crop" ? (
