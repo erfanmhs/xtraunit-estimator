@@ -87,6 +87,15 @@ function hasPrice(li: PricedLine): boolean {
   return li.price_status === "proposed" || li.price_status === "confirmed";
 }
 
+// One-line row layout at xl+: description | 5 buckets | total | source | amount | actions.
+// Below xl the same cells wrap onto a second line (see Row), so a line item is
+// two lines on a laptop/tablet and one on a wide screen — never three.
+const GRID =
+  "xl:grid xl:grid-cols-[minmax(0,1fr)_repeat(5,3.75rem)_4.5rem_5.5rem_5.5rem_6rem] xl:items-center xl:gap-x-1.5";
+
+const CELL =
+  "rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand";
+
 export default function PricingTable({
   projectId,
   initialItems,
@@ -299,62 +308,62 @@ export default function PricingTable({
 
   return (
     <div className="mt-6">
-      {/* Totals header */}
-      <div className="glass sticky top-0 z-10 mb-6 flex flex-wrap items-center gap-x-8 gap-y-2 rounded-xl px-5 py-3">
+      {/* Totals bar: the two numbers, the status counts, the bulk actions.
+          Wraps in that order at narrow widths; nothing is crammed in a corner. */}
+      <div className="glass sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl px-4 py-2.5">
         <div>
-          <p className="text-[11px] uppercase tracking-wider text-muted">
-            Confirmed direct cost
+          <p className="text-[10px] uppercase tracking-wider text-muted">
+            Confirmed
           </p>
-          <p className="font-heading text-xl text-green-300">
+          <p className="font-heading text-lg leading-tight text-green-300">
             {usd.format(confirmedTotal)}
           </p>
         </div>
         <div>
-          <p className="text-[11px] uppercase tracking-wider text-muted">
-            Projected (incl. unconfirmed)
+          <p className="text-[10px] uppercase tracking-wider text-muted">
+            Projected
           </p>
-          <p className="font-heading text-xl text-foreground">
+          <p className="font-heading text-lg leading-tight text-foreground">
             {usd.format(projectedTotal)}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-4">
-          <div className="text-right text-xs text-muted">
-            {needsConfirm > 0 ? (
-              <p className="text-amber-300">{needsConfirm} prices need confirm</p>
-            ) : null}
-            {unpricedCount > 0 ? <p>{unpricedCount} lines unpriced</p> : null}
-            <p className="text-muted/70">
-              Cells take formulas: 2.5*1.1, (100+50)/2 … Markups come later.
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-1.5">
-            {needsConfirm > 0 ? (
-              <button
-                type="button"
-                onClick={() =>
-                  onConfirmMany(
-                    items
-                      .filter((li) => li.price_status === "proposed")
-                      .map((li) => li.id),
-                  )
-                }
-                className="glass-brand rounded-lg px-3 py-2 text-sm font-medium text-foreground hover:bg-brand/30"
-              >
-                Confirm all ({needsConfirm})
-              </button>
-            ) : null}
-            {items.some(hasPrice) ? (
-              <button
-                type="button"
-                onClick={onClearAll}
-                className="rounded-md border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand hover:text-brand-soft"
-              >
-                Clear all
-              </button>
-            ) : null}
-          </div>
+        <div className="text-xs text-muted">
+          {needsConfirm > 0 ? (
+            <p className="text-amber-300">{needsConfirm} need confirm</p>
+          ) : null}
+          {unpricedCount > 0 ? <p>{unpricedCount} unpriced</p> : null}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {items.some(hasPrice) ? (
+            <button
+              type="button"
+              onClick={onClearAll}
+              className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:border-brand hover:text-brand-soft"
+            >
+              Clear all
+            </button>
+          ) : null}
+          {needsConfirm > 0 ? (
+            <button
+              type="button"
+              onClick={() =>
+                onConfirmMany(
+                  items
+                    .filter((li) => li.price_status === "proposed")
+                    .map((li) => li.id),
+                )
+              }
+              className="glass-brand rounded-lg px-3 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30"
+            >
+              Confirm all ({needsConfirm})
+            </button>
+          ) : null}
         </div>
       </div>
+      <p className="mb-4 text-[11px] text-muted/70">
+        Prices are per unit when a line has a quantity, lump sums otherwise.
+        Every cell takes a formula (2.5*1.1, (100+50)/2). Markups come later.
+      </p>
 
       {error ? (
         <p className="mb-4 rounded-lg border border-brand/40 bg-brand/10 px-4 py-2 text-sm text-brand-soft">
@@ -370,11 +379,11 @@ export default function PricingTable({
             .reduce((a, li) => a + lineTotal(li), 0);
           return (
             <section key={g.key} className="glass rounded-xl p-4">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                 <button
                   type="button"
                   onClick={() => toggleCollapse(g.key)}
-                  className="flex min-w-0 items-center gap-2 text-left"
+                  className="flex min-w-0 flex-1 basis-48 items-center gap-2 text-left"
                   aria-expanded={!isCollapsed}
                 >
                   <span className="text-xs text-muted">
@@ -425,6 +434,19 @@ export default function PricingTable({
 
               {!isCollapsed ? (
                 <div className="mt-2 divide-y divide-white/5">
+                  {/* Column headers — only when rows are one line (xl+) */}
+                  <div className={`${GRID} hidden pb-1 text-[10px] uppercase tracking-wider text-muted xl:grid`}>
+                    <span>Line</span>
+                    {BUCKETS.map(([k, label]) => (
+                      <span key={k} className="text-right">
+                        {label}
+                      </span>
+                    ))}
+                    <span className="text-right text-brand-soft">Total</span>
+                    <span>Source</span>
+                    <span className="text-right">Amount</span>
+                    <span />
+                  </div>
                   {g.rows.map((li) => (
                     <Row
                       key={li.id}
@@ -547,66 +569,110 @@ function Row({
       ? (li.quantity ?? 0) * previewSum
       : previewSum;
   const showAmount = usingTotal || previewSum > 0;
+  const qtyText =
+    li.quantity != null ? `${li.quantity} ${li.unit ?? ""}`.trim() : "no qty";
+  // The AI's reasoning is worth a glance while a price still needs review;
+  // once confirmed it's noise, so it folds into the amount's tooltip.
+  const note = [li.price_note, li.price_confidence ? `${li.price_confidence} confidence` : null]
+    .filter(Boolean)
+    .join(" · ");
+  const statusText = proposed ? "needs confirm" : confirmed ? "confirmed" : "unpriced";
 
   return (
-    <div className="py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          {editingDesc ? (
-            <input
-              type="text"
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              onBlur={saveDesc}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveDesc();
-                if (e.key === "Escape") {
-                  setDesc(li.description);
-                  setEditingDesc(false);
-                }
-              }}
-              autoFocus
-              className="w-full rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
-            />
-          ) : (
-            <p
-              onClick={() => setEditingDesc(true)}
-              title="Click to edit"
-              className="cursor-text truncate text-sm text-foreground hover:text-brand-soft"
-            >
-              {confirmed ? <span className="mr-1 text-green-400">✓</span> : null}
-              {li.description}
-            </p>
-          )}
-          <p className="text-[11px] text-muted">
-            {li.quantity != null
-              ? `${li.quantity} ${li.unit ?? ""}`
-              : "no quantity"}
-            {li.price_note ? ` · ${li.price_note}` : ""}
-            {li.price_confidence ? ` · ${li.price_confidence} confidence` : ""}
+    <div className={`group py-1.5 ${GRID}`}>
+      {/* Line 1 below xl: description (+ note) with the amount and actions at
+          the right. At xl this wrapper dissolves (display: contents) and the
+          amount/actions are ordered to the last two grid columns. */}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1 xl:contents">
+      {/* Phone: the description takes the whole first line and the amount +
+          actions drop beneath it; from sm up they share the line. */}
+      <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">
+        {editingDesc ? (
+          <input
+            type="text"
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            onBlur={saveDesc}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveDesc();
+              if (e.key === "Escape") {
+                setDesc(li.description);
+                setEditingDesc(false);
+              }
+            }}
+            autoFocus
+            spellCheck
+            className="w-full rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
+          />
+        ) : (
+          <p
+            onClick={() => setEditingDesc(true)}
+            title={`${li.description}\nClick to edit`}
+            className="cursor-text truncate text-sm text-foreground hover:text-brand-soft"
+          >
+            {confirmed ? <span className="mr-1 text-green-400">✓</span> : null}
+            {li.description}
+            <span className="ml-2 text-[11px] text-muted">{qtyText}</span>
           </p>
-        </div>
-        <div className="shrink-0 text-right">
-          <p className="text-sm font-medium text-foreground">
-            {showAmount ? usd.format(previewTotal ?? 0) : "—"}
+        )}
+        {proposed && note ? (
+          <p className="truncate text-[11px] text-muted" title={note}>
+            {note}
           </p>
+        ) : null}
+      </div>
+
+        {/* Amount, colored by status (the tooltip spells it out) */}
+        <p
+          title={`${statusText}${note ? ` · ${note}` : ""}`}
+          className={`ml-auto shrink-0 text-right text-sm font-medium tabular-nums xl:order-10 ${
+            proposed ? "text-amber-300" : confirmed ? "text-green-300" : "text-muted"
+          }`}
+        >
+          {showAmount ? usd.format(previewTotal ?? 0) : "—"}
+        </p>
+
+        {/* Actions: Confirm stays visible (it's the job); Clear/Exclude on hover */}
+        <div className="flex shrink-0 items-center justify-end gap-1 text-[11px] xl:order-11">
           {proposed ? (
-            <p className="text-[10px] text-amber-300">needs confirm</p>
-          ) : confirmed ? (
-            <p className="text-[10px] text-green-400">confirmed</p>
-          ) : (
-            <p className="text-[10px] text-muted">unpriced</p>
-          )}
+            <button
+              type="button"
+              onClick={onConfirm}
+              className="glass-brand rounded-md px-2 py-0.5 font-medium text-foreground hover:bg-brand/30"
+            >
+              Confirm
+            </button>
+          ) : null}
+          <span className="flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+            {proposed || confirmed ? (
+              <button
+                type="button"
+                onClick={onClear}
+                className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-foreground"
+              >
+                Clear
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onExclude}
+              title="Exclude from scope & pricing (restore from the Scope page)"
+              className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-foreground"
+            >
+              Exclude
+            </button>
+          </span>
         </div>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {/* Line 2 below xl: the price cells. At xl they become grid cells too. */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 xl:contents">
         {BUCKETS.map(([k, label]) => (
           <label
             key={k}
             className={`flex items-center gap-1 ${usingTotal ? "opacity-40" : ""}`}
           >
-            <span className="text-[10px] text-muted">{label}</span>
+            <span className="text-[10px] text-muted xl:hidden">{label}</span>
             <input
               type="text"
               inputMode="decimal"
@@ -614,13 +680,14 @@ function Row({
               onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))}
               onBlur={saveIfChanged}
               placeholder="0"
-              className="w-[72px] rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand"
+              aria-label={label}
+              className={`w-14 xl:w-full ${CELL}`}
             />
           </label>
         ))}
 
         <label className="flex items-center gap-1">
-          <span className="text-[10px] font-medium text-brand-soft">Total</span>
+          <span className="text-[10px] font-medium text-brand-soft xl:hidden">Total</span>
           <input
             type="text"
             inputMode="decimal"
@@ -628,8 +695,9 @@ function Row({
             onChange={(e) => setTotal(e.target.value)}
             onBlur={saveIfChanged}
             placeholder="—"
+            aria-label="Total"
             title="One final price for this line — overrides the buckets"
-            className="w-[90px] rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand"
+            className={`w-[4.5rem] xl:w-full ${CELL}`}
           />
         </label>
 
@@ -637,7 +705,8 @@ function Row({
           value={source}
           onChange={(e) => setSource(e.target.value)}
           onBlur={saveIfChanged}
-          className="rounded-md border border-border bg-black/20 px-1.5 py-1 text-[11px] text-muted outline-none focus:border-brand"
+          aria-label="Price source"
+          className="rounded-md border border-border bg-black/20 px-1 py-1 text-[11px] text-muted outline-none focus:border-brand xl:w-full"
         >
           {SOURCES.map(([v, label]) => (
             <option key={v} value={v}>
@@ -645,38 +714,6 @@ function Row({
             </option>
           ))}
         </select>
-
-        <div className="ml-auto flex items-center gap-3 text-[11px]">
-          {proposed ? (
-            <button
-              type="button"
-              onClick={onConfirm}
-              className="glass-brand rounded-md px-2.5 py-1 font-medium text-foreground hover:bg-brand/30"
-            >
-              Confirm
-            </button>
-          ) : null}
-          {confirmed ? (
-            <span className="text-muted">edit any field to re-open</span>
-          ) : null}
-          {proposed || confirmed ? (
-            <button
-              type="button"
-              onClick={onClear}
-              className="text-muted transition-colors hover:text-brand-soft"
-            >
-              Clear
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onExclude}
-            title="Exclude from scope & pricing (restore from the Scope page)"
-            className="text-muted transition-colors hover:text-brand-soft"
-          >
-            Exclude
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -714,6 +751,7 @@ function AddRow({
         onChange={(e) => setDescription(e.target.value)}
         placeholder="New scope line…"
         autoFocus
+        spellCheck
         className="w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
       />
       <div className="mt-1.5 flex items-center gap-2">

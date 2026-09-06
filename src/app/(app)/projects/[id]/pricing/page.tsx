@@ -76,7 +76,7 @@ export default async function PricingPage({
           subtitle={
             <>
               {project?.name ?? "Project"} · {lines.length} scope lines · direct
-              cost in five buckets (labor / material / sub / equipment / other)
+              cost per line
             </>
           }
           action={<NextStep href={`/projects/${id}/estimate`} label="Estimate" />}
