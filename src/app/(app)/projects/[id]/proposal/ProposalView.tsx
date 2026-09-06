@@ -1,192 +1,173 @@
 "use client";
 
 /**
- * The client-ready proposal — XtraUnit's full format on a white "paper" sheet.
- * Print/Save as PDF prints only the paper (print CSS in globals).
+ * The owner's proposal workbench: an editor for the project-specific parts
+ * (executive summary, options, timeline, expiry) above a live preview of the
+ * exact page the client will open, plus the share-link controls.
  *
- * Project-specific narrative (opening, project description, "Our Understanding")
- * is AI-drafted and editable. The standard sections (Who We Are, Why We're the
- * Right Fit, Next Steps, license/finish notes, closing) come from the company
- * Proposal profile (Settings). The Bid Summary, scope table and cost waterfall
- * are assembled live from the project's scope/pricing/estimate data.
+ * Everything else on the page (scope, pricing, terms, references) is assembled
+ * from the project's data and the company profile — nothing to retype.
  */
-import { useMemo, useState, useTransition, type ReactNode } from "react";
-import { saveProposal, draftProposalNarrative } from "./actions";
-import { lineTotal, type PricedLine } from "../pricing/PricingTable";
-import type { Markups } from "../estimate/actions";
-import type { ProposalProfile } from "@/lib/proposal/profile";
+import { useMemo, useState, useTransition } from "react";
+import ProposalDocument from "@/components/proposal/ProposalDocument";
+import {
+  cleanOptions,
+  cleanTimeline,
+  plusDays,
+  type ProposalDoc,
+  type ProposalOption,
+  type ProposalTimeline,
+} from "@/lib/proposal/model";
+import type { ProposalMeta } from "@/lib/proposal/load";
+import {
+  saveProposal,
+  draftProposalNarrative,
+  publishProposal,
+  unpublishProposal,
+} from "./actions";
 
-export type CompanyInfo = {
-  company_name: string | null;
-  company_address: string | null;
-  company_phone: string | null;
-  company_email: string | null;
-  company_license: string | null;
-  signer_name: string | null;
-  signer_title: string | null;
-};
-export type ProposalRow = {
-  letter_text: string | null;
-  client_name: string | null;
-  proposal_date: string | null;
-  project_description: string | null;
-  understanding: string | null;
-  estimated_duration: string | null;
-  anticipated_start: string | null;
-  table_style: string | null;
-};
-export type FindingLite = { kind: string; text: string };
+const FIELD =
+  "w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
+const LABEL = "text-[11px] uppercase tracking-wider text-muted";
 
-const usd = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
-function isExcluded(li: PricedLine): boolean {
-  return li.status === "excluded";
-}
-function hasPrice(li: PricedLine): boolean {
-  return li.price_status === "proposed" || li.price_status === "confirmed";
-}
-
-const MARKUP_LABELS: [keyof Markups, string][] = [
-  ["contingency_pct", "Contingency"],
-  ["insurance_pct", "Insurance"],
-  ["overhead_pct", "Profit & Overhead"],
-];
-
-type DivGroup = { code: string | null; name: string; total: number; rows: PricedLine[] };
-
-function groupByDivision(lines: PricedLine[]): DivGroup[] {
-  const out: DivGroup[] = [];
-  for (const li of lines) {
-    const code = li.division_code ?? null;
-    const name = li.division_name ?? "Other";
-    let g = out.find((x) => x.code === code && x.name === name);
-    if (!g) {
-      g = { code, name, total: 0, rows: [] };
-      out.push(g);
-    }
-    g.rows.push(li);
-    g.total += lineTotal(li);
-  }
-  return out;
+function newId() {
+  return `opt-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export default function ProposalView({
   projectId,
-  company,
-  profile,
-  project,
-  lines,
-  markups,
-  findings,
-  initial,
+  doc: base,
+  meta,
 }: {
   projectId: string;
-  company: CompanyInfo;
-  profile: ProposalProfile;
-  project: {
-    name: string;
-    client_name: string | null;
-    address: string | null;
-    project_type: string | null;
-    building_sf: number | null;
-  };
-  lines: PricedLine[];
-  markups: Markups;
-  findings: FindingLite[];
-  initial: ProposalRow;
+  doc: ProposalDoc;
+  meta: ProposalMeta;
 }) {
-  const [opening, setOpening] = useState(initial.letter_text ?? "");
-  const [description, setDescription] = useState(initial.project_description ?? "");
-  const [understanding, setUnderstanding] = useState(initial.understanding ?? "");
-  const [clientName, setClientName] = useState(
-    initial.client_name ?? project.client_name ?? "",
-  );
-  const [proposalDate, setProposalDate] = useState(
-    initial.proposal_date ?? new Date().toLocaleDateString("en-US"),
-  );
-  const [duration, setDuration] = useState(initial.estimated_duration ?? "");
-  const [start, setStart] = useState(initial.anticipated_start ?? "");
-  const [tableStyle, setTableStyle] = useState<"priced" | "status">(
-    initial.table_style === "status" ? "status" : "priced",
-  );
-  const [editing, setEditing] = useState(!initial.letter_text);
+  // Editable fields (seeded from the saved proposal / the live doc).
+  const [clientName, setClientName] = useState(base.client_name);
+  const [proposalDate, setProposalDate] = useState(base.proposal_date);
+  const [validUntil, setValidUntil] = useState(base.valid_until ?? plusDays(new Date(), 30));
+  const [brief, setBrief] = useState(meta.client_brief);
+  const [summary, setSummary] = useState(base.executive_summary);
+  const [description, setDescription] = useState(base.project_description);
+  const [options, setOptions] = useState<ProposalOption[]>(base.pricing.options);
+  const [timeline, setTimeline] = useState<ProposalTimeline>(base.timeline);
+
+  const [editing, setEditing] = useState(!base.executive_summary);
   const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [, startTransition] = useTransition();
+  const [shareToken, setShareToken] = useState<string | null>(meta.share_token);
+  const [published, setPublished] = useState<boolean>(!!meta.published_at);
+  const [, start] = useTransition();
 
-  // Live numbers — totals only count active (non-excluded), priced lines.
-  const active = lines.filter((li) => !isExcluded(li));
-  const priced = active.filter(hasPrice);
-  const pricedDivisions = useMemo(() => groupByDivision(priced), [priced]);
-  const scopeDivisions = useMemo(() => groupByDivision(lines), [lines]);
-  const subtotal = pricedDivisions.reduce((a, d) => a + d.total, 0);
-  const steps = useMemo(() => {
-    const out: { label: string; pct: number; amount: number }[] = [];
-    let running = subtotal;
-    for (const [k, label] of MARKUP_LABELS) {
-      const pct = markups[k];
-      const amount = running * (pct / 100);
-      running += amount;
-      out.push({ label, pct, amount });
-    }
-    return out;
-  }, [subtotal, markups]);
-  const grandTotal = subtotal + steps.reduce((a, s) => a + s.amount, 0);
-  const sf = project.building_sf;
-  const psf = sf && sf > 0 ? grandTotal / sf : null;
+  // The preview = the live doc with the edits laid over it.
+  const doc: ProposalDoc = useMemo(
+    () => ({
+      ...base,
+      client_name: clientName || base.client_name,
+      proposal_date: proposalDate || base.proposal_date,
+      valid_until: validUntil || null,
+      executive_summary: summary,
+      project_description: description,
+      pricing: { ...base.pricing, options: cleanOptions(options) },
+      timeline: cleanTimeline(timeline),
+    }),
+    [base, clientName, proposalDate, validUntil, summary, description, options, timeline],
+  );
 
-  const assumptions = findings.filter((f) => f.kind === "assumption");
-  const exclusions = findings.filter((f) => f.kind === "exclusion");
-  // Scope lines you marked "Exclude" — kept (not deleted), shown here as
-  // exclusions on the proposal regardless of the scope-table style.
-  const excludedScope = lines.filter(isExcluded);
-  const unconfirmed = priced.filter((li) => li.price_status === "proposed").length;
-  const unpriced = active.length - priced.length;
+  const shareUrl =
+    shareToken && typeof window !== "undefined"
+      ? `${window.location.origin}/p/${shareToken}`
+      : null;
+
+  function patch() {
+    return {
+      client_name: clientName.trim() || null,
+      proposal_date: proposalDate.trim() || null,
+      valid_until: validUntil || null,
+      client_brief: brief.trim() || null,
+      executive_summary: summary.trim() || null,
+      project_description: description.trim() || null,
+      options: cleanOptions(options),
+      timeline: cleanTimeline(timeline),
+    };
+  }
+
+  function onSave(then?: () => void) {
+    setError(null);
+    setNotice(null);
+    setBusy("Saving…");
+    start(async () => {
+      const res = await saveProposal(projectId, patch());
+      setBusy(null);
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      setNotice(res.needsMigration ? (res.error ?? "Saved.") : "Saved ✓");
+      then?.();
+    });
+  }
 
   function onDraft() {
     setError(null);
-    setBusy("AI is drafting the letter…");
-    startTransition(async () => {
-      const summary = pricedDivisions.map((d) => d.name).join(", ");
-      const res = await draftProposalNarrative(projectId, grandTotal, summary);
+    setBusy("AI is drafting the executive summary…");
+    start(async () => {
+      // Save the brief first so the AI reads the latest version of it.
+      await saveProposal(projectId, { client_brief: brief.trim() || null });
+      const res = await draftProposalNarrative(projectId, brief);
       setBusy(null);
-      if (!res.ok || !res.narrative) {
-        setError(res.error ?? "Draft failed.");
-        return;
-      }
-      setOpening(res.narrative.opening);
-      setDescription(res.narrative.project_description);
-      setUnderstanding(res.narrative.understanding);
+      if (!res.ok || !res.narrative) return setError(res.error ?? "Draft failed.");
+      setSummary(res.narrative.executive_summary);
+      if (!description.trim()) setDescription(res.narrative.project_description);
       setEditing(true);
     });
   }
 
-  function onSave() {
-    setError(null);
-    setSaved(false);
-    startTransition(async () => {
-      const res = await saveProposal(projectId, {
-        letter_text: opening.trim() || null,
-        project_description: description.trim() || null,
-        understanding: understanding.trim() || null,
-        client_name: clientName.trim() || null,
-        proposal_date: proposalDate.trim() || null,
-        estimated_duration: duration.trim() || null,
-        anticipated_start: start.trim() || null,
-        table_style: tableStyle,
+  function onPublish() {
+    // Save first so the snapshot is what's on screen, then publish.
+    onSave(() => {
+      setBusy(published ? "Updating the link…" : "Publishing…");
+      start(async () => {
+        const res = await publishProposal(projectId);
+        setBusy(null);
+        if (!res.ok || !res.token) return setError(res.error ?? "Could not publish.");
+        setShareToken(res.token);
+        setPublished(true);
+        setNotice(published ? "Link updated with the latest proposal ✓" : "Link is live ✓");
       });
-      if (!res.ok) setError(res.error ?? "Could not save.");
-      else {
-        setSaved(true);
-        setEditing(false);
-      }
     });
   }
+
+  function onUnpublish() {
+    if (!window.confirm("Turn the client's link off? They'll see 'not active' until you publish again."))
+      return;
+    setBusy("Turning the link off…");
+    start(async () => {
+      const res = await unpublishProposal(projectId);
+      setBusy(null);
+      if (!res.ok) return setError(res.error ?? "Could not turn the link off.");
+      setPublished(false);
+      setNotice("Link is off.");
+    });
+  }
+
+  async function copyLink() {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setNotice("Link copied ✓");
+    } catch {
+      setNotice(shareUrl);
+    }
+  }
+
+  // ── option / timeline row helpers ─────────────────────────────────────────
+  const setOpt = (id: string, p: Partial<ProposalOption>) =>
+    setOptions((xs) => xs.map((o) => (o.id === id ? { ...o, ...p } : o)));
+  const setMs = (i: number, p: Partial<ProposalTimeline["milestones"][number]>) =>
+    setTimeline((t) => ({
+      ...t,
+      milestones: t.milestones.map((m, j) => (j === i ? { ...m, ...p } : m)),
+    }));
 
   return (
     <div className="mt-6">
@@ -194,482 +175,259 @@ export default function ProposalView({
       <div className="print-hide mb-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={onDraft}
-          disabled={!!busy}
-          className="glass-brand rounded-lg px-4 py-2 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
-        >
-          {opening ? "Re-draft letter with AI" : "Draft letter with AI"}
-        </button>
-        <button
-          type="button"
           onClick={() => setEditing((e) => !e)}
-          className="rounded-md border border-border px-3 py-2 text-sm text-muted transition-colors hover:border-brand hover:text-foreground"
+          className={`rounded-md border px-3 py-2 text-sm transition-colors ${
+            editing ? "border-brand bg-brand/20 text-foreground" : "border-border text-muted hover:border-brand hover:text-foreground"
+          }`}
         >
-          {editing ? "Preview" : "Edit"}
+          {editing ? "Hide editor" : "Edit"}
         </button>
-        {/* Table style toggle */}
-        <div className="inline-flex overflow-hidden rounded-md border border-border text-sm">
-          <button
-            type="button"
-            onClick={() => setTableStyle("priced")}
-            className={`px-3 py-2 transition-colors ${
-              tableStyle === "priced"
-                ? "bg-brand/30 text-foreground"
-                : "text-muted hover:text-foreground"
-            }`}
-          >
-            Priced table
-          </button>
-          <button
-            type="button"
-            onClick={() => setTableStyle("status")}
-            className={`px-3 py-2 transition-colors ${
-              tableStyle === "status"
-                ? "bg-brand/30 text-foreground"
-                : "text-muted hover:text-foreground"
-            }`}
-          >
-            Included / Excluded
-          </button>
-        </div>
         <button
           type="button"
-          onClick={onSave}
-          className="rounded-md border border-border px-3 py-2 text-sm text-muted transition-colors hover:border-brand hover:text-foreground"
+          onClick={() => onSave()}
+          disabled={!!busy}
+          className="rounded-md border border-border px-3 py-2 text-sm text-muted transition-colors hover:border-brand hover:text-foreground disabled:opacity-50"
         >
           Save
         </button>
         <button
           type="button"
-          onClick={() => window.print()}
-          className="glass-brand rounded-lg px-4 py-2 text-sm font-medium text-foreground hover:bg-brand/30"
+          onClick={onPublish}
+          disabled={!!busy || !meta.hasShareColumns}
+          title={meta.hasShareColumns ? "" : "Needs migration 0033 (see PENDING-DB-CHANGES.md)"}
+          className="glass-brand rounded-lg px-4 py-2 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
         >
-          Print / Save as PDF
+          {published ? "Update client link" : "Publish client link"}
         </button>
-        {saved ? <span className="text-sm text-green-300">Saved ✓</span> : null}
-        {busy ? (
-          <span className="animate-pulse text-sm text-muted">{busy}</span>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="rounded-md border border-border px-3 py-2 text-sm text-muted transition-colors hover:border-brand hover:text-foreground"
+        >
+          Print / PDF
+        </button>
+        {busy ? <span className="animate-pulse text-sm text-muted">{busy}</span> : null}
+        {notice ? <span className="text-sm text-green-300">{notice}</span> : null}
         {error ? <span className="text-sm text-brand-soft">{error}</span> : null}
       </div>
 
-      {/* When editing: the Bid Summary inputs that aren't elsewhere */}
-      {editing ? (
-        <div className="print-hide mb-4 flex flex-wrap gap-3 rounded-lg border border-border p-3">
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="uppercase tracking-wider text-muted">
-              Estimated duration
-            </span>
-            <input
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              placeholder="18-21 months"
-              className="rounded border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="uppercase tracking-wider text-muted">
-              Anticipated start
-            </span>
-            <input
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-              placeholder="Q2 2026"
-              className="rounded border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
-            />
-          </label>
-        </div>
-      ) : null}
-
-      {unconfirmed > 0 || unpriced > 0 ? (
-        <p className="print-hide mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-200">
-          Heads up before sending:{" "}
-          {unconfirmed > 0 ? `${unconfirmed} prices are still unconfirmed. ` : ""}
-          {unpriced > 0 ? `${unpriced} scope lines are unpriced and not in the number.` : ""}
-        </p>
-      ) : null}
-
-      {/* The paper */}
-      <div className="proposal-sheet mx-auto max-w-3xl rounded-md bg-white p-10 text-black shadow-2xl">
-        {/* Letterhead */}
-        <div className="border-b-2 border-[#A01C2D] pb-4">
-          <p className="font-heading text-2xl font-bold tracking-wide text-[#A01C2D]">
-            {company.company_name || "XtraUnit Construction"}
+      {/* Share status */}
+      <div className="print-hide mb-4 rounded-xl glass p-4 text-sm">
+        {!meta.hasShareColumns ? (
+          <p className="text-muted">
+            The client link (and Accept-in-document) switches on once migration{" "}
+            <span className="text-foreground">0033_proposal_redesign.sql</span> is run in Supabase.
+            Until then this page still previews and prints.
           </p>
-          <p className="mt-1 text-xs text-neutral-600">
-            {[company.company_address, company.company_phone, company.company_email]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-          <p className="text-xs text-neutral-600">
-            {company.company_license || "CA LIC #1033830"} · Licensed &amp; Bonded
-          </p>
-        </div>
-
-        {/* Addressing */}
-        <div className="mt-6 flex items-start justify-between text-sm">
-          <div>
-            <p className="text-neutral-500">To:</p>
-            {editing ? (
-              <input
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                placeholder="Client name"
-                className="print-hide mt-0.5 rounded border border-neutral-300 px-2 py-1 text-sm"
-              />
-            ) : null}
-            <p className={editing ? "print-only font-medium" : "font-medium"}>
-              {clientName || "Owner"}
-            </p>
-            <p className="mt-2 text-neutral-500">RE: Bid Proposal</p>
-            <p className="font-medium">
-              {project.name}
-              {project.address ? ` — ${project.address}` : ""}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-neutral-500">Date</p>
-            {editing ? (
-              <input
-                value={proposalDate}
-                onChange={(e) => setProposalDate(e.target.value)}
-                className="print-hide mt-0.5 w-32 rounded border border-neutral-300 px-2 py-1 text-right text-sm"
-              />
-            ) : null}
-            <p className={editing ? "print-only font-medium" : "font-medium"}>
-              {proposalDate}
-            </p>
-          </div>
-        </div>
-
-        {/* Opening + project description */}
-        <div className="mt-6 space-y-3 text-sm leading-relaxed">
-          <EditableBlock
-            editing={editing}
-            value={opening}
-            onChange={setOpening}
-            rows={4}
-            placeholder='Opening paragraph, or click "Draft letter with AI".'
-          />
-          <EditableBlock
-            editing={editing}
-            value={description}
-            onChange={setDescription}
-            rows={2}
-            placeholder="Project description — what's being built."
-          />
-        </div>
-
-        {/* Project Bid Summary */}
-        <div className="mt-6 rounded-md border border-neutral-300 bg-neutral-50 p-4">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-[#A01C2D]">
-            Project Bid Summary
-          </h2>
-          <dl className="mt-2 grid grid-cols-1 gap-x-8 gap-y-1 text-sm sm:grid-cols-2">
-            <SummaryRow label="Total Bid Amount" value={usd.format(grandTotal)} strong />
-            {sf ? (
-              <SummaryRow label="Building Size" value={`${sf.toLocaleString()} SF`} />
-            ) : null}
-            {psf != null ? (
-              <SummaryRow label="Cost Per SQFT" value={`$${Math.round(psf)}`} />
-            ) : null}
-            {duration ? (
-              <SummaryRow label="Estimated Duration" value={duration} />
-            ) : null}
-            {start ? <SummaryRow label="Anticipated Start" value={start} /> : null}
-            {project.project_type ? (
-              <SummaryRow label="Project Type" value={project.project_type} />
-            ) : null}
-          </dl>
-        </div>
-
-        {/* Our Understanding */}
-        {(understanding || editing) && (
-          <Section title="Our Understanding of the Project">
-            <EditableBlock
-              editing={editing}
-              value={understanding}
-              onChange={setUnderstanding}
-              rows={5}
-              placeholder="What you understand about the site, plans reviewed, agencies…"
-            />
-          </Section>
-        )}
-
-        {/* Assumptions */}
-        {assumptions.length > 0 ? (
-          <Section title="Assumptions">
-            <ul className="list-disc pl-5">
-              {assumptions.map((f, i) => (
-                <li key={i}>{f.text}</li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
-
-        {/* Exclusions: excluded scope lines + exclusion findings + license note */}
-        {exclusions.length > 0 || excludedScope.length > 0 ? (
-          <Section title="Exclusions">
-            <ul className="list-disc pl-5">
-              {excludedScope.map((li) => (
-                <li key={li.id}>{li.description}</li>
-              ))}
-              {exclusions.map((f, i) => (
-                <li key={`f-${i}`}>{f.text}</li>
-              ))}
-            </ul>
-            {profile.license_note ? (
-              <p className="mt-2 text-neutral-700">{profile.license_note}</p>
-            ) : null}
-          </Section>
-        ) : null}
-
-        {/* Finish package note */}
-        {profile.finish_note ? (
-          <Section title="Finish Materials & Fixtures">
-            <p>{profile.finish_note}</p>
-          </Section>
-        ) : null}
-
-        {/* Who We Are */}
-        <Section title="Who We Are">
-          <p>{profile.who_we_are}</p>
-        </Section>
-
-        {/* Why We're the Right Fit */}
-        <Section title="Why We're the Right Fit">
-          <ul className="space-y-1">
-            {profile.why_fit.map((b, i) => (
-              <li key={i}>
-                <span className="font-semibold">{b.title}:</span> {b.body}
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        {/* Next Steps */}
-        <Section title="Next Steps">
-          <p>{profile.next_steps}</p>
-          {profile.closing ? (
-            <p className="mt-2">{profile.closing}</p>
-          ) : null}
-        </Section>
-
-        {/* Signature block */}
-        {company.signer_name ? (
-          <div className="mt-6 text-sm leading-snug">
-            <p>Respectfully,</p>
-            <p className="mt-3 font-medium">{company.signer_name}</p>
-            {company.signer_title ? (
-              <p className="text-neutral-600">{company.signer_title}</p>
-            ) : null}
-            <p className="text-neutral-600">
-              {company.company_name || "XtraUnit Construction"}
-            </p>
-          </div>
-        ) : null}
-
-        {/* Scope of Work table */}
-        <div className="mt-8">
-          <h2 className="border-b border-neutral-300 pb-1 text-sm font-bold uppercase tracking-wider">
-            Scope of Work — CSI MasterFormat
-          </h2>
-          {tableStyle === "priced" ? (
-            <PricedTable divisions={pricedDivisions} />
-          ) : (
-            <StatusTable divisions={scopeDivisions} />
-          )}
-        </div>
-
-        {/* Cost waterfall */}
-        <div className="mt-6">
-          <table className="w-full text-sm">
-            <tbody>
-              <tr className="border-b border-neutral-200 font-medium">
-                <td className="py-1.5">Builder&apos;s Cost</td>
-                <td className="py-1.5 text-right">{usd.format(subtotal)}</td>
-              </tr>
-              {steps.map((s) =>
-                s.pct > 0 ? (
-                  <tr key={s.label} className="border-b border-neutral-100">
-                    <td className="py-1.5">
-                      {s.label} ({s.pct}%)
-                    </td>
-                    <td className="py-1.5 text-right">{usd.format(s.amount)}</td>
-                  </tr>
-                ) : null,
+        ) : published && shareUrl ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] uppercase tracking-wider text-muted">Client link · live</p>
+              <p className="truncate font-mono text-xs text-foreground" title={shareUrl}>
+                {shareUrl}
+              </p>
+              {meta.accepted_at ? (
+                <p className="mt-1 text-green-300">
+                  ✓ Accepted by {meta.accepted_by?.name ?? "the client"} on{" "}
+                  {new Date(meta.accepted_at).toLocaleDateString()}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-muted">
+                  Opens on any device, no login. Edit here and click &ldquo;Update client link&rdquo; to refresh what they see.
+                </p>
               )}
-              <tr className="border-t border-neutral-400 font-bold">
-                <td className="py-2 text-base">Total Project Cost</td>
-                <td className="py-2 text-right text-base text-[#A01C2D]">
-                  {usd.format(grandTotal)}
-                </td>
-              </tr>
-              {psf != null ? (
-                <tr>
-                  <td className="py-1 text-neutral-600">Cost per SQFT</td>
-                  <td className="py-1 text-right text-neutral-600">
-                    ${Math.round(psf)}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Acceptance */}
-        <div className="mt-10 grid grid-cols-2 gap-10 text-sm">
-          <div>
-            <p className="border-t border-neutral-400 pt-1 text-neutral-600">
-              Owner / Authorized Agent — Signature &amp; Date
-            </p>
+            </div>
+            <button type="button" onClick={copyLink} className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:border-brand">
+              Copy link
+            </button>
+            <a href={shareUrl} target="_blank" rel="noreferrer" className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:border-brand">
+              Open ↗
+            </a>
+            <button type="button" onClick={onUnpublish} className="text-xs text-muted hover:text-brand-soft">
+              Turn off
+            </button>
           </div>
-          <div>
-            <p className="border-t border-neutral-400 pt-1 text-neutral-600">
-              {company.company_name || "XtraUnit Construction"} — Signature &amp; Date
-            </p>
-          </div>
-        </div>
+        ) : (
+          <p className="text-muted">
+            Not shared yet. <span className="text-foreground">Publish client link</span> creates a private,
+            unguessable link the client opens on any device — with live option toggles and Accept built in.
+            The PDF is the fallback.
+          </p>
+        )}
       </div>
-    </div>
-  );
-}
 
-function SummaryRow({
-  label,
-  value,
-  strong,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-}) {
-  return (
-    <div className="flex justify-between gap-3">
-      <dt className="text-neutral-600">{label}</dt>
-      <dd className={strong ? "font-bold text-[#A01C2D]" : "font-medium"}>
-        {value}
-      </dd>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="mt-6 text-sm leading-relaxed">
-      <h2 className="border-b border-neutral-300 pb-1 text-sm font-bold uppercase tracking-wider">
-        {title}
-      </h2>
-      <div className="mt-2">{children}</div>
-    </div>
-  );
-}
-
-function EditableBlock({
-  editing,
-  value,
-  onChange,
-  rows,
-  placeholder,
-}: {
-  editing: boolean;
-  value: string;
-  onChange: (v: string) => void;
-  rows: number;
-  placeholder: string;
-}) {
-  return (
-    <>
+      {/* Editor */}
       {editing ? (
-        <textarea
-          value={value}
-          spellCheck
-          onChange={(e) => onChange(e.target.value)}
-          rows={rows}
-          placeholder={placeholder}
-          className="print-hide w-full rounded border border-neutral-300 p-2 text-sm leading-relaxed"
-        />
+        <div className="print-hide mb-6 space-y-5 rounded-xl glass p-4 sm:p-5">
+          {/* Addressing + expiry */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="flex flex-col gap-1">
+              <span className={LABEL}>Prepared for</span>
+              <input value={clientName} onChange={(e) => setClientName(e.target.value)} className={FIELD} spellCheck />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className={LABEL}>Proposal date (as shown)</span>
+              <input value={proposalDate} onChange={(e) => setProposalDate(e.target.value)} className={FIELD} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className={LABEL}>Pricing valid through</span>
+              <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} className={FIELD} />
+            </label>
+          </div>
+
+          {/* Executive summary */}
+          <div>
+            <span className={LABEL}>01 · Executive summary</span>
+            <p className="mt-0.5 text-xs text-muted">
+              First, what did the client tell you they need or worry about — in their words? The AI turns
+              that into a tight, tailored summary (under 300 words).
+            </p>
+            <textarea
+              value={brief}
+              onChange={(e) => setBrief(e.target.value)}
+              rows={3}
+              spellCheck
+              placeholder="e.g. “We need to stay open during construction and the budget can't go past $500k. The city has been slow on permits.”"
+              className={`${FIELD} mt-2`}
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onDraft}
+                disabled={!!busy}
+                className="glass-brand rounded-md px-3 py-1.5 text-xs font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
+              >
+                {summary ? "Re-draft summary with AI" : "Draft summary with AI"}
+              </button>
+              <span className="text-xs text-muted">{summary.trim().split(/\s+/).filter(Boolean).length} words</span>
+            </div>
+            <textarea
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              rows={7}
+              spellCheck
+              placeholder="The executive summary — or let the AI draft it from the brief above."
+              className={`${FIELD} mt-2`}
+            />
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              spellCheck
+              placeholder="One-line project description (what's being built)"
+              className={`${FIELD} mt-2`}
+            />
+          </div>
+
+          {/* Options */}
+          <div>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className={LABEL}>03 · Tiered options (on top of the base bid)</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setOptions((xs) => [
+                    ...xs,
+                    { id: newId(), title: "", description: "", amount: 0, tier: "recommended", default_on: false },
+                  ])
+                }
+                className="text-xs text-brand-soft hover:underline"
+              >
+                + Add option
+              </button>
+            </div>
+            <p className="mt-0.5 text-xs text-muted">
+              &ldquo;Recommended&rdquo; options make the Recommended package; &ldquo;Enhanced&rdquo; ones are on top of that. The client
+              toggles them and the total updates live. Leave empty for a single fixed price.
+            </p>
+            {options.length ? (
+              <div className="mt-2 space-y-2">
+                {options.map((o) => (
+                  <div key={o.id} className="grid gap-1.5 rounded-lg border border-border p-2 sm:grid-cols-[1fr_7rem_8.5rem_auto_auto]">
+                    <input value={o.title} onChange={(e) => setOpt(o.id, { title: e.target.value })} placeholder="Option title" spellCheck className={FIELD} />
+                    <input
+                      value={o.amount || ""}
+                      onChange={(e) => setOpt(o.id, { amount: Number(e.target.value) || 0 })}
+                      inputMode="decimal"
+                      placeholder="+ $"
+                      className={`${FIELD} text-right`}
+                    />
+                    <select value={o.tier} onChange={(e) => setOpt(o.id, { tier: e.target.value as ProposalOption["tier"] })} className={FIELD}>
+                      <option value="recommended">Recommended</option>
+                      <option value="enhanced">Enhanced</option>
+                    </select>
+                    <label className="flex items-center gap-1.5 text-xs text-muted">
+                      <input type="checkbox" checked={o.default_on} onChange={(e) => setOpt(o.id, { default_on: e.target.checked })} />
+                      On by default
+                    </label>
+                    <button type="button" onClick={() => setOptions((xs) => xs.filter((x) => x.id !== o.id))} className="text-xs text-muted hover:text-brand-soft">
+                      Remove
+                    </button>
+                    <input
+                      value={o.description}
+                      onChange={(e) => setOpt(o.id, { description: e.target.value })}
+                      placeholder="What it includes (one line)"
+                      spellCheck
+                      className={`${FIELD} sm:col-span-5`}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Timeline */}
+          <div>
+            <span className={LABEL}>04 · Timeline</span>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <input value={timeline.start} onChange={(e) => setTimeline((t) => ({ ...t, start: e.target.value }))} placeholder="Anticipated start (e.g. within 2 weeks of permit)" className={FIELD} />
+              <input value={timeline.duration} onChange={(e) => setTimeline((t) => ({ ...t, duration: e.target.value }))} placeholder="Duration (e.g. 18–21 months)" className={FIELD} />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-xs text-muted">Milestones — the hard dates, each with what it depends on</span>
+              <button
+                type="button"
+                onClick={() => setTimeline((t) => ({ ...t, milestones: [...t.milestones, { label: "", when: "", depends_on: "" }] }))}
+                className="text-xs text-brand-soft hover:underline"
+              >
+                + Add milestone
+              </button>
+            </div>
+            {timeline.milestones.length ? (
+              <div className="mt-1.5 space-y-1.5">
+                {timeline.milestones.map((m, i) => (
+                  <div key={i} className="grid gap-1.5 sm:grid-cols-[1fr_9rem_1fr_auto]">
+                    <input value={m.label} onChange={(e) => setMs(i, { label: e.target.value })} placeholder="Milestone (e.g. Permits issued)" spellCheck className={FIELD} />
+                    <input value={m.when} onChange={(e) => setMs(i, { when: e.target.value })} placeholder="When (Week 3)" className={FIELD} />
+                    <input value={m.depends_on} onChange={(e) => setMs(i, { depends_on: e.target.value })} placeholder="Depends on (owner selections by…)" spellCheck className={FIELD} />
+                    <button type="button" onClick={() => setTimeline((t) => ({ ...t, milestones: t.milestones.filter((_, j) => j !== i) }))} className="text-xs text-muted hover:text-brand-soft">
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <textarea
+              value={timeline.assumptions.join("\n")}
+              onChange={(e) => setTimeline((t) => ({ ...t, assumptions: e.target.value.split("\n") }))}
+              rows={3}
+              spellCheck
+              placeholder={"Dependencies & assumptions on the critical path — one per line, e.g.\nPermit issuance by the city\nOwner's finish selections by week 2\nSite access Mon–Sat 7am–5pm"}
+              className={`${FIELD} mt-2`}
+            />
+          </div>
+
+          <p className="text-xs text-muted">
+            Scope, pricing breakdown, terms, and references come from the project and your Settings → Proposal profile.
+          </p>
+        </div>
       ) : null}
-      <p className={`${editing ? "print-only" : ""} whitespace-pre-line`}>
-        {value || (editing ? "" : "—")}
-      </p>
-    </>
-  );
-}
 
-function noteOf(li: PricedLine): string {
-  return li.price_note ?? "";
-}
-
-function PricedTable({ divisions }: { divisions: DivGroup[] }) {
-  if (!divisions.length)
-    return <p className="mt-2 text-sm text-neutral-500">No priced scope yet.</p>;
-  return (
-    <table className="mt-2 w-full text-xs">
-      <thead>
-        <tr className="border-b border-neutral-300 text-left text-[10px] uppercase tracking-wider text-neutral-500">
-          <th className="py-1">Scope of Work</th>
-          <th className="py-1">Note</th>
-          <th className="py-1 text-right">Builder&apos;s Cost</th>
-        </tr>
-      </thead>
-      <tbody>
-        {divisions.map((d) => (
-          <DivisionBlock key={`${d.code}-${d.name}`} d={d} mode="priced" />
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function StatusTable({ divisions }: { divisions: DivGroup[] }) {
-  if (!divisions.length)
-    return <p className="mt-2 text-sm text-neutral-500">No scope yet.</p>;
-  return (
-    <table className="mt-2 w-full text-xs">
-      <thead>
-        <tr className="border-b border-neutral-300 text-left text-[10px] uppercase tracking-wider text-neutral-500">
-          <th className="py-1">Scope of Work</th>
-          <th className="py-1">Note</th>
-          <th className="py-1 text-right">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {divisions.map((d) => (
-          <DivisionBlock key={`${d.code}-${d.name}`} d={d} mode="status" />
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function DivisionBlock({ d, mode }: { d: DivGroup; mode: "priced" | "status" }) {
-  return (
-    <>
-      <tr className="border-b border-neutral-200 bg-neutral-50">
-        <td className="py-1.5 font-semibold" colSpan={2}>
-          {d.code ? `Division ${d.code} — ` : ""}
-          {d.name}
-        </td>
-        <td className="py-1.5 text-right font-semibold">
-          {mode === "priced" ? usd.format(d.total) : ""}
-        </td>
-      </tr>
-      {d.rows.map((li) => (
-        <tr key={li.id} className="border-b border-neutral-100 align-top">
-          <td className="py-1 pr-2">{li.description}</td>
-          <td className="py-1 pr-2 text-neutral-500">{noteOf(li)}</td>
-          <td className="py-1 text-right">
-            {mode === "priced" ? (
-              usd.format(lineTotal(li))
-            ) : li.status === "excluded" ? (
-              <span className="text-neutral-500">Excluded</span>
-            ) : (
-              <span className="text-neutral-700">Included</span>
-            )}
-          </td>
-        </tr>
-      ))}
-    </>
+      {/* The proposal, exactly as the client sees it */}
+      <ProposalDocument
+        doc={doc}
+        mode="preview"
+        accepted={meta.accepted_at ? { name: meta.accepted_by?.name ?? "the client", at: meta.accepted_at } : null}
+      />
+    </div>
   );
 }

@@ -189,6 +189,10 @@ Return JSON with exactly these fields:
           parsed.license_note?.trim() || DEFAULT_PROFILE.license_note,
         finish_note: parsed.finish_note?.trim() || DEFAULT_PROFILE.finish_note,
         closing: parsed.closing?.trim() || DEFAULT_PROFILE.closing,
+        // Not AI-drafted — the editor keeps whatever the owner already has.
+        terms: DEFAULT_PROFILE.terms,
+        standard_exclusions: DEFAULT_PROFILE.standard_exclusions,
+        references: [],
       },
     };
   } catch {

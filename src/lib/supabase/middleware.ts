@@ -42,7 +42,10 @@ export async function updateSession(request: NextRequest) {
   const isPublicAuthRoute =
     path.startsWith("/login") ||
     path.startsWith("/auth") ||
-    path.startsWith("/reset-password");
+    path.startsWith("/reset-password") ||
+    // The client's proposal link (/p/<token>) — no login; the data behind it
+    // is gated by the unguessable token, not by a session.
+    path.startsWith("/p/");
 
   // Not signed in and trying to reach a protected page → go to login.
   if (!user && !isPublicAuthRoute) {

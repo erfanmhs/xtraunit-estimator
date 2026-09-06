@@ -15,6 +15,14 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
+- [ ] 0033_proposal_redesign.sql — the new web proposal. Adds the executive
+      summary, pricing expiry, tiered options and timeline fields to
+      `proposals`, plus the share link (an unguessable token + a frozen copy
+      of the proposal) and two database functions the client's link uses to
+      read it and to click Accept. Until it's run: the proposal page still
+      works and prints, but "Publish link" is disabled and the new fields
+      don't save. Safe to run anytime.
+
 - [ ] 0028_sheet_ingest_version.sql — adds `ingest_version` to `sheets`. Powers
       the improved plan-reading (layout-aware text so tables survive + schedule
       sheets sent as images). Running it makes existing projects re-read their

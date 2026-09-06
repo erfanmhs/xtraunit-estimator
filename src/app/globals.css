@@ -137,7 +137,18 @@ body {
       max-width: none;
       border-radius: 0;
       box-shadow: none;
-      padding: 0.5in;
+      padding: 0.25in;
+    }
+    /* Anchors and sticky bars have no place on paper; keep sections together. */
+    .proposal-sheet section {
+      break-inside: avoid-page;
+    }
+    .proposal-sheet a {
+      color: inherit;
+      text-decoration: none;
+    }
+    @page {
+      margin: 0.5in;
     }
     .print-hide {
       display: none !important;
