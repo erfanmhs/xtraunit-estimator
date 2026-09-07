@@ -34,9 +34,12 @@ export default function Error({
           A hiccup on our side — your work isn&apos;t lost. Try again, and if it
           keeps happening, send Erfan this code so it can be traced.
         </p>
-        {error.digest ? (
-          <p className="mt-3 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-muted">
-            {error.digest}
+        {/* The message itself (client errors have no digest) — so it can be
+            relayed word for word instead of "it said something went wrong". */}
+        {error.message || error.digest ? (
+          <p className="mt-3 max-h-32 overflow-auto rounded-md border border-border bg-background px-3 py-1.5 text-left font-mono text-xs text-muted whitespace-pre-wrap break-words">
+            {error.message}
+            {error.digest ? `\n${error.digest}` : ""}
           </p>
         ) : null}
         <div className="mt-6 flex items-center justify-center gap-3">
