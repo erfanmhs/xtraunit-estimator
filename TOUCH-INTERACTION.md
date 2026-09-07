@@ -310,6 +310,23 @@ and each is now handled on its own path:
 | **Re-raster** (sharpening after a zoom) | Started 160 ms after the zoom, sized the visible canvas first (blanking the sheet), and ran under the next tap | Waits until no finger is on the drawing and the last gesture is 400 ms old; draws into an offscreen bitmap and swaps it in — the sheet never disappears |
 | **Cool-down** | — | 250 ms after any multi-touch during which a lift places nothing (a trailing finger can't leave a point) |
 
+**Saving is optimistic.** When a shape is finished (Finish / Close shape / tap
+back at the start), it appears on the sheet and the draft clears at once; the
+database write happens behind it, and the placeholder is swapped for the saved
+row when the write returns. Before this, the draft only cleared when the
+network answered, which on a slow connection wiped the next shape you had
+started, and the finished shape looked lost until the round trip came back. A
+failed save now removes the placeholder and shows a red toast (errors used to
+be set but never displayed).
+
+**Pickers on a phone are bottom sheets.** The layer and color pickers open as
+sheets at the document root with a real full-screen backdrop; a tap on the
+drawing closes them. Inside the frosted options bar a `fixed` backdrop was
+clipped to the bar (its backdrop-filter is the containing block), so the
+picker could not be dismissed by tapping the page. The finger census ignores
+presses that come from those sheets (React routes portal events through the
+column), and forgets a finger whose lift never arrived after 6 s.
+
 The layer a run records into is a chip in the options bar: one tap lists
 every layer on the sheet (continue one, with its color and settings) or takes
 a new name. It sticks across tool switches; a red dot shows it is recording
