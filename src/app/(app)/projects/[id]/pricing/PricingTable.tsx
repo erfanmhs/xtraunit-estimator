@@ -713,6 +713,8 @@ function Row({
           </label>
         ))}
 
+        {/* Total: shows the line's computed total (buckets × qty, or the lump
+            sum) as its placeholder; typing here overrides the buckets. */}
         <label className="flex min-w-0 items-center gap-1">
           <span className="shrink-0 text-[10px] font-medium text-brand-soft xl:hidden">Total</span>
           <input
@@ -721,10 +723,14 @@ function Row({
             value={total}
             onChange={(e) => setTotal(e.target.value)}
             onBlur={saveIfChanged}
-            placeholder="—"
+            placeholder={previewSum > 0 ? usd.format(previewTotal ?? 0) : "—"}
             aria-label="Total"
-            title="One final price for this line — overrides the buckets"
-            className={`min-w-0 flex-1 sm:w-[4.5rem] sm:flex-none xl:w-full ${CELL}`}
+            title={
+              previewSum > 0
+                ? `${usd.format(previewTotal ?? 0)} = ${isUnit ? `${li.quantity ?? 0} × ${usd.format(previewSum)}` : "sum of the buckets"} · type a number to override`
+                : "One final price for this line — overrides the buckets"
+            }
+            className={`min-w-0 flex-1 placeholder:text-foreground/70 sm:w-[4.5rem] sm:flex-none xl:w-full ${CELL}`}
           />
         </label>
 

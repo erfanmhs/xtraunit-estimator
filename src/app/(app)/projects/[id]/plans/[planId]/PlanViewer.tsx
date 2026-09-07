@@ -22,6 +22,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
 import StageJump from "@/components/StageNav";
+import { polishSheetNotes } from "./actions";
 import {
   SelectIcon,
   PanIcon,
@@ -529,7 +530,18 @@ export default function PlanViewer({
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist0: number; scale0: number; fx: number; fy: number } | null>(null);
   const pinchedRef = useRef(false); // a pinch happened during this touch — no point on lift
-  const zoomRafRef = useRef<number | null>(null);
+  // While two fingers are down the page is scaled/moved with a CSS transform
+  // (GPU, no re-render, no re-raster); the real zoom is committed on lift.
+  const pageWrapRef = useRef<HTMLDivElement>(null);
+  const pinchLiveRef = useRef<{ k: number; mx: number; my: number; dx: number; dy: number } | null>(null);
+  // Select tool: two quick taps on the same shape open its menu.
+  const lastSelTapRef = useRef<{ x: number; y: number; t: number; id: string } | null>(null);
+  // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
+  const [voiceState, setVoiceState] = useState<"idle" | "listening" | "thinking" | "unsupported">("idle");
+  const [voiceInterim, setVoiceInterim] = useState("");
+  const [voiceErr, setVoiceErr] = useState<string | null>(null);
+  const recRef = useRef<{ stop: () => void } | null>(null);
+  const voiceFinalRef = useRef("");
   // A finger placing a point: down → (slide, loupe) → lift = place.
   const tapRef = useRef<{ id: number; x: number; y: number; t: number } | null>(null);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -548,7 +560,7 @@ export default function PlanViewer({
   const moveRef = useRef<{ id: string; pointerId: number; start: Pt; orig: Pt[] } | null>(null);
   // A handle press: where it started (client px), whether it crossed the drag
   // threshold, and whether it came from a hold (lift without a slide = menu).
-  const dragStartRef = useRef<{ x: number; y: number; moved: boolean; hold: boolean } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; moved: boolean; hold: boolean; inserted?: boolean } | null>(null);
   // Select tool, finger: selection happens on LIFT (a second finger = pinch,
   // holding still = menu), so a press alone changes nothing.
   const selTapRef = useRef<{ id: number; x: number; y: number } | null>(null);
@@ -1063,6 +1075,91 @@ export default function PlanViewer({
     ),
   ];
 
+  // ── Dictated notes ────────────────────────────────────────────────────────
+  // The browser's speech recognition (Safari/Chrome) turns speech into text;
+  // when it stops — Stop button, or a pause — the AI tidies the transcript
+  // into notes about THIS sheet and appends them to the box.
+  function startVoice() {
+    type SRResultList = ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+    type SR = {
+      lang: string;
+      continuous: boolean;
+      interimResults: boolean;
+      onresult: ((ev: { results: SRResultList }) => void) | null;
+      onerror: ((ev: { error?: string }) => void) | null;
+      onend: (() => void) | null;
+      start: () => void;
+      stop: () => void;
+    };
+    const w = window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR };
+    const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+    if (!Ctor) {
+      setVoiceState("unsupported");
+      return;
+    }
+    setVoiceErr(null);
+    voiceFinalRef.current = "";
+    setVoiceInterim("");
+    const rec = new Ctor();
+    rec.lang = "en-US";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (ev) => {
+      let done = "";
+      let interim = "";
+      for (let i = 0; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        if (r.isFinal) done += r[0].transcript + " ";
+        else interim += r[0].transcript;
+      }
+      voiceFinalRef.current = done;
+      setVoiceInterim((done + interim).trim());
+    };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed") setVoiceErr("Microphone access was blocked — allow it in the browser and try again.");
+      else if (ev.error !== "no-speech" && ev.error !== "aborted") setVoiceErr("Couldn't hear that — try again.");
+    };
+    rec.onend = () => {
+      recRef.current = null;
+      void finishVoice();
+    };
+    try {
+      rec.start();
+      recRef.current = rec;
+      setVoiceState("listening");
+    } catch {
+      setVoiceErr("Couldn't start the microphone.");
+    }
+  }
+  function stopVoice() {
+    recRef.current?.stop();
+  }
+  async function finishVoice() {
+    const transcript = (voiceFinalRef.current.trim() || voiceInterim).trim();
+    setVoiceInterim("");
+    if (!transcript || !currentSheet) {
+      setVoiceState("idle");
+      return;
+    }
+    setVoiceState("thinking");
+    const existing = notes[currentSheet.id] ?? "";
+    const res = await polishSheetNotes({
+      projectId,
+      sheetId: currentSheet.id,
+      transcript,
+      existing,
+    });
+    if (!res.ok || !res.notes) {
+      setVoiceErr(res.error ?? "Couldn't turn that into notes.");
+      setVoiceState("idle");
+      return;
+    }
+    const next = existing.trim() ? `${existing.trimEnd()}\n${res.notes}` : res.notes;
+    onNotesChange(next);
+    await saveNotes(next);
+    setVoiceState("idle");
+  }
+
   async function saveNotes(value: string) {
     if (!currentSheet) return;
     await supabase.from("sheets").update({ notes: value }).eq("id", currentSheet.id);
@@ -1219,6 +1316,31 @@ export default function PlanViewer({
       if (b && (!found || b.d < found.d)) found = { id: m.id, index: b.index, d: b.d };
     }
     return found ? { id: found.id, index: found.index } : null;
+  }
+
+  // A "+" midpoint of the selected shape under the point: where a new vertex
+  // goes (insert index) if the finger lands on it. Only segments long enough
+  // on screen to show a midpoint count.
+  // Shortest segment (screen px) that gets a "+" midpoint: its middle must sit
+  // clear of both corners' hit circles, with a little air, or a press there
+  // would grab a corner instead.
+  const MID_SEG_MIN = () => (coarse ? 16 : 8) * 1.6 * 2 + 24;
+  function midpointAt(pt: Pt): { at: number; p: Pt } | null {
+    if (!selected || selected.type === "count" || selected.type === "leader" || selected.type === "line") return null;
+    const g = selected.geometry;
+    const closed = selected.type === "area" || (selected.type === "volume" && selected.vol_mode === "area");
+    const r = TOL() * 1.4;
+    let best: { at: number; p: Pt; d: number } | null = null;
+    const n = closed ? g.length : g.length - 1;
+    for (let i = 0; i < n; i++) {
+      const a = g[i];
+      const b = g[(i + 1) % g.length];
+      if (Math.hypot(b.x - a.x, b.y - a.y) * scale < MID_SEG_MIN()) continue;
+      const p = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+      if (d <= r && (!best || d < best.d)) best = { at: i + 1, p, d };
+    }
+    return best ? { at: best.at, p: best.p } : null;
   }
 
   // Fewest points a shape can keep (delete-a-point stops here).
@@ -1721,6 +1843,12 @@ export default function PlanViewer({
         }
       }
       const id = pickMeasurementAt(pt);
+      if (id) {
+        // Holding a shape makes it editable right away (handles on), and
+        // offers its menu on top.
+        setTool("select");
+        setSelectedId(id);
+      }
       setMenu(id ? { x: cx, y: cy, kind: "measurement", id } : { x: cx, y: cy, kind: "canvas" });
       setLoupe(null);
     }, 450);
@@ -1848,6 +1976,20 @@ export default function PlanViewer({
           }
           return;
         }
+        // A "+" midpoint: add a vertex there and carry it with the finger.
+        const mid = midpointAt(pt);
+        if (mid) {
+          const ng = [...selected.geometry.slice(0, mid.at), mid.p, ...selected.geometry.slice(mid.at)].map((q) => ({ ...q }));
+          dragRef.current = { id: selected.id, index: mid.at, pointerId: e.pointerId };
+          dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false, inserted: true };
+          setEditGeom(ng);
+          setActiveVertex({ id: selected.id, index: mid.at });
+          try {
+            svgRef.current?.setPointerCapture(e.pointerId);
+          } catch {}
+          if (touch) showLoupe(e);
+          return;
+        }
         // Inside a selected filled shape (or "Move" armed from the menu): drag
         // the whole shape.
         const filled =
@@ -1946,7 +2088,16 @@ export default function PlanViewer({
     setHover(evtToPoint(e));
   }
 
-  function onDoubleClick() {
+  function onDoubleClick(e?: React.MouseEvent) {
+    // Select tool: double-click a shape = its menu (same as right-click).
+    if (tool === "select" && e) {
+      const id = pickMeasurementAt(evtToPoint(e as unknown as React.PointerEvent));
+      if (id) {
+        setSelectedId(id);
+        setMenu({ x: e.clientX, y: e.clientY, kind: "measurement", id });
+      }
+      return;
+    }
     if (tool === "polyline" && draft.length >= 2) finalizePolyline(draft);
     else if (tool === "area" && draft.length >= 3) finalizeArea(draft);
     else if (tool === "wall" && draft.length >= 2) finalizeWall(draft);
@@ -1975,7 +2126,17 @@ export default function PlanViewer({
         setLoupe(null);
         if (fired || pinchedRef.current) return;
         if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) return;
-        setSelectedId(pickMeasurementAt(evtToPoint(e)));
+        const id = pickMeasurementAt(evtToPoint(e));
+        setSelectedId(id);
+        // Double-tap on the same shape = its menu.
+        const now = Date.now();
+        const lt = lastSelTapRef.current;
+        if (id && lt && lt.id === id && now - lt.t < 300 && Math.hypot(lt.x - e.clientX, lt.y - e.clientY) < 24) {
+          lastSelTapRef.current = null;
+          setMenu({ x: e.clientX, y: e.clientY, kind: "measurement", id });
+          return;
+        }
+        lastSelTapRef.current = id ? { x: e.clientX, y: e.clientY, t: now, id } : null;
         return;
       }
       selTapRef.current = null;
@@ -1997,7 +2158,7 @@ export default function PlanViewer({
       dragRef.current = null;
       dragStartRef.current = null;
       setLoupe(null);
-      if (!ds?.moved) {
+      if (!ds?.moved && !ds?.inserted) {
         setEditGeom(null);
         setActiveVertex({ id, index });
         if (ds?.hold) setMenu({ x: e.clientX, y: e.clientY, kind: "vertex", id, index });
@@ -2366,6 +2527,13 @@ export default function PlanViewer({
         pinchedRef.current = true;
         panRef.current = null;
         cancelTouchTap();
+        // Live preview: scale/move the page with a transform until lift.
+        pinchLiveRef.current = { k: 1, mx: g.mx, my: g.my, dx: 0, dy: 0 };
+        const wrap = pageWrapRef.current;
+        if (wrap) {
+          wrap.style.transformOrigin = `${pinchRef.current.fx * 100}% ${pinchRef.current.fy * 100}%`;
+          wrap.style.willChange = "transform";
+        }
         // Whatever the first finger had started is abandoned, untouched: a
         // vertex snaps back, a shape move is dropped, a crop box vanishes.
         dragRef.current = null;
@@ -2411,26 +2579,16 @@ export default function PlanViewer({
         pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const p = pinchRef.current;
       const g = midAndDist();
-      if (p && g) {
-        const next = Math.max(0.1, Math.min(6, (p.scale0 * g.d) / p.dist0));
-        const vrect = vp.getBoundingClientRect();
-        const canvas = canvasRef.current;
-        if (Math.abs(next - scale) / scale > 0.004) {
-          // Zoom: the layout effect keeps fx/fy under the fingers' midpoint.
-          focusRef.current = { fx: p.fx, fy: p.fy, vx: g.mx - vrect.left, vy: g.my - vrect.top };
-          if (zoomRafRef.current == null)
-            zoomRafRef.current = requestAnimationFrame(() => {
-              zoomRafRef.current = null;
-              setScale(next);
-            });
-        } else if (canvas) {
-          // Two-finger pan at steady zoom: keep the anchored point under the midpoint.
-          const crect = canvas.getBoundingClientRect();
-          const originX = crect.left - vrect.left + vp.scrollLeft;
-          const originY = crect.top - vrect.top + vp.scrollTop;
-          vp.scrollLeft = originX + p.fx * crect.width - (g.mx - vrect.left);
-          vp.scrollTop = originY + p.fy * crect.height - (g.my - vrect.top);
-        }
+      const live = pinchLiveRef.current;
+      if (p && g && live) {
+        // Preview only: one transform per move, nothing re-renders. Scale is
+        // clamped to the real zoom range; the midpoint drag becomes a pan.
+        const k = Math.max(0.1 / p.scale0, Math.min(6 / p.scale0, g.d / p.dist0));
+        live.k = k;
+        live.dx = g.mx - live.mx;
+        live.dy = g.my - live.my;
+        const wrap = pageWrapRef.current;
+        if (wrap) wrap.style.transform = `translate(${live.dx}px, ${live.dy}px) scale(${k})`;
         return;
       }
     }
@@ -2468,7 +2626,34 @@ export default function PlanViewer({
         }
       }
       pointersRef.current.delete(e.pointerId);
-      if (pointersRef.current.size < 2) pinchRef.current = null;
+      if (pointersRef.current.size < 2 && pinchRef.current) {
+        // Pinch over: drop the preview transform and commit the real zoom,
+        // keeping the page point that was under the fingers where they left it.
+        const p = pinchRef.current;
+        const live = pinchLiveRef.current;
+        pinchRef.current = null;
+        pinchLiveRef.current = null;
+        const wrap = pageWrapRef.current;
+        const canvas = canvasRef.current;
+        if (live && wrap && vp && canvas) {
+          wrap.style.transform = "";
+          wrap.style.willChange = "";
+          const vrect = vp.getBoundingClientRect();
+          const vx = live.mx + live.dx - vrect.left;
+          const vy = live.my + live.dy - vrect.top;
+          const final = Math.max(0.1, Math.min(6, p.scale0 * live.k));
+          if (Math.abs(final - scale) / scale > 0.002) {
+            focusRef.current = { fx: p.fx, fy: p.fy, vx, vy };
+            setScale(final);
+          } else {
+            const crect = canvas.getBoundingClientRect();
+            const originX = crect.left - vrect.left + vp.scrollLeft;
+            const originY = crect.top - vrect.top + vp.scrollTop;
+            vp.scrollLeft = originX + p.fx * crect.width - vx;
+            vp.scrollTop = originY + p.fy * crect.height - vy;
+          }
+        }
+      }
       if (pointersRef.current.size === 0) panRef.current = null;
       return;
     }
@@ -3497,9 +3682,14 @@ export default function PlanViewer({
           onPointerMove={onPanMove}
           onPointerUp={onPanEnd}
           onPointerCancel={onPanEnd}
-          onPointerLeave={onPanEnd}
+          // A finger sliding past the edge is NOT the end of its gesture (a
+          // pinch near the toolbar would otherwise drop a finger); only the
+          // mouse leaving matters.
+          onPointerLeave={(e) => {
+            if (e.pointerType !== "touch") onPanEnd(e);
+          }}
           onContextMenu={onCanvasContextMenu}
-          className="relative min-h-0 flex-1 overflow-auto bg-black/40"
+          className="touch-surface relative min-h-0 flex-1 overflow-auto bg-black/40"
           // touch-action none: the browser hands us every finger instead of
           // scrolling/zooming the page itself — required for pinch + draw.
           style={{
@@ -3523,7 +3713,7 @@ export default function PlanViewer({
                 padding: `${Math.max(vpSize.h, 24)}px ${Math.max(vpSize.w, 24)}px`,
               }}
             >
-              <div className="relative h-fit">
+              <div ref={pageWrapRef} className="relative h-fit">
                 <canvas
                   ref={canvasRef}
                   className="block rounded shadow-lg"
@@ -3539,7 +3729,7 @@ export default function PlanViewer({
                   onPointerDown={onPointerDown}
                   onPointerMove={onPointerMove}
                   onPointerUp={onPointerUp}
-                  onDoubleClick={onDoubleClick}
+                  onDoubleClick={(e) => onDoubleClick(e)}
                   className="absolute left-0 top-0"
                   style={{
                     pointerEvents: tool === "browse" ? "none" : "auto",
@@ -3754,6 +3944,35 @@ export default function PlanViewer({
                               );
                             })
                           : null}
+                        {/* "+" midpoints on the selection: press one to add a
+                            corner there (and carry it). Only on segments long
+                            enough to leave room between the real handles. */}
+                        {isSel && tool === "select" && !isCount && m.type !== "leader" && m.type !== "line"
+                          ? (() => {
+                              const closed = isFilled;
+                              const n = closed ? pts.length : pts.length - 1;
+                              const out: React.ReactElement[] = [];
+                              for (let i = 0; i < n; i++) {
+                                const a = pts[i];
+                                const b = pts[(i + 1) % pts.length];
+                                if (Math.hypot(b.x - a.x, b.y - a.y) < MID_SEG_MIN()) continue;
+                                const cx = (a.x + b.x) / 2;
+                                const cy = (a.y + b.y) / 2;
+                                const r = coarse ? 8 : 4.5;
+                                out.push(
+                                  <g key={`mid-${i}`} style={{ cursor: "copy" }}>
+                                    <circle cx={cx} cy={cy} r={r} fill="#fff" fillOpacity={0.85} stroke={m.color ?? "#A01C2D"} strokeWidth={1.5} strokeDasharray="2 2" />
+                                    <path
+                                      d={`M${cx - r * 0.5} ${cy}H${cx + r * 0.5}M${cx} ${cy - r * 0.5}V${cy + r * 0.5}`}
+                                      stroke={m.color ?? "#A01C2D"}
+                                      strokeWidth={1.5}
+                                    />
+                                  </g>,
+                                );
+                              }
+                              return out;
+                            })()
+                          : null}
                       </g>
                     );
                   })}
@@ -3953,54 +4172,128 @@ export default function PlanViewer({
           </div>
         ) : null}
 
-        {/* Nudge pad: fine-tune the tapped vertex one step at a time. */}
-        {activeV && selected && draft.length === 0 && !menu ? (
+        {/* Leader note card: where the note is typed on a phone (the side
+            panel is hidden there) — text, text size, arrowhead size. */}
+        {selected?.type === "leader" && (coarse || !panelOpen) && !menu && draft.length === 0 ? (
+          <div className="glass-strong absolute bottom-14 left-2 right-2 z-20 rounded-2xl p-2.5 text-xs sm:left-auto sm:w-80">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wider text-muted">Leader note</span>
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                className="rounded-md px-2 py-1 text-foreground hover:text-brand-soft"
+              >
+                Done
+              </button>
+            </div>
+            <textarea
+              value={selected.text ?? ""}
+              onChange={(e) => updateLeader({ text: e.target.value })}
+              rows={2}
+              autoFocus={!(selected.text ?? "").trim()}
+              spellCheck
+              placeholder="What is the arrow pointing at?"
+              className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
+            />
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+              {(
+                [
+                  ["Text size", "font_size", LEADER_FONT_DEFAULT, 6, 96],
+                  ["Arrowhead", "head_size", LEADER_HEAD_DEFAULT, 4, 60],
+                ] as const
+              ).map(([label, key, dflt, lo, hi]) => {
+                const cur = selected[key] ?? dflt;
+                return (
+                  <div key={key} className="flex items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wider text-muted">{label}</span>
+                    <button
+                      type="button"
+                      aria-label={`${label} smaller`}
+                      onClick={() => updateLeader({ [key]: Math.max(lo, cur - 2) })}
+                      className="h-9 w-9 min-h-0 rounded-md border border-border text-base text-foreground hover:border-brand"
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center tabular-nums text-foreground">{Math.round(cur)}</span>
+                    <button
+                      type="button"
+                      aria-label={`${label} larger`}
+                      onClick={() => updateLeader({ [key]: Math.min(hi, cur + 2) })}
+                      className="h-9 w-9 min-h-0 rounded-md border border-border text-base text-foreground hover:border-brand"
+                    >
+                      +
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Nudge pad: fine-tune the tapped vertex one step at a time. A fixed
+            3×3 cross of 44 px arrows (explicit grid cells — nothing floats or
+            overlaps) plus step, Delete point and Done, tucked bottom-right. */}
+        {activeV && selected && selected.type !== "leader" && draft.length === 0 && !menu ? (
           <div
-            className="glass-strong absolute bottom-12 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-2xl px-2.5 py-1.5 text-xs"
+            className="glass-strong absolute bottom-14 right-2 z-20 flex items-center gap-2 rounded-2xl p-1.5 text-xs"
             role="group"
             aria-label="Nudge the selected point"
           >
-            <div className="grid grid-cols-3 gap-0.5">
+            <div
+              className="grid gap-0.5"
+              style={{ gridTemplateColumns: "repeat(3, 2.75rem)", gridTemplateRows: "repeat(3, 2.75rem)" }}
+            >
               {(
                 [
-                  [null, [0, -1, "↑", "Up"], null],
-                  [[-1, 0, "←", "Left"], null, [1, 0, "→", "Right"]],
-                  [null, [0, 1, "↓", "Down"], null],
-                ] as ([number, number, string, string] | null)[][]
-              ).flat().map((cell, i) =>
-                cell ? (
-                  <button
-                    key={i}
-                    type="button"
-                    aria-label={`Nudge ${cell[3].toLowerCase()}`}
-                    onClick={() => nudgeActive(cell[0], cell[1])}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-base text-foreground hover:border-brand pointer-coarse:h-11 pointer-coarse:w-11"
-                  >
-                    {cell[2]}
-                  </button>
-                ) : (
-                  <span key={i} className="h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11" aria-hidden />
-                ),
-              )}
+                  [0, -1, "↑", "up", 2, 1],
+                  [-1, 0, "←", "left", 1, 2],
+                  [1, 0, "→", "right", 3, 2],
+                  [0, 1, "↓", "down", 2, 3],
+                ] as const
+              ).map(([dx, dy, glyph, name, col, row]) => (
+                <button
+                  key={name}
+                  type="button"
+                  aria-label={`Nudge ${name}`}
+                  onClick={() => nudgeActive(dx, dy)}
+                  style={{ gridColumn: col, gridRow: row }}
+                  className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg border border-border text-lg text-foreground hover:border-brand"
+                >
+                  {glyph}
+                </button>
+              ))}
+              <span
+                style={{ gridColumn: 2, gridRow: 2 }}
+                className="flex items-center justify-center text-[10px] tabular-nums text-muted"
+                aria-label={`Point ${activeV.index + 1} of ${selected.geometry.length}`}
+              >
+                {activeV.index + 1}/{selected.geometry.length}
+              </span>
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wider text-muted">
-                Point {activeV.index + 1} of {selected.geometry.length}
-              </span>
               <select
                 value={nudgeUnit}
                 onChange={(e) => setNudgeStep(e.target.value as "qft" | "ft" | "px")}
                 aria-label="Nudge step"
-                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
+                className="h-9 rounded-md border border-border bg-background px-1.5 text-xs text-foreground focus:border-brand focus:outline-none"
               >
-                {hasScale ? <option value="qft">¼ ft per tap</option> : null}
-                {hasScale ? <option value="ft">1 ft per tap</option> : null}
-                <option value="px">1 px per tap</option>
+                {hasScale ? <option value="qft">¼ ft</option> : null}
+                {hasScale ? <option value="ft">1 ft</option> : null}
+                <option value="px">1 px</option>
               </select>
+              {selected.geometry.length > minPointsOf(selected) || selected.type === "count" ? (
+                <button
+                  type="button"
+                  onClick={() => deleteVertex(selected.id, activeV.index)}
+                  className="h-9 min-h-0 rounded-md border border-brand/40 bg-brand/10 px-2 text-brand-soft hover:bg-brand/20"
+                >
+                  {selected.type === "count" ? "Delete marker" : "Delete point"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setActiveVertex(null)}
-                className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand pointer-coarse:min-h-9"
+                className="h-9 min-h-0 rounded-md border border-border px-2 text-foreground hover:border-brand"
               >
                 Done
               </button>
@@ -4133,6 +4426,40 @@ export default function PlanViewer({
                   {notesSaved ? (
                     <span className="text-xs text-brand-soft">Saved</span>
                   ) : null}
+                  {/* Dictate: speak, the AI writes the notes */}
+                  <button
+                    type="button"
+                    onClick={voiceState === "listening" ? stopVoice : startVoice}
+                    disabled={voiceState === "thinking" || voiceState === "unsupported"}
+                    aria-pressed={voiceState === "listening"}
+                    title={
+                      voiceState === "unsupported"
+                        ? "Voice input isn't available in this browser"
+                        : "Dictate notes about this sheet"
+                    }
+                    className={`flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      voiceState === "listening"
+                        ? "border-brand bg-brand text-white"
+                        : "border-border text-foreground hover:border-brand"
+                    }`}
+                  >
+                    {voiceState === "listening" ? (
+                      <>
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-white" aria-hidden />
+                        Stop
+                      </>
+                    ) : voiceState === "thinking" ? (
+                      "Writing notes…"
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+                          <rect x="9" y="3" width="6" height="11" rx="3" />
+                          <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" strokeLinecap="round" />
+                        </svg>
+                        Dictate
+                      </>
+                    )}
+                  </button>
                   <button
                     type="button"
                     onClick={() => setNotesOpen(false)}
@@ -4143,6 +4470,15 @@ export default function PlanViewer({
                   </button>
                 </div>
               </div>
+              {voiceState === "listening" ? (
+                <p className="mb-1.5 min-h-5 text-xs text-muted">
+                  {voiceInterim ? <span className="text-foreground">{voiceInterim}</span> : "Listening… say what the AI should know about this sheet."}
+                </p>
+              ) : null}
+              {voiceState === "unsupported" ? (
+                <p className="mb-1.5 text-xs text-muted">Voice input isn&apos;t available in this browser — type the note instead.</p>
+              ) : null}
+              {voiceErr ? <p className="mb-1.5 text-xs text-brand-soft">{voiceErr}</p> : null}
               <textarea
                 id="sheet-notes"
                 value={currentSheet ? notes[currentSheet.id] ?? "" : ""}

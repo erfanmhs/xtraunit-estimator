@@ -111,7 +111,7 @@ export default function PlanManager({
           setDragOver(false);
           pick(e.dataTransfer.files);
         }}
-        className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-4 py-8 text-center transition-colors ${
+        className={`flex min-h-11 cursor-pointer flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded-lg border border-dashed px-3 py-2 text-center transition-colors ${
           dragOver ? "border-brand bg-brand/10" : "border-border hover:border-brand/60"
         }`}
       >
@@ -122,12 +122,8 @@ export default function PlanManager({
           hidden
           onChange={(e) => pick(e.target.files)}
         />
-        <span className="text-sm text-foreground">
-          Click to upload or drag a plan PDF here
-        </span>
-        <span className="text-xs text-muted">
-          You&apos;ll pick which sheets to keep next
-        </span>
+        <span className="text-sm text-foreground">＋ Upload or drop a plan PDF</span>
+        <span className="text-xs text-muted">you&apos;ll pick which sheets to keep next</span>
       </label>
 
       {error ? (
