@@ -23,6 +23,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
 import StageJump from "@/components/StageNav";
+import SwipeRow from "@/components/SwipeRow";
 import { polishSheetNotes } from "./actions";
 import {
   SelectIcon,
@@ -545,11 +546,19 @@ export default function PlanViewer({
   // backdrop-filter makes it the containing block — so taps on the drawing
   // never closed the picker.)
   const popoverRef = useRef<HTMLDivElement>(null);
-  function popover(close: () => void, body: React.ReactNode, width = "w-80") {
+  const layerAnchorRef = useRef<DOMRect | null>(null); // the layer chip's box when opened
+  function popover(close: () => void, body: React.ReactNode, width = "w-80", anchor?: DOMRect | null) {
     if (phone) {
+      // Small popover pinned under its control (portaled so the backdrop is
+      // truly full-screen); falls back to a bottom sheet with no anchor.
+      const W = typeof window !== "undefined" ? window.innerWidth : 375;
+      const H = typeof window !== "undefined" ? window.innerHeight : 800;
+      const pw = Math.min(288, W - 16);
+      const left = anchor ? Math.max(8, Math.min(anchor.left, W - 8 - pw)) : 8;
+      const top = anchor ? Math.min(anchor.bottom + 4, H - 120) : undefined;
       return createPortal(
         <div
-          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50"
+          className={`fixed inset-0 z-[70] ${anchor ? "" : "flex items-end justify-center bg-black/50"}`}
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) close();
           }}
@@ -557,7 +566,12 @@ export default function PlanViewer({
           <div
             ref={popoverRef}
             role="dialog"
-            className="glass-strong pb-safe max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-2xl"
+            className={
+              anchor
+                ? "glass-strong fixed max-h-[45vh] overflow-y-auto rounded-xl"
+                : "glass-strong pb-safe max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-2xl"
+            }
+            style={anchor ? { left, top, width: pw } : undefined}
           >
             {body}
           </div>
@@ -656,6 +670,11 @@ export default function PlanViewer({
   // The page bitmap is only re-rasterized once no finger is down and the
   // last gesture is this old — never in the middle of tapping.
   const idleUntilRef = useRef(0);
+  // Auto edge-pan: while a finger aims a point or drags a handle within
+  // EDGE_M px of the drawing's edge, the page slides that way (faster the
+  // closer to the edge) so a run can continue past the visible area; it
+  // stops when the finger moves back in, lifts, or the page can't scroll.
+  const edgePanRef = useRef<{ raf: number | null; vx: number; vy: number; x: number; y: number } | null>(null);
   // ── Touch editing (see TOUCH-INTERACTION.md) ───────────────────────────────
   // The vertex the nudge pad works on (a tapped handle); hold-to-grab pulse;
   // whole-shape move; and the press-vs-drag bookkeeping for a handle.
@@ -678,6 +697,9 @@ export default function PlanViewer({
   const [markedSheets, setMarkedSheets] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState<string | null>(null);
   const [exportLegend, setExportLegend] = useState(true);
+  // The context menu is measured after it mounts and moved so all of it is
+  // on-screen: opens upward from a low item, slides left from a right one.
+  const menuRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -1039,6 +1061,23 @@ export default function PlanViewer({
     return () => clearTimeout(t);
   }, [scale, rasterScale, coarse, baseDims.w, baseDims.h]);
 
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!menu || !el) return;
+    const pad = 8;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    let left = menu.x;
+    let top = menu.y;
+    if (left + w > W - pad) left = Math.max(pad, W - pad - w);
+    if (top + h > H - pad) top = Math.max(pad, menu.y - h); // flip above the finger
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.visibility = "visible";
+  }, [menu]);
 
   // Keyboard: Esc cancels/steps back, Delete removes selection, Space pans.
   useEffect(() => {
@@ -1848,9 +1887,13 @@ export default function PlanViewer({
     recordHistory();
     const active = activeCountRef.current;
     if (active) {
-      const idx = active.geometry.findIndex(
-        (v) => Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6,
-      );
+      // Mouse: clicking an existing marker removes it. Finger: a tap always
+      // ADDS — a fingertip landing near a marker was removing it by accident,
+      // which read as "the count is confused". Remove a marker by holding it
+      // (Delete this marker) or from the nudge pad.
+      const idx = coarse
+        ? -1
+        : active.geometry.findIndex((v) => Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6);
       const geometry =
         idx >= 0
           ? active.geometry.filter((_, i) => i !== idx)
@@ -2093,6 +2136,72 @@ export default function PlanViewer({
     hideLoupe();
     clearRubber();
     aimSamplesRef.current = [];
+    edgePanStop();
+  }
+  // ── Auto edge-pan ─────────────────────────────────────────────────────────
+  function edgePanStop() {
+    const s = edgePanRef.current;
+    if (s?.raf != null) cancelAnimationFrame(s.raf);
+    edgePanRef.current = null;
+  }
+  function edgePanUpdate(clientX: number, clientY: number) {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const r = vp.getBoundingClientRect();
+    const EDGE_M = 48; // px from the edge where panning starts
+    const MAX = 14; // px per frame at the very edge
+    const speed = (d: number) => (d < EDGE_M ? ((EDGE_M - Math.max(0, d)) / EDGE_M) * MAX : 0);
+    const l = speed(clientX - r.left);
+    const rt = speed(r.right - clientX);
+    const t = speed(clientY - r.top);
+    const b = speed(r.bottom - clientY);
+    const vx = l ? -l : rt;
+    const vy = t ? -t : b;
+    if (!vx && !vy) {
+      edgePanStop();
+      return;
+    }
+    const cur = edgePanRef.current;
+    if (cur) {
+      cur.vx = vx;
+      cur.vy = vy;
+      cur.x = clientX;
+      cur.y = clientY;
+      return;
+    }
+    const st = { raf: null as number | null, vx, vy, x: clientX, y: clientY };
+    edgePanRef.current = st;
+    const tick = () => {
+      const s = edgePanRef.current;
+      const v = viewportRef.current;
+      if (!s || !v) return;
+      const sl = v.scrollLeft;
+      const stp = v.scrollTop;
+      v.scrollLeft += s.vx;
+      v.scrollTop += s.vy;
+      if (v.scrollLeft === sl && v.scrollTop === stp) {
+        edgePanStop(); // reached the end of the page
+        return;
+      }
+      // The page moved under the still finger: re-aim at the same screen spot.
+      const pt = clientToPoint(s.x, s.y);
+      if (tapRef.current) {
+        recordAim(s.x, s.y);
+        showLoupeAt(s.x, s.y, pt);
+        if (draft.length) updateRubber(pt);
+      } else if (dragRef.current) {
+        const idx = dragRef.current.index;
+        setEditGeom((g) => {
+          if (!g) return g;
+          const ng = g.map((q) => ({ ...q }));
+          ng[idx] = pt;
+          return ng;
+        });
+        showLoupeAt(s.x, s.y, pt);
+      }
+      s.raf = requestAnimationFrame(tick);
+    };
+    st.raf = requestAnimationFrame(tick);
   }
   function clientToPoint(x: number, y: number): Pt {
     const rect = svgRef.current!.getBoundingClientRect();
@@ -2419,6 +2528,7 @@ export default function PlanViewer({
       recordAim(e.clientX, e.clientY);
       showLoupe(e);
       if (draft.length) updateRubber(evtToPoint(e));
+      edgePanUpdate(e.clientX, e.clientY);
       return;
     }
     // Select tool, finger on nothing: a slide is not a selection (and not a
@@ -2443,7 +2553,10 @@ export default function PlanViewer({
         ng[dragRef.current!.index] = pt;
         return ng;
       });
-      if (touch) showLoupe(e);
+      if (touch) {
+        showLoupe(e);
+        edgePanUpdate(e.clientX, e.clientY);
+      }
       return;
     }
     // The whole shape being moved.
@@ -2537,6 +2650,7 @@ export default function PlanViewer({
       dragRef.current = null;
       dragStartRef.current = null;
       hideLoupe();
+      edgePanStop();
       if (!ds?.moved && !ds?.inserted) {
         setEditGeom(null);
         setActiveVertex({ id, index });
@@ -3235,23 +3349,23 @@ export default function PlanViewer({
   const displayW = baseDims.w * scale;
   const displayH = baseDims.h * scale;
 
-  // Lay out the on-drawing labels, nudging each one down until it no longer
-  // overlaps an already-placed label (greedy collision avoidance).
+  // On-drawing labels: ONE per layer, showing the layer's consolidated total,
+  // anchored on the layer's largest run — not a number on every run, which
+  // buried the sheet. The selected run keeps its own label while it's being
+  // edited. Greedy collision avoidance nudges overlapping labels down.
   const LABEL_FONT = 14;
   const labelLayout: Record<string, { x: number; y: number; text: string }> = {};
   {
     const placed: { x: number; y: number; w: number; h: number }[] = [];
     const lineH = LABEL_FONT + 4;
-    for (const m of measurements) {
-      const text = labelText(m);
-      if (!text) continue;
+    const anchorOf = (m: Measurement): Pt | null => {
       const geom = m.id === selectedId && editGeom ? editGeom : m.geometry;
-      if (geom.length === 0) continue;
+      if (geom.length === 0) return null;
       const centered =
         m.type === "area" ||
         m.type === "count" ||
         (m.type === "volume" && m.vol_mode === "area");
-      const anchor = centered
+      return centered
         ? {
             x: geom.reduce((s, p) => s + p.x, 0) / geom.length,
             y: geom.reduce((s, p) => s + p.y, 0) / geom.length,
@@ -3259,6 +3373,8 @@ export default function PlanViewer({
         : geom.length >= 2
           ? { x: (geom[0].x + geom[1].x) / 2, y: (geom[0].y + geom[1].y) / 2 }
           : geom[0];
+    };
+    const place = (key: string, anchor: Pt, text: string) => {
       const base = px(anchor);
       const x = base.x + 6;
       let y = base.y - 6;
@@ -3274,9 +3390,36 @@ export default function PlanViewer({
         tries++;
       }
       placed.push({ x, y, w, h: lineH });
-      labelLayout[m.id] = { x, y, text };
+      labelLayout[key] = { x, y, text };
+    };
+    const byLayer = new Map<string, Measurement[]>();
+    for (const m of measurements) {
+      if (m.type === "leader" || m.value == null) continue;
+      const key = layerKeyOf(m.layer);
+      if (hiddenLayers.has(key)) continue;
+      const list = byLayer.get(key);
+      if (list) list.push(m);
+      else byLayer.set(key, [m]);
+    }
+    for (const [key, rows] of byLayer) {
+      const totals: Record<string, number> = {};
+      for (const m of rows) totals[m.unit || ""] = (totals[m.unit || ""] ?? 0) + (m.value ?? 0);
+      const parts = Object.entries(totals).map(([unit, sum]) =>
+        unit === "cf" ? `${sum.toFixed(0)} cf` : unit === "ea" ? `${sum}` : `${sum.toFixed(1)} ${unit}`,
+      );
+      const biggest = rows.reduce((a, b) => (Math.abs(b.value ?? 0) > Math.abs(a.value ?? 0) ? b : a));
+      const anchor = anchorOf(biggest);
+      if (!anchor) continue;
+      place(`layer:${key}`, anchor, key === "Unlabeled" ? parts.join(" · ") : `${key}: ${parts.join(" · ")}`);
+    }
+    // The run being edited shows its own number too.
+    if (selected && selected.type !== "leader") {
+      const t = labelText(selected);
+      const a = anchorOf(selected);
+      if (t && a) place(selected.id, a, t);
     }
   }
+  const layerLabels = Object.entries(labelLayout).filter(([k]) => k.startsWith("layer:"));
 
   // Order matters on a phone: the tools row scrolls sideways, so the ones used
   // most sit first and stay visible.
@@ -3889,7 +4032,10 @@ export default function PlanViewer({
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
               <button
                 type="button"
-                onClick={() => setLayerOpen((o) => !o)}
+                onClick={(e) => {
+                  layerAnchorRef.current = e.currentTarget.getBoundingClientRect();
+                  setLayerOpen((o) => !o);
+                }}
                 aria-haspopup="listbox"
                 aria-expanded={layerOpen}
                 title="The layer new runs are added to"
@@ -3932,10 +4078,10 @@ export default function PlanViewer({
                       </div>
                       {layerGroups.length ? (
                         <>
-                          <p className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wider text-muted">
-                            Continue a layer on this sheet
+                          <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-muted">
+                            Continue a layer
                           </p>
-                          <div className="max-h-[45vh] overflow-y-auto sm:max-h-56">
+                          <div className="max-h-[32vh] overflow-y-auto sm:max-h-56">
                             {layerGroups.map((g) => {
                               const active = layerKeyOf(layer) === g.layer;
                               return (
@@ -3948,15 +4094,14 @@ export default function PlanViewer({
                                     if (!MEASURE_TOOLS.includes(tool) && kind && MEASURE_TOOLS.includes(kind)) setTool(kind);
                                     setLayerOpen(false);
                                   }}
-                                  className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-foreground hover:bg-white/10 ${
+                                  className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-foreground hover:bg-white/10 ${
                                     active ? "bg-brand/15" : ""
                                   }`}
                                 >
-                                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: g.color }} />
+                                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: g.color }} />
                                   <span className="min-w-0 flex-1 truncate">{g.layer}</span>
-                                  <span className="shrink-0 text-xs text-muted">
-                                    {g.rows.length} run{g.rows.length === 1 ? "" : "s"}
-                                    {g.lines.length ? ` · ${g.lines.join(", ")}` : ""}
+                                  <span className="shrink-0 text-[10px] text-muted">
+                                    {g.lines.length ? g.lines.join(" · ") : `${g.rows.length}`}
                                   </span>
                                 </button>
                               );
@@ -3965,10 +4110,40 @@ export default function PlanViewer({
                         </>
                       ) : null}
                     </div>,
-                    "w-80",
+                    "w-72",
+                    layerAnchorRef.current,
                   )
                 : null}
             </div>
+            {/* Dictate — speak a note about this sheet (opens Notes for AI and
+                starts listening); sits beside the color so it's one tap away
+                while drawing. */}
+            <button
+              type="button"
+              onClick={() => {
+                setNotesOpen(true);
+                if (voiceState === "listening") stopVoice();
+                else startVoice();
+              }}
+              disabled={voiceState === "thinking"}
+              aria-pressed={voiceState === "listening"}
+              aria-label={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
+              title={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
+              className={`flex h-10 w-10 min-h-0 shrink-0 items-center justify-center rounded-md border transition-colors disabled:opacity-50 md:h-8 md:w-8 ${
+                voiceState === "listening"
+                  ? "border-brand bg-brand text-white"
+                  : "border-border text-foreground hover:border-brand"
+              }`}
+            >
+              {voiceState === "listening" ? (
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" aria-hidden />
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" strokeLinecap="round" />
+                </svg>
+              )}
+            </button>
             <div className="relative flex items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
               {/* Phone: one swatch → popover */}
@@ -4114,7 +4289,9 @@ export default function PlanViewer({
                     ? `Counting: ${
                         measurements.find((m) => m.id === activeCountId)?.value ?? 0
                       } (auto-saved)`
-                    : "Click each item — every click saves"}
+                    : coarse
+                      ? "Tap each item — every tap saves · hold a marker to remove it"
+                      : "Click each item — every click saves"}
                 </span>
                 <button
                   type="button"
@@ -4490,6 +4667,22 @@ export default function PlanViewer({
                       </g>
                     );
                   })}
+                  {/* Layer totals — one label per layer (see labelLayout) */}
+                  {layerLabels.map(([key, lbl]) => (
+                    <text
+                      key={key}
+                      x={lbl.x}
+                      y={lbl.y}
+                      fontSize={LABEL_FONT}
+                      fontWeight={700}
+                      fill="#fff"
+                      stroke="#000"
+                      strokeWidth={3.5}
+                      style={{ paintOrder: "stroke", pointerEvents: "none" }}
+                    >
+                      {lbl.text}
+                    </text>
+                  ))}
                   {draft.length >= 1 ? (
                     <g>
                       {(tool === "area" ||
@@ -5424,10 +5617,36 @@ export default function PlanViewer({
                     !isHidden &&
                     MEASURE_TOOLS.includes(tool) &&
                     layerKeyOf(layer) === g.layer;
+                  const toggleHidden = () =>
+                    setHiddenLayers((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(g.layer)) next.delete(g.layer);
+                      else next.add(g.layer);
+                      return next;
+                    });
                   return (
-                    <div
+                    // Touch: swipe left for Hide / Delete, hold for every
+                    // action. The row's own buttons stay for everyone.
+                    <SwipeRow
                       key={g.layer}
-                      className={`mb-1 rounded-md border border-white/5 ${isHidden ? "opacity-50" : ""}`}
+                      className="mb-1 rounded-md"
+                      actions={[
+                        { label: isHidden ? "Show" : "Hide", onClick: toggleHidden },
+                        { label: "Delete", onClick: () => deleteLayer(g.rows), tone: "danger" },
+                      ]}
+                      sheetActions={[
+                        {
+                          label: isRecording ? "Stop recording" : "Draw into this layer",
+                          onClick: () => (isRecording ? setTool("select") : continueLayer(g)),
+                          tone: "primary",
+                        },
+                        { label: "Rename / settings", onClick: () => openLayerEditor(g) },
+                        { label: isHidden ? "Show on sheet" : "Hide from sheet", onClick: toggleHidden },
+                        { label: "Delete layer", onClick: () => deleteLayer(g.rows), tone: "danger" },
+                      ]}
+                    >
+                    <div
+                      className={`rounded-md border border-white/5 ${isHidden ? "opacity-50" : ""}`}
                     >
                       <div className="flex items-center gap-1.5 px-2 py-1.5">
                         {/* Record toggle: red = drawing adds to this layer; green = idle */}
@@ -5619,6 +5838,7 @@ export default function PlanViewer({
                         </div>
                       ) : null}
                     </div>
+                    </SwipeRow>
                   );
                 })
               )}
@@ -5697,14 +5917,11 @@ export default function PlanViewer({
             }}
           />
           <div
+            ref={menuRef}
             className="glass-strong fixed z-[61] min-w-[170px] rounded-xl p-1 text-sm"
-            style={{
-              left: Math.min(
-                menu.x,
-                (typeof window !== "undefined" ? window.innerWidth : 99999) - 190,
-              ),
-              top: menu.y,
-            }}
+            // Placed by the layout effect below once its size is known: it
+            // flips upward from a low item and never leaves the screen.
+            style={{ left: menu.x, top: menu.y, visibility: "hidden" }}
           >
             {menu.kind === "canvas" ? (
               <p className="px-3 py-1 text-[10px] uppercase tracking-wider text-muted">

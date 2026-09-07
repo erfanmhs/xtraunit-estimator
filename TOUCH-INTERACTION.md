@@ -294,6 +294,13 @@ nothing has to be relearned.
 | Closing a wall / polyline loop lost the last segment | Yes — tapping near the first point finished without it | An open run tapped back at its start gets a closing point snapped exactly onto the first point, then finishes. Filled shapes close as before |
 | Measurements panel on a phone | Behind the ⋯ sheet; opened as a side column that squeezed the drawing | A list button (with the count) in the top row toggles it; it opens as a bottom sheet over the drawing, and a tap on the drawing closes it |
 | Cool-down after a multi-touch | 350 ms | 250 ms — quicker to pick up the next point after a pan |
+| Context menu ran off the bottom | Yes — opened downward from a low item | Measured after mount: flips upward from a low item, clamps from the right edge; always fully on-screen |
+| A number on every run | Yes — busy, overwhelming sheets | One label per layer with its consolidated total (counts show just the number), anchored on the layer's largest run; the selected run keeps its own label while being edited |
+| Count tool on touch | A tap near an existing marker removed it | A finger tap always adds; remove a marker by holding it (Delete this marker) or from the nudge pad. Mouse keeps click-to-toggle |
+| Layer picker on a phone | Bottom sheet taking most of the screen | Compact popover (18 rem, list capped at a third of the screen) pinned under the chip; Dictate button beside Color |
+| Delete a measurement layer | Only inside the layer editor | Swipe a layer row left for Hide / Delete; hold for every action. Visible controls stay |
+| Drawing past the visible page | Stop, two-finger pan, tap again | Auto edge-pan: with a finger aiming or dragging within 48 px of the edge, the page slides that way (faster nearer the edge) and stops when the finger moves back in, lifts, or the page ends |
+| Viewer crash | Generic "something went wrong" with no message | Viewer-level error screen with the actual message, Reload the viewer, and Copy details |
 
 ---
 
