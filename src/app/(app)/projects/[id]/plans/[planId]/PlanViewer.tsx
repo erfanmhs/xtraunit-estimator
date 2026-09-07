@@ -714,6 +714,13 @@ export default function PlanViewer({
   const [draft, setDraft] = useState<Pt[]>([]);
   const [hover, setHover] = useState<Pt | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  // Latest list for async work (a save that returns after an undo, a drag on
+  // a placeholder that hasn't been saved yet).
+  const measurementsRef = useRef<Measurement[]>([]);
+  useEffect(() => {
+    measurementsRef.current = measurements;
+  }, [measurements]);
+  const isTemp = (id: string) => id.startsWith("tmp-");
   const [layer, setLayer] = useState("");
   const [color, setColor] = useState(COLORS[0]);
   const [wallHeight, setWallHeight] = useState("8");
@@ -1630,9 +1637,26 @@ export default function PlanViewer({
       setError("Could not save that measurement.");
       return;
     }
+    const saved = data as Measurement;
+    const live = measurementsRef.current.find((x) => x.id === tempId);
+    if (!live) {
+      // Undone or deleted while the save was in flight: the row must not
+      // linger in the database.
+      await supabase.from("measurements").delete().eq("id", saved.id);
+      return;
+    }
+    if (live.geometry !== geometry) {
+      // Reshaped while pending: the database gets the newer geometry.
+      saved.geometry = live.geometry;
+      saved.value = geometryValue(saved, live.geometry);
+      await supabase
+        .from("measurements")
+        .update({ geometry: saved.geometry, value: saved.value })
+        .eq("id", saved.id);
+    }
     // Swap the placeholder for the saved row (keeps its real id for edits).
-    setMeasurements((m) => m.map((x) => (x.id === tempId ? (data as Measurement) : x)));
-    if (selectedId === tempId) setSelectedId((data as Measurement).id);
+    setMeasurements((m) => m.map((x) => (x.id === tempId ? saved : x)));
+    if (selectedId === tempId) setSelectedId(saved.id);
     // Drawing into a hidden layer shows it again — a run that vanishes the
     // moment it is saved looks like it was lost.
     const key = layerKeyOf(layer || null);
@@ -1721,6 +1745,10 @@ export default function PlanViewer({
     if (insErr || !data) {
       setMeasurements((m) => m.filter((x) => x.id !== tempId));
       setError("Could not add the leader. (Has migration 0023 been run?)");
+      return;
+    }
+    if (!measurementsRef.current.some((x) => x.id === tempId)) {
+      await supabase.from("measurements").delete().eq("id", (data as Measurement).id); // undone meanwhile
       return;
     }
     // Drop straight into Select so the user can type the note.
@@ -2753,9 +2781,12 @@ export default function PlanViewer({
   async function reconcileDb(target: Measurement[], current: Measurement[]) {
     const tgt = new Map(target.map((m) => [m.id, m]));
     const cur = new Map(current.map((m) => [m.id, m]));
-    const toDelete = current.filter((m) => !tgt.has(m.id)).map((m) => m.id);
-    const toInsert = target.filter((m) => !cur.has(m.id));
+    // Placeholders (saves still in flight) have no row yet: the save itself
+    // notices if it was undone meanwhile and removes its row.
+    const toDelete = current.filter((m) => !tgt.has(m.id) && !isTemp(m.id)).map((m) => m.id);
+    const toInsert = target.filter((m) => !cur.has(m.id) && !isTemp(m.id));
     const toUpdate = target.filter((m) => {
+      if (isTemp(m.id)) return false;
       const c = cur.get(m.id);
       return c && JSON.stringify(c) !== JSON.stringify(m);
     });
