@@ -4122,35 +4122,6 @@ export default function PlanViewer({
                   )
                 : null}
             </div>
-            {/* Dictate — speak a note about this sheet (opens Notes for AI and
-                starts listening); sits beside the color so it's one tap away
-                while drawing. */}
-            <button
-              type="button"
-              onClick={() => {
-                setNotesOpen(true);
-                if (voiceState === "listening") stopVoice();
-                else startVoice();
-              }}
-              disabled={voiceState === "thinking"}
-              aria-pressed={voiceState === "listening"}
-              aria-label={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
-              title={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
-              className={`flex h-10 w-10 min-h-0 shrink-0 items-center justify-center rounded-md border transition-colors disabled:opacity-50 md:h-8 md:w-8 ${
-                voiceState === "listening"
-                  ? "border-brand bg-brand text-white"
-                  : "border-border text-foreground hover:border-brand"
-              }`}
-            >
-              {voiceState === "listening" ? (
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" aria-hidden />
-              ) : (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
-                  <rect x="9" y="3" width="6" height="11" rx="3" />
-                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" strokeLinecap="round" />
-                </svg>
-              )}
-            </button>
             <div className="relative flex items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
               {/* Phone: one swatch → popover */}
