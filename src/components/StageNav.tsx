@@ -132,7 +132,7 @@ export default function StageJump({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Go to another part of the app"
-        className={`flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand ${className}`}
+        className={`flex items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand ${className}`}
       >
         <GridIcon className="h-4 w-4" />
         Go to

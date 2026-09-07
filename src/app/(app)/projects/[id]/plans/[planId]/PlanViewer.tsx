@@ -22,6 +22,21 @@ import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
 import StageJump from "@/components/StageNav";
+import {
+  SelectIcon,
+  PanIcon,
+  LineIcon,
+  AreaIcon,
+  CountIcon,
+  PolylineIcon,
+  WallIcon,
+  VolumeIcon,
+  LeaderIcon,
+  CalibrateIcon,
+  CropIcon,
+  MoreIcon,
+  type ToolIconProps,
+} from "@/components/ToolIcons";
 import type { PlanFile } from "@/types";
 
 // On-sheet takeoff legend placement (fractions of the page + a size multiplier).
@@ -454,6 +469,10 @@ export default function PlanViewer({
   const [panelOpen, setPanelOpen] = useState(true);
   const [panelW, setPanelW] = useState(268);
   const [notesOpen, setNotesOpen] = useState(false);
+  // Phone toolbar: the "More" sheet (zoom / legend / export / panels) and the
+  // color popover — both keep the top of the screen to two short rows.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [colorOpen, setColorOpen] = useState(false);
 
   // Narrow windows (tablet, half-screen laptop): start with both side panels
   // collapsed so the DRAWING gets the width, and collapse again if the window
@@ -697,14 +716,22 @@ export default function PlanViewer({
     setActiveCountId(null);
     setUndoStack([]);
     setRedoStack([]);
+    setActiveVertex(null);
     if (!currentSheet) return;
+    // Paging quickly fires one load per sheet; only the LATEST may land.
+    // (Without this guard a slow earlier response could overwrite the current
+    // sheet's measurements with another sheet's — or an empty list.)
+    let live = true;
     (async () => {
       const { data } = await supabase
         .from("measurements")
         .select(MEAS_COLS)
         .eq("sheet_id", currentSheet.id);
-      setMeasurements((data as Measurement[]) ?? []);
+      if (live) setMeasurements((data as Measurement[]) ?? []);
     })();
+    return () => {
+      live = false;
+    };
   }, [supabase, currentSheet?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fitWidth = useCallback(async () => {
@@ -2686,19 +2713,45 @@ export default function PlanViewer({
 
   // Order matters on a phone: the tools row scrolls sideways, so the ones used
   // most sit first and stay visible.
-  const TOOLS: { id: Tool; label: string }[] = [
-    { id: "select", label: "Select" },
-    { id: "browse", label: "Pan" },
-    { id: "line", label: "Line" },
-    { id: "area", label: "Area" },
-    { id: "count", label: "Count" },
-    { id: "polyline", label: "Polyline" },
-    { id: "wall", label: "Wall" },
-    { id: "volume", label: "Volume" },
-    { id: "leader", label: "Leader" },
-    { id: "calibrate", label: "Calibrate" },
-    { id: "crop", label: "Crop" },
+  const TOOLS: { id: Tool; label: string; icon: (p: ToolIconProps) => React.ReactElement }[] = [
+    { id: "select", label: "Select", icon: SelectIcon },
+    { id: "browse", label: "Pan", icon: PanIcon },
+    { id: "line", label: "Line", icon: LineIcon },
+    { id: "area", label: "Area", icon: AreaIcon },
+    { id: "count", label: "Count", icon: CountIcon },
+    { id: "polyline", label: "Polyline", icon: PolylineIcon },
+    { id: "wall", label: "Wall", icon: WallIcon },
+    { id: "volume", label: "Volume", icon: VolumeIcon },
+    { id: "leader", label: "Leader", icon: LeaderIcon },
+    { id: "calibrate", label: "Calibrate", icon: CalibrateIcon },
+    { id: "crop", label: "Crop", icon: CropIcon },
   ];
+
+  // The scale preset picker — in the phone's top row and the desktop toolbar.
+  const scaleSelect = (cls: string) => (
+    <select
+      value={currentScale?.preset ?? ""}
+      onChange={(e) => applyPreset(e.target.value)}
+      aria-label="Sheet scale"
+      className={`rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none ${cls}`}
+    >
+      <option value="">{hasScale && !currentScale?.preset ? "Manual" : "Not set"}</option>
+      <optgroup label="Architectural">
+        {PRESETS.filter((p) => p.group === "Architectural").map((p) => (
+          <option key={p.label} value={p.label}>
+            {p.label}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="Civil / Engineering">
+        {PRESETS.filter((p) => p.group === "Civil").map((p) => (
+          <option key={p.label} value={p.label}>
+            {p.label}
+          </option>
+        ))}
+      </optgroup>
+    </select>
+  );
 
   // Running totals for this sheet, grouped by layer and summed per unit.
   // One group per layer: rows + summed totals. The panel shows these groups
@@ -2978,9 +3031,12 @@ export default function PlanViewer({
 
       {/* Center */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* Toolbar */}
-        <div className="glass-strong z-10 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
-          <div className="flex items-center gap-2 text-muted">
+        {/* Toolbar. Phone (below md): row 1 = sheets · undo/redo · scale · More;
+            row 2 = every tool as a 6-column grid of 44 px icon buttons, none
+            hidden off the edge. Zoom, legend, export and the panels sit in the
+            More sheet. md and up: one wrapping row, icons with labels. */}
+        <div className="glass-strong z-10 flex flex-col gap-1.5 px-2 py-1.5 text-sm md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-3 md:px-4 md:py-2.5">
+          <div className="flex items-center gap-1.5 text-muted md:gap-2">
             {!navOpen ? (
               <button
                 type="button"
@@ -3009,52 +3065,52 @@ export default function PlanViewer({
             >
               ↷
             </button>
+            {/* Phone: the scale and the More sheet share row 1 */}
+            <label className="flex min-w-0 flex-1 items-center gap-1 md:hidden">
+              <span className="text-[10px] uppercase tracking-wider">Scale</span>
+              {scaleSelect("min-w-0 flex-1 text-xs")}
+            </label>
+            <button
+              type="button"
+              onClick={() => setMoreOpen(true)}
+              aria-label="More viewer controls"
+              aria-haspopup="dialog"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border text-foreground hover:border-brand md:hidden"
+            >
+              <MoreIcon className="h-5 w-5" />
+            </button>
           </div>
 
-          {/* Scrolls sideways on narrow screens instead of clipping tools off. */}
-          <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto">
-            {TOOLS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => selectTool(t.id)}
-                className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1 transition-colors ${
-                  tool === t.id
-                    ? "border-brand bg-brand/15 text-foreground"
-                    : "border-border text-muted hover:border-brand"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          {/* Tools: a 6-column grid on phones (two rows, all visible); a row
+              of icon + label buttons from md up. */}
+          <div className="grid grid-cols-6 gap-1 md:flex md:min-w-0 md:max-w-full md:items-center md:overflow-x-auto">
+            {TOOLS.map((t) => {
+              const Ico = t.icon;
+              const active = tool === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => selectTool(t.id)}
+                  aria-pressed={active}
+                  title={t.label}
+                  className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-md border px-1 text-[10px] leading-none transition-colors md:min-h-0 md:shrink-0 md:flex-row md:gap-1.5 md:whitespace-nowrap md:px-2.5 md:py-1 md:text-xs ${
+                    active
+                      ? "border-brand bg-brand/15 text-foreground"
+                      : "border-border text-muted hover:border-brand"
+                  }`}
+                >
+                  <Ico className="h-5 w-5 md:h-4 md:w-4" />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-3 text-muted">
+          <div className="hidden items-center gap-3 text-muted md:flex">
             <label className="flex items-center gap-1.5">
               <span className="text-xs uppercase tracking-wider">Scale</span>
-              <select
-                value={currentScale?.preset ?? ""}
-                onChange={(e) => applyPreset(e.target.value)}
-                className="rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none"
-              >
-                <option value="">
-                  {hasScale && !currentScale?.preset ? "Manual" : "Not set"}
-                </option>
-                <optgroup label="Architectural">
-                  {PRESETS.filter((p) => p.group === "Architectural").map((p) => (
-                    <option key={p.label} value={p.label}>
-                      {p.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Civil / Engineering">
-                  {PRESETS.filter((p) => p.group === "Civil").map((p) => (
-                    <option key={p.label} value={p.label}>
-                      {p.label}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
+              {scaleSelect("")}
             </label>
             <div className="flex items-center gap-1">
               <button
@@ -3114,32 +3170,176 @@ export default function PlanViewer({
           </div>
         </div>
 
-        {/* New-measurement attributes (Line / Polyline / Area / Wall / Volume / Count) */}
+        {/* Phone "More" sheet: zoom, legend, export, panels */}
+        {moreOpen ? (
+          <div
+            className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 md:hidden"
+            onClick={() => setMoreOpen(false)}
+          >
+            <div
+              role="dialog"
+              aria-label="Viewer controls"
+              className="glass-strong pb-safe w-full max-w-sm rounded-t-2xl p-3 text-sm"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-muted">Zoom</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setScale((s) => Math.max(0.1, s / 1.25))}
+                    aria-label="Zoom out"
+                    className="h-11 w-11 rounded-md border border-border text-lg text-foreground"
+                  >
+                    −
+                  </button>
+                  <span className="w-14 text-center tabular-nums text-foreground">{Math.round(scale * 100)}%</span>
+                  <button
+                    type="button"
+                    onClick={() => setScale((s) => Math.min(6, s * 1.25))}
+                    aria-label="Zoom in"
+                    className="h-11 w-11 rounded-md border border-border text-lg text-foreground"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    onClick={fitWidth}
+                    className="h-11 rounded-md border border-border px-3 text-foreground"
+                  >
+                    Fit
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-1">
+                {ledgerRows.length ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateLedger({ visible: !currentLedger?.visible });
+                      setMoreOpen(false);
+                    }}
+                    className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                  >
+                    {currentLedger?.visible ? "Hide legend" : "Show legend"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    openExport();
+                  }}
+                  disabled={status !== "ready"}
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10 disabled:opacity-40"
+                >
+                  Export marked-up PDF…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPanelOpen((o) => !o);
+                    setMoreOpen(false);
+                  }}
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                >
+                  {panelOpen ? "Hide measurements panel" : "Show measurements panel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNavOpen((o) => !o);
+                    setMoreOpen(false);
+                  }}
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                >
+                  {navOpen ? "Hide sheet list" : "Show sheet list"}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(false)}
+                className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-white/10 text-muted hover:text-foreground"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* New-measurement attributes (Line / Polyline / Area / Wall / Volume / Count).
+            One short row: the layer name takes the width; on phones the color is
+            a single swatch that opens a popover of 44 px swatches (twelve
+            inline dots each stretched to 44 px by the touch rule was what made
+            this bar so tall). */}
         {tool === "line" ||
         tool === "polyline" ||
         tool === "area" ||
         tool === "wall" ||
         tool === "volume" ||
         tool === "count" ? (
-          <div className="glass z-10 flex flex-wrap items-center gap-3 px-4 py-2 text-sm">
-            <span className="text-xs uppercase tracking-wider text-muted">Layer</span>
-            <input
-              value={layer}
-              onChange={(e) => setLayer(e.target.value)}
-              placeholder="e.g. Exterior wall"
-              className="rounded-md border border-border bg-background px-2 py-1 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
-            />
-            <span className="text-xs uppercase tracking-wider text-muted">Color</span>
-            <div className="flex items-center gap-1">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  style={{ background: c }}
-                  className={`h-5 w-5 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
-                />
-              ))}
+          <div className="glass z-10 flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1 text-xs md:gap-3 md:px-4 md:py-2 md:text-sm">
+            <label className="flex min-w-0 flex-1 basis-36 items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
+              <input
+                value={layer}
+                onChange={(e) => setLayer(e.target.value)}
+                placeholder="e.g. Exterior wall"
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none md:w-48 md:flex-none"
+              />
+            </label>
+            <div className="relative flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
+              {/* Phone: one swatch → popover */}
+              <button
+                type="button"
+                onClick={() => setColorOpen((o) => !o)}
+                aria-label="Pick a color"
+                aria-haspopup="true"
+                aria-expanded={colorOpen}
+                className="flex h-10 w-10 min-h-0 items-center justify-center rounded-md border border-border md:hidden"
+              >
+                <span className="h-5 w-5 rounded-full" style={{ background: color }} />
+              </button>
+              {/* md+: the dots inline */}
+              <div className="hidden items-center gap-1 md:flex">
+                {COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setColor(c)}
+                    aria-label={`Color ${c}`}
+                    aria-pressed={color === c}
+                    style={{ background: c }}
+                    className={`h-5 w-5 min-h-0 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
+                  />
+                ))}
+              </div>
+              {colorOpen ? (
+                <>
+                  <div className="fixed inset-0 z-20 md:hidden" onClick={() => setColorOpen(false)} />
+                  <div className="glass-strong absolute left-0 top-full z-30 mt-1 grid grid-cols-6 gap-0.5 rounded-xl p-1.5 md:hidden">
+                    {COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => {
+                          setColor(c);
+                          setColorOpen(false);
+                        }}
+                        aria-label={`Color ${c}`}
+                        aria-pressed={color === c}
+                        className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-white/10"
+                      >
+                        <span
+                          className={`h-6 w-6 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
+                          style={{ background: c }}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </div>
             {tool === "wall" ? (
               <>
@@ -3246,7 +3446,9 @@ export default function PlanViewer({
               </div>
             ) : null}
             {!hasScale && tool !== "count" ? (
-              <span className="text-xs text-brand-soft">Set a scale before measuring.</span>
+              <span className="basis-full text-brand-soft md:basis-auto md:text-xs">
+                Set a scale before measuring.
+              </span>
             ) : null}
           </div>
         ) : null}
