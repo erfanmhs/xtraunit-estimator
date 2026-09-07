@@ -23,6 +23,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
 import StageJump from "@/components/StageNav";
+import SwipeRow from "@/components/SwipeRow";
 import { polishSheetNotes } from "./actions";
 import {
   SelectIcon,
@@ -5540,10 +5541,36 @@ export default function PlanViewer({
                     !isHidden &&
                     MEASURE_TOOLS.includes(tool) &&
                     layerKeyOf(layer) === g.layer;
+                  const toggleHidden = () =>
+                    setHiddenLayers((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(g.layer)) next.delete(g.layer);
+                      else next.add(g.layer);
+                      return next;
+                    });
                   return (
-                    <div
+                    // Touch: swipe left for Hide / Delete, hold for every
+                    // action. The row's own buttons stay for everyone.
+                    <SwipeRow
                       key={g.layer}
-                      className={`mb-1 rounded-md border border-white/5 ${isHidden ? "opacity-50" : ""}`}
+                      className="mb-1 rounded-md"
+                      actions={[
+                        { label: isHidden ? "Show" : "Hide", onClick: toggleHidden },
+                        { label: "Delete", onClick: () => deleteLayer(g.rows), tone: "danger" },
+                      ]}
+                      sheetActions={[
+                        {
+                          label: isRecording ? "Stop recording" : "Draw into this layer",
+                          onClick: () => (isRecording ? setTool("select") : continueLayer(g)),
+                          tone: "primary",
+                        },
+                        { label: "Rename / settings", onClick: () => openLayerEditor(g) },
+                        { label: isHidden ? "Show on sheet" : "Hide from sheet", onClick: toggleHidden },
+                        { label: "Delete layer", onClick: () => deleteLayer(g.rows), tone: "danger" },
+                      ]}
+                    >
+                    <div
+                      className={`rounded-md border border-white/5 ${isHidden ? "opacity-50" : ""}`}
                     >
                       <div className="flex items-center gap-1.5 px-2 py-1.5">
                         {/* Record toggle: red = drawing adds to this layer; green = idle */}
@@ -5735,6 +5762,7 @@ export default function PlanViewer({
                         </div>
                       ) : null}
                     </div>
+                    </SwipeRow>
                   );
                 })
               )}
