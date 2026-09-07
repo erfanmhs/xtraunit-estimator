@@ -744,6 +744,10 @@ export default function PlanViewer({
   }, [measurements]);
   const isTemp = (id: string) => id.startsWith("tmp-");
   const [layer, setLayer] = useState("");
+  const layerRef = useRef(layer); // for the sheet-load effect (no stale closure)
+  useEffect(() => {
+    layerRef.current = layer;
+  }, [layer]);
   const [color, setColor] = useState(COLORS[0]);
   const [wallHeight, setWallHeight] = useState("8");
   const [wallSided, setWallSided] = useState<"single" | "double">("single");
@@ -872,8 +876,21 @@ export default function PlanViewer({
       const { data } = await supabase
         .from("measurements")
         .select(MEAS_COLS)
-        .eq("sheet_id", currentSheet.id);
-      if (live) setMeasurements((data as Measurement[]) ?? []);
+        .eq("sheet_id", currentSheet.id)
+        .order("created_at", { ascending: true });
+      if (!live) return;
+      const rows = (data as Measurement[]) ?? [];
+      setMeasurements(rows);
+      // Keep recording where the sheet left off: with no layer chosen yet
+      // (fresh load, first visit to this sheet), the chip takes the newest
+      // run's layer and color instead of falling back to "New layer…" — which
+      // read as "my layer name didn't save" after a reload.
+      const newest = rows[rows.length - 1];
+      if (newest && !layerRef.current.trim()) {
+        const key = layerKeyOf(newest.layer);
+        setLayer(key === "Unlabeled" ? "" : key);
+        if (newest.color) setColor(newest.color);
+      }
     })();
     return () => {
       live = false;
@@ -1635,7 +1652,7 @@ export default function PlanViewer({
       geometry,
       value,
       unit,
-      layer: layer || null,
+      layer: layer.trim() || null,
       color,
       wall_sided: null,
       wall_height: null,
@@ -1667,7 +1684,7 @@ export default function PlanViewer({
         geometry,
         value,
         unit,
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
         ...extra,
       })
@@ -1742,7 +1759,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
         wall_sided: null,
         wall_height: null,
@@ -1775,7 +1792,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
         text: "",
         font_size: LEADER_FONT_DEFAULT,
@@ -1934,7 +1951,7 @@ export default function PlanViewer({
         geometry,
         value: 1,
         unit: "ea",
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
       })
       .select(MEAS_COLS)
@@ -4067,22 +4084,38 @@ export default function PlanViewer({
                           value={layer}
                           onChange={(e) => setLayer(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === "Escape") setLayerOpen(false);
+                            if (e.key === "Enter" || e.key === "Escape") {
+                              setLayer((v) => v.trim());
+                              setLayerOpen(false);
+                            }
                           }}
+                          onBlur={() => setLayer((v) => v.trim())}
                           autoFocus={!layer.trim()}
                           spellCheck
+                          autoCapitalize="sentences"
+                          enterKeyHint="done"
                           placeholder="New layer name (e.g. Exterior wall)"
                           aria-label="Layer name"
                           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-2 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
                         />
                         <button
                           type="button"
-                          onClick={() => setLayerOpen(false)}
+                          onClick={() => {
+                            setLayer((v) => v.trim());
+                            setLayerOpen(false);
+                          }}
                           className="glass-brand min-h-10 shrink-0 rounded-md px-3 font-medium text-foreground"
                         >
                           Done
                         </button>
                       </div>
+                      <p className="px-1 pt-1 text-[10px] text-muted">
+                        {layer.trim()
+                          ? layerGroups.some((g) => g.layer === layerKeyOf(layer))
+                            ? `Continuing "${layerKeyOf(layer)}" — new runs add to it.`
+                            : `New layer "${layer.trim()}" — saved with the first run you draw.`
+                          : "Type a name for the runs you're about to draw, or pick a layer below."}
+                      </p>
                       {layerGroups.length ? (
                         <>
                           <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-muted">
@@ -4109,6 +4142,31 @@ export default function PlanViewer({
                                   <span className="min-w-0 flex-1 truncate">{g.layer}</span>
                                   <span className="shrink-0 text-[10px] text-muted">
                                     {g.lines.length ? g.lines.join(" · ") : `${g.rows.length}`}
+                                  </span>
+                                  {/* Rename an existing layer (all its runs) in the panel editor */}
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`Rename ${g.layer}`}
+                                    title="Rename this layer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLayerOpen(false);
+                                      setPanelOpen(true);
+                                      openLayerEditor(g);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setLayerOpen(false);
+                                        setPanelOpen(true);
+                                        openLayerEditor(g);
+                                      }
+                                    }}
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-white/10 hover:text-foreground"
+                                  >
+                                    ✎
                                   </span>
                                 </button>
                               );
