@@ -290,8 +290,30 @@ nothing has to be relearned.
 | Two-finger pan mid-shape left a stray point | Yes — a second finger on a pill or card was never seen as a pinch | Every finger on the viewer is counted (capture phase); a second finger anywhere cancels the aim, and for 350 ms after a multi-touch ends nothing can be placed. Cancelled pointers are cleaned up |
 | Continue a wall / polyline past its ends | No | "+" handles just past the first and last point of a selected open path: press to add a point there and drag it |
 | Aiming with the loupe opened the menu | Yes (a still finger = long-press) | In drawing tools a hold never opens anything mid-shape or on empty paper; the lift still places the point. Between shapes a hold still grabs a vertex or opens a shape's menu; Select keeps the full hold |
+| Zoomed out, the next point "finished" the run | Yes — "tap the last point again = finish" used a radius that grows in drawing units when zoomed out | A finger's finish radius is tight (0.9 × the hit tolerance; the Finish button is the reliable way). A mouse keeps the forgiving radius |
+| Closing a wall / polyline loop lost the last segment | Yes — tapping near the first point finished without it | An open run tapped back at its start gets a closing point snapped exactly onto the first point, then finishes. Filled shapes close as before |
+| Measurements panel on a phone | Behind the ⋯ sheet; opened as a side column that squeezed the drawing | A list button (with the count) in the top row toggles it; it opens as a bottom sheet over the drawing, and a tap on the drawing closes it |
+| Cool-down after a multi-touch | 350 ms | 250 ms — quicker to pick up the next point after a pan |
 
 ---
+
+## 10a. The input pipeline (why placing a point is now smooth)
+
+Three things made "zoom, pan, tap the next point" feel laggy and hit-or-miss,
+and each is now handled on its own path:
+
+| Stage | Before | Now |
+|---|---|---|
+| **Aiming** (one finger down, sliding) | Every move updated React state for the loupe and the rubber band → the whole viewer and its SVG re-rendered at touch-event rate | The loupe and the rubber band are DOM nodes updated directly on each move; the loupe bitmap is redrawn once per animation frame. Zero renders while aiming |
+| **Placing** (lift) | The point landed where the finger left the glass; fingers roll 3–8 px on lift | The point is where the finger was **held** ~80 ms before the lift, unless it clearly slid since. A still finger's landing spot counts as its held spot |
+| **Pinch / pan** (two fingers) | Each frame re-rendered at the new zoom | The page scales and moves with one CSS transform per move; the real zoom is committed once on lift, keeping the page point under the fingers exactly where they left it |
+| **Re-raster** (sharpening after a zoom) | Started 160 ms after the zoom, sized the visible canvas first (blanking the sheet), and ran under the next tap | Waits until no finger is on the drawing and the last gesture is 400 ms old; draws into an offscreen bitmap and swaps it in — the sheet never disappears |
+| **Cool-down** | — | 250 ms after any multi-touch during which a lift places nothing (a trailing finger can't leave a point) |
+
+The layer a run records into is a chip in the options bar: one tap lists
+every layer on the sheet (continue one, with its color and settings) or takes
+a new name. It sticks across tool switches; a red dot shows it is recording
+into an existing layer.
 
 ## 11. Later (not in this round)
 

@@ -474,6 +474,7 @@ export default function PlanViewer({
   // color popover — both keep the top of the screen to two short rows.
   const [moreOpen, setMoreOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
+  const [layerOpen, setLayerOpen] = useState(false); // the layer picker popover
 
   // Narrow windows (tablet, half-screen laptop): start with both side panels
   // collapsed so the DRAWING gets the width, and collapse again if the window
@@ -526,6 +527,16 @@ export default function PlanViewer({
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
+  // `phone` = a narrow screen (below Tailwind's sm): the measurements panel
+  // becomes a bottom sheet over the drawing instead of a side column.
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setPhone(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
   // Fingers currently down on the viewport (client coords) → pinch when two.
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist0: number; scale0: number; fx: number; fy: number } | null>(null);
@@ -558,7 +569,8 @@ export default function PlanViewer({
   function fingerUp(id: number) {
     fingersRef.current.delete(id);
     if (fingersRef.current.size === 0 && multiUntilRef.current === Number.MAX_SAFE_INTEGER)
-      multiUntilRef.current = Date.now() + 350;
+      multiUntilRef.current = Date.now() + 250;
+    idleUntilRef.current = Date.now() + 400;
   }
   // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "thinking" | "unsupported">("idle");
@@ -573,8 +585,20 @@ export default function PlanViewer({
   const rowPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<{ x: number; y: number; t: number } | null>(null);
   // The magnifier that shows what's under the fingertip (center-column coords).
-  const [loupe, setLoupe] = useState<{ vx: number; vy: number; pt: Pt } | null>(null);
+  // The loupe and the rubber band are driven WITHOUT React state while a
+  // finger aims: their DOM is updated directly on each move (a state update
+  // would re-render this whole component and its SVG at touch-event rate —
+  // that was the lag while placing a point).
+  const loupeElRef = useRef<HTMLDivElement>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const loupeRafRef = useRef<number | null>(null);
+  const rubberRef = useRef<SVGGElement>(null);
+  // Where the finger has been during an aim (client px): the point placed on
+  // lift is where the finger was HELD, not where it rolled off the glass.
+  const aimSamplesRef = useRef<{ t: number; x: number; y: number }[]>([]);
+  // The page bitmap is only re-rasterized once no finger is down and the
+  // last gesture is this old — never in the middle of tapping.
+  const idleUntilRef = useRef(0);
   // ── Touch editing (see TOUCH-INTERACTION.md) ───────────────────────────────
   // The vertex the nudge pad works on (a tapped handle); hold-to-grab pulse;
   // whole-shape move; and the press-vs-drag bookkeeping for a handle.
@@ -831,9 +855,14 @@ export default function PlanViewer({
       });
       const canvas = canvasRef.current;
       if (!canvas) return;
-      canvas.width = Math.ceil(w * rasterScale);
-      canvas.height = Math.ceil(h * rasterScale);
-      const ctx = canvas.getContext("2d")!;
+      // Double-buffered: draw into an offscreen bitmap and swap it in when
+      // done. Sizing the visible canvas first would blank the sheet for the
+      // whole render — the "page disappears after a pinch" effect on phones.
+      const buf = document.createElement("canvas");
+      buf.width = Math.ceil(w * rasterScale);
+      buf.height = Math.ceil(h * rasterScale);
+      const ctx = buf.getContext("2d");
+      if (!ctx) return;
       if (taskRef.current) {
         try {
           taskRef.current.cancel();
@@ -843,7 +872,15 @@ export default function PlanViewer({
       taskRef.current = task;
       try {
         await task.promise;
-      } catch {}
+      } catch {
+        return;
+      }
+      if (cancelled) return;
+      canvas.width = buf.width;
+      canvas.height = buf.height;
+      canvas.getContext("2d")?.drawImage(buf, 0, 0);
+      buf.width = 0; // release the buffer's memory now, not at GC time
+      buf.height = 0;
     })();
     return () => {
       cancelled = true;
@@ -923,37 +960,21 @@ export default function PlanViewer({
       baseDims.w && baseDims.h ? Math.sqrt(maxPixels / (baseDims.w * baseDims.h)) : Infinity;
     const target = Math.min(scale, cap);
     if (target === rasterScale) return;
-    const t = setTimeout(() => setRasterScale(target), 160);
+    // …and only once the user is idle: no finger on the drawing and the last
+    // gesture at least 400 ms old. Rasterizing is the heaviest thing this
+    // page does; running it under a tap is what made taps feel dead.
+    let t: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      if (fingersRef.current.size > 0 || Date.now() < idleUntilRef.current) {
+        t = setTimeout(tick, 120);
+        return;
+      }
+      setRasterScale(target);
+    };
+    t = setTimeout(tick, 160);
     return () => clearTimeout(t);
   }, [scale, rasterScale, coarse, baseDims.w, baseDims.h]);
 
-  // Draw the loupe: the bitmap around the fingertip, magnified, with a crosshair.
-  useEffect(() => {
-    const lc = loupeCanvasRef.current;
-    const src = canvasRef.current;
-    if (!loupe || !lc || !src) return;
-    const ctx = lc.getContext("2d");
-    if (!ctx) return;
-    const SIZE = 120;
-    const MAG = 2.5;
-    const span = SIZE / MAG / scale; // page points across the loupe
-    const sx = (loupe.pt.x - span / 2) * rasterScale;
-    const sy = (loupe.pt.y - span / 2) * rasterScale;
-    const sw = span * rasterScale;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, SIZE, SIZE);
-    try {
-      ctx.drawImage(src, sx, sy, sw, sw, 0, 0, SIZE, SIZE);
-    } catch {}
-    ctx.strokeStyle = "#A01C2D";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(SIZE / 2, 0);
-    ctx.lineTo(SIZE / 2, SIZE);
-    ctx.moveTo(0, SIZE / 2);
-    ctx.lineTo(SIZE, SIZE / 2);
-    ctx.stroke();
-  }, [loupe, scale, rasterScale]);
 
   // Keyboard: Esc cancels/steps back, Delete removes selection, Space pans.
   useEffect(() => {
@@ -1277,10 +1298,9 @@ export default function PlanViewer({
     setDraft([]);
     setHover(null);
     finishCount();
-    if (MEASURE_TOOLS.includes(t)) {
-      setLayer("");
-      setColor(pickNextColor());
-    }
+    // The active layer sticks across tool switches (keep recording into the
+    // same layer); only an empty layer gets a fresh color.
+    if (MEASURE_TOOLS.includes(t) && !layer.trim()) setColor(pickNextColor());
   }
 
   // "Digitizer" continue: re-arm a layer group so new draws keep adding to it.
@@ -1906,7 +1926,7 @@ export default function PlanViewer({
         setSelectedId(id);
       }
       setMenu(id ? { x: cx, y: cy, kind: "measurement", id } : { x: cx, y: cy, kind: "canvas" });
-      setLoupe(null);
+      hideLoupe();
     }, 450);
   }
   function cancelLongPress() {
@@ -1918,16 +1938,149 @@ export default function PlanViewer({
   function cancelTouchTap() {
     tapRef.current = null;
     cancelLongPress();
-    setLoupe(null);
+    hideLoupe();
+    clearRubber();
+    aimSamplesRef.current = [];
+  }
+  function clientToPoint(x: number, y: number): Pt {
+    const rect = svgRef.current!.getBoundingClientRect();
+    return { x: (x - rect.left) / scale, y: (y - rect.top) / scale };
+  }
+  function recordAim(x: number, y: number) {
+    const s = aimSamplesRef.current;
+    s.push({ t: Date.now(), x, y });
+    if (s.length > 24) s.shift();
+  }
+  // The point the finger meant: the position it was holding ~80 ms before the
+  // lift, unless it clearly moved since (a deliberate slide). Fingers roll a
+  // few pixels as they leave the glass; this ignores that.
+  function stableAimPoint(upX: number, upY: number): { x: number; y: number } {
+    const now = Date.now();
+    const s = aimSamplesRef.current;
+    for (let i = s.length - 1; i >= 0; i--) {
+      const q = s[i];
+      if (now - q.t >= 80)
+        return Math.hypot(q.x - upX, q.y - upY) <= 8 ? { x: q.x, y: q.y } : { x: upX, y: upY };
+    }
+    return { x: upX, y: upY };
+  }
+  // ── Loupe (imperative) ────────────────────────────────────────────────────
+  function drawLoupe(pt: Pt) {
+    const lc = loupeCanvasRef.current;
+    const src = canvasRef.current;
+    if (!lc || !src) return;
+    const ctx = lc.getContext("2d");
+    if (!ctx) return;
+    const SIZE = 120;
+    const MAG = 2.5;
+    const span = SIZE / MAG / scale; // page points across the loupe
+    const sx = (pt.x - span / 2) * rasterScale;
+    const sy = (pt.y - span / 2) * rasterScale;
+    const sw = span * rasterScale;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    try {
+      ctx.drawImage(src, sx, sy, sw, sw, 0, 0, SIZE, SIZE);
+    } catch {}
+    ctx.strokeStyle = "#A01C2D";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(SIZE / 2, 0);
+    ctx.lineTo(SIZE / 2, SIZE);
+    ctx.moveTo(0, SIZE / 2);
+    ctx.lineTo(SIZE, SIZE / 2);
+    ctx.stroke();
   }
   function showLoupe(e: React.PointerEvent) {
     showLoupeAt(e.clientX, e.clientY, evtToPoint(e));
   }
   function showLoupeAt(clientX: number, clientY: number, pt: Pt) {
     const host = viewportRef.current?.parentElement; // the center column (relative)
-    if (!host) return;
+    const el = loupeElRef.current;
+    if (!host || !el) return;
     const hr = host.getBoundingClientRect();
-    setLoupe({ vx: clientX - hr.left, vy: clientY - hr.top, pt });
+    const vx = clientX - hr.left;
+    const vy = clientY - hr.top;
+    el.hidden = false;
+    el.style.left = `${Math.max(4, vx - 60)}px`;
+    // Above the finger; flips below it near the top edge of the screen.
+    el.style.top = `${vy < 170 ? vy + 50 : vy - 60 - 90}px`;
+    if (loupeRafRef.current == null)
+      loupeRafRef.current = requestAnimationFrame(() => {
+        loupeRafRef.current = null;
+        drawLoupe(pt);
+      });
+  }
+  function hideLoupe() {
+    const el = loupeElRef.current;
+    if (el) el.hidden = true;
+  }
+  // ── Rubber band while a finger aims (imperative) ──────────────────────────
+  function aimLabel(pts: Pt[]): string | null {
+    if (tool === "calibrate" || !currentScale?.x || !currentScale?.y) return null;
+    const sx = currentScale.x;
+    const sy = currentScale.y;
+    if (tool === "area") return `${polyAreaSqFt(pts, sx, sy).toFixed(0)} sf`;
+    if (tool === "wall")
+      return `${(geomLenFeet(pts, sx, sy) * (parseFloat(wallHeight) || 0) * (wallSided === "double" ? 2 : 1)).toFixed(0)} sf`;
+    if (tool === "volume")
+      return `${(
+        (volMode === "area" ? polyAreaSqFt(pts, sx, sy) : geomLenFeet(pts, sx, sy) * (parseFloat(volWidth) || 0)) *
+        (parseFloat(volDepth) || 0)
+      ).toFixed(0)} cf`;
+    return `${geomLenFeet(pts, sx, sy).toFixed(1)} ft`;
+  }
+  function updateRubber(pt: Pt) {
+    const g = rubberRef.current;
+    if (!g || draft.length === 0) return;
+    g.style.display = "";
+    const q = (sel: string) => g.querySelector<SVGElement>(`[data-aim="${sel}"]`);
+    const last = px(draft[draft.length - 1]);
+    const first = px(draft[0]);
+    const a = px(pt);
+    const fill = tool === "area" || (tool === "volume" && volMode === "area");
+    const col = tool === "calibrate" ? "#22d3ee" : color;
+    const seg = q("seg");
+    if (seg) {
+      seg.setAttribute("x1", String(last.x));
+      seg.setAttribute("y1", String(last.y));
+      seg.setAttribute("x2", String(a.x));
+      seg.setAttribute("y2", String(a.y));
+      seg.setAttribute("stroke", col);
+    }
+    const close = q("close");
+    if (close) {
+      if (fill && draft.length >= 2) {
+        close.style.display = "";
+        close.setAttribute("x1", String(a.x));
+        close.setAttribute("y1", String(a.y));
+        close.setAttribute("x2", String(first.x));
+        close.setAttribute("y2", String(first.y));
+        close.setAttribute("stroke", col);
+      } else close.style.display = "none";
+    }
+    const poly = q("fill");
+    if (poly) {
+      if (fill && draft.length >= 2) {
+        poly.style.display = "";
+        poly.setAttribute("points", [...draft, pt].map((p) => `${px(p).x},${px(p).y}`).join(" "));
+        poly.setAttribute("fill", color);
+      } else poly.style.display = "none";
+    }
+    const label = q("label");
+    if (label) {
+      const t = aimLabel([...draft, pt]);
+      if (t) {
+        label.style.display = "";
+        label.textContent = t;
+        label.setAttribute("x", String(a.x + 6));
+        label.setAttribute("y", String(a.y - 6));
+      } else label.style.display = "none";
+    }
+  }
+  function clearRubber() {
+    const g = rubberRef.current;
+    if (g) g.style.display = "none";
   }
   // Zoom so the page point under (clientX, clientY) stays put — the tap
   // fallback for pinch (double-tap in Pan mode, the +/− buttons).
@@ -1969,15 +2122,25 @@ export default function PlanViewer({
       const minPts = fillShape ? 3 : 2;
       const last = draft[draft.length - 1];
       const first = draft[0];
-      const nearLast = Math.hypot(last.x - pt.x, last.y - pt.y) <= TOL() * 1.6;
+      // "Tap the last point again = finish" — a finger gets a tight radius
+      // (it has the Finish button; zoomed out, a loose one swallowed real
+      // points as accidental finishes). A mouse keeps the forgiving one.
+      const finishR = TOL() * (coarse ? 0.9 : 1.6);
+      const nearLast = Math.hypot(last.x - pt.x, last.y - pt.y) <= finishR;
       const nearFirst = Math.hypot(first.x - pt.x, first.y - pt.y) <= TOL() * 1.6;
-      // click the last vertex (incl. a double-click), or the first vertex to
-      // close a filled shape, finishes the run
-      if (draft.length >= minPts && (nearLast || nearFirst)) {
-        if (tool === "area") finalizeArea(draft);
-        else if (tool === "wall") finalizeWall(draft);
-        else if (tool === "volume") finalizeVolume(draft);
-        else finalizePolyline(draft);
+      const finish = (g: Pt[]) => {
+        if (tool === "area") finalizeArea(g);
+        else if (tool === "wall") finalizeWall(g);
+        else if (tool === "volume") finalizeVolume(g);
+        else finalizePolyline(g);
+      };
+      if (draft.length >= minPts && nearLast) {
+        finish(draft);
+      } else if (draft.length >= minPts && nearFirst) {
+        // Back at the start: a filled shape closes by itself; an open run
+        // (wall, polyline, linear volume) gets its closing segment — snapped
+        // exactly onto the first point — instead of ending one short.
+        finish(fillShape ? draft : [...draft, { ...first }]);
       } else {
         setDraft((d) => [...d, pt]);
       }
@@ -2011,6 +2174,8 @@ export default function PlanViewer({
       // multi-touch just ended: this finger is navigation, not a point.
       if (fingersRef.current.size > 1 || Date.now() < multiUntilRef.current) return;
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
+      aimSamplesRef.current = [];
+      recordAim(e.clientX, e.clientY); // a still finger sends no moves: the landing spot IS the held spot
       showLoupe(e);
       startLongPress(e.clientX, e.clientY, e.pointerId);
       return;
@@ -2098,8 +2263,10 @@ export default function PlanViewer({
     if (touch && tapRef.current?.id === e.pointerId) {
       if (Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10)
         cancelLongPress();
+      // No React state here — direct DOM updates keep this at frame rate.
+      recordAim(e.clientX, e.clientY);
       showLoupe(e);
-      if (draft.length) setHover(evtToPoint(e));
+      if (draft.length) updateRubber(evtToPoint(e));
       return;
     }
     // Select tool, finger on nothing: a slide is not a selection (and not a
@@ -2168,7 +2335,8 @@ export default function PlanViewer({
     if (e.pointerType === "touch") {
       if (tapRef.current?.id === e.pointerId) {
         const fired = longPressFiredRef.current;
-        const pt = evtToPoint(e);
+        const held = stableAimPoint(e.clientX, e.clientY);
+        const pt = clientToPoint(held.x, held.y);
         cancelTouchTap();
         // A long-press opened the menu, or a pinch happened, or a second
         // finger was involved at any point: no point.
@@ -2182,7 +2350,7 @@ export default function PlanViewer({
         selTapRef.current = null;
         const fired = longPressFiredRef.current;
         cancelLongPress();
-        setLoupe(null);
+        hideLoupe();
         if (fired || pinchedRef.current) return;
         if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) return;
         const id = pickMeasurementAt(evtToPoint(e));
@@ -2216,7 +2384,7 @@ export default function PlanViewer({
       const ds = dragStartRef.current;
       dragRef.current = null;
       dragStartRef.current = null;
-      setLoupe(null);
+      hideLoupe();
       if (!ds?.moved && !ds?.inserted) {
         setEditGeom(null);
         setActiveVertex({ id, index });
@@ -3327,6 +3495,26 @@ export default function PlanViewer({
               <span className="text-[10px] uppercase tracking-wider">Scale</span>
               {scaleSelect("min-w-0 flex-1 text-xs")}
             </label>
+            {/* Phone: the measurements panel is one tap away (it opens as a
+                bottom sheet; tapping the drawing closes it). */}
+            <button
+              type="button"
+              onClick={() => setPanelOpen((o) => !o)}
+              aria-pressed={panelOpen}
+              aria-label={panelOpen ? "Hide measurements" : "Show measurements"}
+              className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-foreground sm:hidden ${
+                panelOpen ? "border-brand bg-brand/15" : "border-border hover:border-brand"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+                <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" strokeLinecap="round" />
+              </svg>
+              {measurements.length ? (
+                <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] leading-4 text-white">
+                  {measurements.length}
+                </span>
+              ) : null}
+            </button>
             <button
               type="button"
               onClick={() => setMoreOpen(true)}
@@ -3536,15 +3724,83 @@ export default function PlanViewer({
         tool === "volume" ||
         tool === "count" ? (
           <div className="glass z-10 flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1 text-xs md:gap-3 md:px-4 md:py-2 md:text-sm">
-            <label className="flex min-w-0 flex-1 basis-36 items-center gap-1.5">
+            {/* Layer picker: the layer new runs record into. One tap shows
+                every layer on this sheet (continue one) or a field for a new
+                name. Sticks across tool switches. */}
+            <div className="relative flex min-w-0 flex-1 basis-40 items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
-              <input
-                value={layer}
-                onChange={(e) => setLayer(e.target.value)}
-                placeholder="e.g. Exterior wall"
-                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none md:w-48 md:flex-none"
-              />
-            </label>
+              <button
+                type="button"
+                onClick={() => setLayerOpen((o) => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={layerOpen}
+                title="The layer new runs are added to"
+                className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-left text-foreground hover:border-brand md:min-h-0 md:w-56 md:flex-none"
+              >
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: color }} />
+                <span className={`min-w-0 flex-1 truncate ${layer.trim() ? "" : "text-muted/70"}`}>
+                  {layer.trim() ||
+                    (layerGroups.some((g) => g.layer === "Unlabeled") ? "Unlabeled" : "New layer…")}
+                </span>
+                {layerGroups.some((g) => g.layer === layerKeyOf(layer)) ? (
+                  <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" title="Recording into this layer" />
+                ) : null}
+                <span className="text-muted" aria-hidden>▾</span>
+              </button>
+              {layerOpen ? (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setLayerOpen(false)} />
+                  <div className="glass-strong absolute left-0 top-full z-30 mt-1 w-80 max-w-[calc(100vw-1rem)] rounded-xl p-1.5 text-sm">
+                    <input
+                      value={layer}
+                      onChange={(e) => setLayer(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === "Escape") setLayerOpen(false);
+                      }}
+                      autoFocus={!layer.trim()}
+                      spellCheck
+                      placeholder="New layer name (e.g. Exterior wall)"
+                      aria-label="Layer name"
+                      className="w-full rounded-md border border-border bg-background px-2 py-2 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
+                    />
+                    {layerGroups.length ? (
+                      <>
+                        <p className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wider text-muted">
+                          Continue a layer on this sheet
+                        </p>
+                        <div className="max-h-56 overflow-y-auto">
+                          {layerGroups.map((g) => {
+                            const active = layerKeyOf(layer) === g.layer;
+                            return (
+                              <button
+                                key={g.layer}
+                                type="button"
+                                onClick={() => {
+                                  continueLayer(g);
+                                  const kind = g.rows[0]?.type as Tool | undefined;
+                                  if (!MEASURE_TOOLS.includes(tool) && kind && MEASURE_TOOLS.includes(kind)) setTool(kind);
+                                  setLayerOpen(false);
+                                }}
+                                className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-foreground hover:bg-white/10 ${
+                                  active ? "bg-brand/15" : ""
+                                }`}
+                              >
+                                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: g.color }} />
+                                <span className="min-w-0 flex-1 truncate">{g.layer}</span>
+                                <span className="shrink-0 text-xs text-muted">
+                                  {g.rows.length} run{g.rows.length === 1 ? "" : "s"}
+                                  {g.lines.length ? ` · ${g.lines.join(", ")}` : ""}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+            </div>
             <div className="relative flex items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
               {/* Phone: one swatch → popover */}
@@ -4177,6 +4433,22 @@ export default function PlanViewer({
                       ) : null}
                     </g>
                   ) : null}
+                  {/* Touch rubber band: updated directly on each move (updateRubber),
+                      never through state. Hidden unless a finger is aiming. */}
+                  <g ref={rubberRef} style={{ display: "none", pointerEvents: "none" }}>
+                    <polygon data-aim="fill" points="" fillOpacity={0.15} stroke="none" style={{ display: "none" }} />
+                    <line data-aim="seg" strokeWidth={2} strokeDasharray="6 4" />
+                    <line data-aim="close" strokeWidth={1.5} strokeDasharray="4 4" opacity={0.6} style={{ display: "none" }} />
+                    <text
+                      data-aim="label"
+                      fontSize={LABEL_FONT}
+                      fontWeight={700}
+                      fill="#fff"
+                      stroke="#000"
+                      strokeWidth={3.5}
+                      style={{ paintOrder: "stroke", display: "none" }}
+                    />
+                  </g>
                   {calib ? (
                     <line
                       x1={px(calib.p1).x}
@@ -4246,21 +4518,17 @@ export default function PlanViewer({
         </div>
 
         {/* Loupe: what's under the fingertip, magnified, above the finger */}
-        {loupe ? (
-          <div
-            className="pointer-events-none absolute z-30 overflow-hidden rounded-full border-2 border-brand bg-white shadow-xl"
-            // Above the finger; flips below it near the top edge of the screen.
-            style={{
-              left: Math.max(4, loupe.vx - 60),
-              top: loupe.vy < 170 ? loupe.vy + 50 : loupe.vy - 60 - 90,
-              width: 120,
-              height: 120,
-            }}
-            aria-hidden
-          >
-            <canvas ref={loupeCanvasRef} width={120} height={120} className="block" />
-          </div>
-        ) : null}
+        {/* Loupe: always in the DOM, shown/moved imperatively while a finger
+            aims (see showLoupeAt) so no render happens per move. */}
+        <div
+          ref={loupeElRef}
+          hidden
+          className="pointer-events-none absolute z-30 overflow-hidden rounded-full border-2 border-brand bg-white shadow-xl"
+          style={{ width: 120, height: 120 }}
+          aria-hidden
+        >
+          <canvas ref={loupeCanvasRef} width={120} height={120} className="block" />
+        </div>
 
         {/* Leader note card: where the note is typed on a phone (the side
             panel is hidden there) — text, text size, arrowhead size. */}
@@ -4676,16 +4944,30 @@ export default function PlanViewer({
         </div>
       </div>
 
-      {/* Right rail (collapsible + resizable): edit selected OR list */}
+      {/* Right rail (collapsible + resizable): edit selected OR list. On a
+          phone it is a bottom sheet over the drawing; a tap on the drawing
+          (the backdrop) closes it. */}
       {panelOpen ? (
         <>
-          <div
-            className="resize-handle z-10"
-            onPointerDown={(e) => startResize("right", e)}
-          />
+          {phone ? (
+            <div
+              className="fixed inset-0 z-30 bg-black/30"
+              aria-hidden
+              onPointerDown={() => setPanelOpen(false)}
+            />
+          ) : (
+            <div
+              className="resize-handle z-10"
+              onPointerDown={(e) => startResize("right", e)}
+            />
+          )}
           <aside
-            className="glass z-10 flex shrink-0 flex-col"
-            style={{ width: panelW }}
+            className={
+              phone
+                ? "glass-strong pb-safe fixed inset-x-0 bottom-0 z-40 flex max-h-[60vh] flex-col overflow-hidden rounded-t-2xl"
+                : "glass z-10 flex shrink-0 flex-col"
+            }
+            style={phone ? undefined : { width: panelW }}
           >
             <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2 py-1.5">
               {/* Next step — lives on top of the measurements panel */}
@@ -4971,7 +5253,8 @@ export default function PlanViewer({
                               ? "Recording — new draws add to this layer. Click to stop."
                               : "Continue this layer — new draws add to it"
                           }
-                          className="shrink-0"
+                          aria-label={isRecording ? "Stop recording into this layer" : "Record into this layer"}
+                          className="flex h-9 w-8 shrink-0 items-center justify-center"
                         >
                           <span
                             className={`inline-block h-2.5 w-2.5 rounded-full ${
