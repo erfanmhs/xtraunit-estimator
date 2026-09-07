@@ -3255,23 +3255,23 @@ export default function PlanViewer({
   const displayW = baseDims.w * scale;
   const displayH = baseDims.h * scale;
 
-  // Lay out the on-drawing labels, nudging each one down until it no longer
-  // overlaps an already-placed label (greedy collision avoidance).
+  // On-drawing labels: ONE per layer, showing the layer's consolidated total,
+  // anchored on the layer's largest run — not a number on every run, which
+  // buried the sheet. The selected run keeps its own label while it's being
+  // edited. Greedy collision avoidance nudges overlapping labels down.
   const LABEL_FONT = 14;
   const labelLayout: Record<string, { x: number; y: number; text: string }> = {};
   {
     const placed: { x: number; y: number; w: number; h: number }[] = [];
     const lineH = LABEL_FONT + 4;
-    for (const m of measurements) {
-      const text = labelText(m);
-      if (!text) continue;
+    const anchorOf = (m: Measurement): Pt | null => {
       const geom = m.id === selectedId && editGeom ? editGeom : m.geometry;
-      if (geom.length === 0) continue;
+      if (geom.length === 0) return null;
       const centered =
         m.type === "area" ||
         m.type === "count" ||
         (m.type === "volume" && m.vol_mode === "area");
-      const anchor = centered
+      return centered
         ? {
             x: geom.reduce((s, p) => s + p.x, 0) / geom.length,
             y: geom.reduce((s, p) => s + p.y, 0) / geom.length,
@@ -3279,6 +3279,8 @@ export default function PlanViewer({
         : geom.length >= 2
           ? { x: (geom[0].x + geom[1].x) / 2, y: (geom[0].y + geom[1].y) / 2 }
           : geom[0];
+    };
+    const place = (key: string, anchor: Pt, text: string) => {
       const base = px(anchor);
       const x = base.x + 6;
       let y = base.y - 6;
@@ -3294,9 +3296,36 @@ export default function PlanViewer({
         tries++;
       }
       placed.push({ x, y, w, h: lineH });
-      labelLayout[m.id] = { x, y, text };
+      labelLayout[key] = { x, y, text };
+    };
+    const byLayer = new Map<string, Measurement[]>();
+    for (const m of measurements) {
+      if (m.type === "leader" || m.value == null) continue;
+      const key = layerKeyOf(m.layer);
+      if (hiddenLayers.has(key)) continue;
+      const list = byLayer.get(key);
+      if (list) list.push(m);
+      else byLayer.set(key, [m]);
+    }
+    for (const [key, rows] of byLayer) {
+      const totals: Record<string, number> = {};
+      for (const m of rows) totals[m.unit || ""] = (totals[m.unit || ""] ?? 0) + (m.value ?? 0);
+      const parts = Object.entries(totals).map(([unit, sum]) =>
+        unit === "cf" ? `${sum.toFixed(0)} cf` : unit === "ea" ? `${sum}` : `${sum.toFixed(1)} ${unit}`,
+      );
+      const biggest = rows.reduce((a, b) => (Math.abs(b.value ?? 0) > Math.abs(a.value ?? 0) ? b : a));
+      const anchor = anchorOf(biggest);
+      if (!anchor) continue;
+      place(`layer:${key}`, anchor, key === "Unlabeled" ? parts.join(" · ") : `${key}: ${parts.join(" · ")}`);
+    }
+    // The run being edited shows its own number too.
+    if (selected && selected.type !== "leader") {
+      const t = labelText(selected);
+      const a = anchorOf(selected);
+      if (t && a) place(selected.id, a, t);
     }
   }
+  const layerLabels = Object.entries(labelLayout).filter(([k]) => k.startsWith("layer:"));
 
   // Order matters on a phone: the tools row scrolls sideways, so the ones used
   // most sit first and stay visible.
@@ -4510,6 +4539,22 @@ export default function PlanViewer({
                       </g>
                     );
                   })}
+                  {/* Layer totals — one label per layer (see labelLayout) */}
+                  {layerLabels.map(([key, lbl]) => (
+                    <text
+                      key={key}
+                      x={lbl.x}
+                      y={lbl.y}
+                      fontSize={LABEL_FONT}
+                      fontWeight={700}
+                      fill="#fff"
+                      stroke="#000"
+                      strokeWidth={3.5}
+                      style={{ paintOrder: "stroke", pointerEvents: "none" }}
+                    >
+                      {lbl.text}
+                    </text>
+                  ))}
                   {draft.length >= 1 ? (
                     <g>
                       {(tool === "area" ||
