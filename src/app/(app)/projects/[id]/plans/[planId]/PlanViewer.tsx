@@ -744,6 +744,10 @@ export default function PlanViewer({
   }, [measurements]);
   const isTemp = (id: string) => id.startsWith("tmp-");
   const [layer, setLayer] = useState("");
+  const layerRef = useRef(layer); // for the sheet-load effect (no stale closure)
+  useEffect(() => {
+    layerRef.current = layer;
+  }, [layer]);
   const [color, setColor] = useState(COLORS[0]);
   const [wallHeight, setWallHeight] = useState("8");
   const [wallSided, setWallSided] = useState<"single" | "double">("single");
@@ -872,8 +876,21 @@ export default function PlanViewer({
       const { data } = await supabase
         .from("measurements")
         .select(MEAS_COLS)
-        .eq("sheet_id", currentSheet.id);
-      if (live) setMeasurements((data as Measurement[]) ?? []);
+        .eq("sheet_id", currentSheet.id)
+        .order("created_at", { ascending: true });
+      if (!live) return;
+      const rows = (data as Measurement[]) ?? [];
+      setMeasurements(rows);
+      // Keep recording where the sheet left off: with no layer chosen yet
+      // (fresh load, first visit to this sheet), the chip takes the newest
+      // run's layer and color instead of falling back to "New layer…" — which
+      // read as "my layer name didn't save" after a reload.
+      const newest = rows[rows.length - 1];
+      if (newest && !layerRef.current.trim()) {
+        const key = layerKeyOf(newest.layer);
+        setLayer(key === "Unlabeled" ? "" : key);
+        if (newest.color) setColor(newest.color);
+      }
     })();
     return () => {
       live = false;
@@ -1432,7 +1449,9 @@ export default function PlanViewer({
   }
 
   function evtToPoint(e: React.PointerEvent): Pt {
-    const rect = svgRef.current!.getBoundingClientRect();
+    // Null-safe: a pointer event can land after the overlay is gone (sheet
+    // switch mid-gesture) — better a harmless point than a crash.
+    const rect = svgRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
     return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
   }
   // Selection tolerance in page points: a fingertip needs twice a cursor's.
@@ -1633,7 +1652,7 @@ export default function PlanViewer({
       geometry,
       value,
       unit,
-      layer: layer || null,
+      layer: layer.trim() || null,
       color,
       wall_sided: null,
       wall_height: null,
@@ -1665,7 +1684,7 @@ export default function PlanViewer({
         geometry,
         value,
         unit,
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
         ...extra,
       })
@@ -1740,7 +1759,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
         wall_sided: null,
         wall_height: null,
@@ -1773,7 +1792,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
         text: "",
         font_size: LEADER_FONT_DEFAULT,
@@ -1932,7 +1951,7 @@ export default function PlanViewer({
         geometry,
         value: 1,
         unit: "ea",
-        layer: layer || null,
+        layer: layer.trim() || null,
         color,
       })
       .select(MEAS_COLS)
@@ -2204,7 +2223,7 @@ export default function PlanViewer({
     st.raf = requestAnimationFrame(tick);
   }
   function clientToPoint(x: number, y: number): Pt {
-    const rect = svgRef.current!.getBoundingClientRect();
+    const rect = svgRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
     return { x: (x - rect.left) / scale, y: (y - rect.top) / scale };
   }
   function recordAim(x: number, y: number) {
@@ -2547,10 +2566,15 @@ export default function PlanViewer({
         cancelLongPress();
       }
       const pt = evtToPoint(e);
+      // Capture the index NOW. The updater below runs later, during React's
+      // next render — by then a fast lift may already have cleared dragRef,
+      // and reading it there crashed the whole viewer ("null is not an
+      // object (evaluating 'el.current.index')").
+      const idx = dragRef.current.index;
       setEditGeom((g) => {
         if (!g) return g;
         const ng = g.map((q) => ({ ...q }));
-        ng[dragRef.current!.index] = pt;
+        ng[idx] = pt;
         return ng;
       });
       if (touch) {
@@ -4060,22 +4084,38 @@ export default function PlanViewer({
                           value={layer}
                           onChange={(e) => setLayer(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === "Escape") setLayerOpen(false);
+                            if (e.key === "Enter" || e.key === "Escape") {
+                              setLayer((v) => v.trim());
+                              setLayerOpen(false);
+                            }
                           }}
+                          onBlur={() => setLayer((v) => v.trim())}
                           autoFocus={!layer.trim()}
                           spellCheck
+                          autoCapitalize="sentences"
+                          enterKeyHint="done"
                           placeholder="New layer name (e.g. Exterior wall)"
                           aria-label="Layer name"
                           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-2 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
                         />
                         <button
                           type="button"
-                          onClick={() => setLayerOpen(false)}
+                          onClick={() => {
+                            setLayer((v) => v.trim());
+                            setLayerOpen(false);
+                          }}
                           className="glass-brand min-h-10 shrink-0 rounded-md px-3 font-medium text-foreground"
                         >
                           Done
                         </button>
                       </div>
+                      <p className="px-1 pt-1 text-[10px] text-muted">
+                        {layer.trim()
+                          ? layerGroups.some((g) => g.layer === layerKeyOf(layer))
+                            ? `Continuing "${layerKeyOf(layer)}" — new runs add to it.`
+                            : `New layer "${layer.trim()}" — saved with the first run you draw.`
+                          : "Type a name for the runs you're about to draw, or pick a layer below."}
+                      </p>
                       {layerGroups.length ? (
                         <>
                           <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-muted">
@@ -4103,6 +4143,31 @@ export default function PlanViewer({
                                   <span className="shrink-0 text-[10px] text-muted">
                                     {g.lines.length ? g.lines.join(" · ") : `${g.rows.length}`}
                                   </span>
+                                  {/* Rename an existing layer (all its runs) in the panel editor */}
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`Rename ${g.layer}`}
+                                    title="Rename this layer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLayerOpen(false);
+                                      setPanelOpen(true);
+                                      openLayerEditor(g);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setLayerOpen(false);
+                                        setPanelOpen(true);
+                                        openLayerEditor(g);
+                                      }
+                                    }}
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-white/10 hover:text-foreground"
+                                  >
+                                    ✎
+                                  </span>
                                 </button>
                               );
                             })}
@@ -4115,35 +4180,6 @@ export default function PlanViewer({
                   )
                 : null}
             </div>
-            {/* Dictate — speak a note about this sheet (opens Notes for AI and
-                starts listening); sits beside the color so it's one tap away
-                while drawing. */}
-            <button
-              type="button"
-              onClick={() => {
-                setNotesOpen(true);
-                if (voiceState === "listening") stopVoice();
-                else startVoice();
-              }}
-              disabled={voiceState === "thinking"}
-              aria-pressed={voiceState === "listening"}
-              aria-label={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
-              title={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
-              className={`flex h-10 w-10 min-h-0 shrink-0 items-center justify-center rounded-md border transition-colors disabled:opacity-50 md:h-8 md:w-8 ${
-                voiceState === "listening"
-                  ? "border-brand bg-brand text-white"
-                  : "border-border text-foreground hover:border-brand"
-              }`}
-            >
-              {voiceState === "listening" ? (
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" aria-hidden />
-              ) : (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
-                  <rect x="9" y="3" width="6" height="11" rx="3" />
-                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" strokeLinecap="round" />
-                </svg>
-              )}
-            </button>
             <div className="relative flex items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
               {/* Phone: one swatch → popover */}
