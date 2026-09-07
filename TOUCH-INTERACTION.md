@@ -287,6 +287,9 @@ nothing has to be relearned.
 | Nudge pad | Floating cells could overlap the bottom bar | Fixed 3×3 cross of 44 px arrows, bottom-right, above the bar; step, Delete point, Done |
 | Leader note on a phone | Only in the hidden side panel | A note card above the bottom bar: text, text size, arrowhead size; opens with the keyboard when a leader is new |
 | Sheet notes by voice | No | Dictate button: the browser's speech recognition transcribes, the AI tidies it into bullet notes about the sheet and appends them |
+| Two-finger pan mid-shape left a stray point | Yes — a second finger on a pill or card was never seen as a pinch | Every finger on the viewer is counted (capture phase); a second finger anywhere cancels the aim, and for 350 ms after a multi-touch ends nothing can be placed. Cancelled pointers are cleaned up |
+| Continue a wall / polyline past its ends | No | "+" handles just past the first and last point of a selected open path: press to add a point there and drag it |
+| Aiming with the loupe opened the menu | Yes (a still finger = long-press) | In drawing tools a hold never opens anything mid-shape or on empty paper; the lift still places the point. Between shapes a hold still grabs a vertex or opens a shape's menu; Select keeps the full hold |
 
 ---
 

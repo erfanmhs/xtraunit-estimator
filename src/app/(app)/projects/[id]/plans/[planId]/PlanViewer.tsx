@@ -536,6 +536,30 @@ export default function PlanViewer({
   const pinchLiveRef = useRef<{ k: number; mx: number; my: number; dx: number; dy: number } | null>(null);
   // Select tool: two quick taps on the same shape open its menu.
   const lastSelTapRef = useRef<{ x: number; y: number; t: number; id: string } | null>(null);
+  // Every finger on the whole viewer (drawing, pills, cards…), counted in the
+  // capture phase. A second finger ANYWHERE cancels a one-finger aim, and for
+  // a moment after a multi-touch ends nothing can be placed — so a two-finger
+  // pan never leaves a stray point behind.
+  const fingersRef = useRef(new Map<number, number>()); // pointerId → time it landed
+  const multiUntilRef = useRef(0);
+  // Bookkeeping for the census: a finger whose lift was never delivered
+  // (it happens) is forgotten after 20 s so it can't block placing forever.
+  function fingerDown(id: number) {
+    const now = Date.now();
+    for (const [k, t] of fingersRef.current) if (now - t > 20000) fingersRef.current.delete(k);
+    fingersRef.current.set(id, now);
+    if (fingersRef.current.size > 1) {
+      multiUntilRef.current = Number.MAX_SAFE_INTEGER; // until every finger lifts
+      pinchedRef.current = true;
+      cancelTouchTap();
+      selTapRef.current = null;
+    }
+  }
+  function fingerUp(id: number) {
+    fingersRef.current.delete(id);
+    if (fingersRef.current.size === 0 && multiUntilRef.current === Number.MAX_SAFE_INTEGER)
+      multiUntilRef.current = Date.now() + 350;
+  }
   // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "thinking" | "unsupported">("idle");
   const [voiceInterim, setVoiceInterim] = useState("");
@@ -1325,20 +1349,44 @@ export default function PlanViewer({
   // clear of both corners' hit circles, with a little air, or a press there
   // would grab a corner instead.
   const MID_SEG_MIN = () => (coarse ? 16 : 8) * 1.6 * 2 + 24;
-  function midpointAt(pt: Pt): { at: number; p: Pt } | null {
-    if (!selected || selected.type === "count" || selected.type === "leader" || selected.type === "line") return null;
-    const g = selected.geometry;
-    const closed = selected.type === "area" || (selected.type === "volume" && selected.vol_mode === "area");
-    const r = TOL() * 1.4;
-    let best: { at: number; p: Pt; d: number } | null = null;
+  // How far past an open path's ends its "continue" handles sit (screen px):
+  // outside the end vertex's hit circle, with a little air.
+  const END_EXT = () => (coarse ? 16 : 8) * 1.6 + 14;
+  // The "+" handles of the selected shape: one on the middle of each
+  // long-enough edge (insert there), and for open paths (polyline, wall,
+  // linear volume) one just past each end (continue the run from there).
+  function plusHandles(m: Measurement): { at: number; p: Pt; end?: "start" | "end" }[] {
+    if (m.type === "count" || m.type === "leader" || m.type === "line") return [];
+    const g = m.geometry;
+    const closed = m.type === "area" || (m.type === "volume" && m.vol_mode === "area");
+    const out: { at: number; p: Pt; end?: "start" | "end" }[] = [];
     const n = closed ? g.length : g.length - 1;
     for (let i = 0; i < n; i++) {
       const a = g[i];
       const b = g[(i + 1) % g.length];
       if (Math.hypot(b.x - a.x, b.y - a.y) * scale < MID_SEG_MIN()) continue;
-      const p = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const d = Math.hypot(p.x - pt.x, p.y - pt.y);
-      if (d <= r && (!best || d < best.d)) best = { at: i + 1, p, d };
+      out.push({ at: i + 1, p: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } });
+    }
+    if (!closed && g.length >= 2) {
+      const ext = END_EXT() / scale;
+      const dir = (from: Pt, to: Pt): Pt => {
+        const L = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+        return { x: (to.x - from.x) / L, y: (to.y - from.y) / L };
+      };
+      const dEnd = dir(g[g.length - 2], g[g.length - 1]);
+      out.push({ at: g.length, end: "end", p: { x: g[g.length - 1].x + dEnd.x * ext, y: g[g.length - 1].y + dEnd.y * ext } });
+      const dStart = dir(g[1], g[0]);
+      out.push({ at: 0, end: "start", p: { x: g[0].x + dStart.x * ext, y: g[0].y + dStart.y * ext } });
+    }
+    return out;
+  }
+  function midpointAt(pt: Pt): { at: number; p: Pt } | null {
+    if (!selected) return null;
+    const r = TOL() * 1.4;
+    let best: { at: number; p: Pt; d: number } | null = null;
+    for (const h of plusHandles(selected)) {
+      const d = Math.hypot(h.p.x - pt.x, h.p.y - pt.y);
+      if (d <= r && (!best || d < best.d)) best = { at: h.at, p: h.p, d };
     }
     return best ? { at: best.at, p: best.p } : null;
   }
@@ -1821,11 +1869,19 @@ export default function PlanViewer({
     cancelLongPress();
     longPressFiredRef.current = false;
     longPressRef.current = setTimeout(() => {
-      longPressFiredRef.current = true;
       const rect = svgRef.current?.getBoundingClientRect();
       if (!rect) return;
       const pt = { x: (cx - rect.left) / scale, y: (cy - rect.top) / scale };
+      // Drawing tools: holding still is how a finger AIMS with the loupe, so
+      // a hold must not open anything mid-shape, and never on empty paper —
+      // and the lift that follows still places the point (nothing "fired").
+      // Grabbing an existing vertex, or a shape's menu, still works between
+      // shapes; Select keeps the full hold behaviour.
+      const drawing = tool !== "select" && tool !== "browse" && tool !== "crop";
+      if (drawing && draft.length > 0) return;
       const v = pointerId != null && tool !== "crop" ? vertexAt(pt) : null;
+      if (drawing && !v && !pickMeasurementAt(pt)) return;
+      longPressFiredRef.current = true;
       if (v && pointerId != null) {
         const m = measurements.find((x) => x.id === v.id);
         if (m) {
@@ -1951,7 +2007,9 @@ export default function PlanViewer({
     // gesture into a pinch instead; holding still opens the menu.
     const touch = e.pointerType === "touch";
     if (touch && tool !== "select" && tool !== "crop" && tool !== "browse") {
-      if (pointersRef.current.size > 1) return;
+      // Another finger is already down (this one is counted too), or a
+      // multi-touch just ended: this finger is navigation, not a point.
+      if (fingersRef.current.size > 1 || Date.now() < multiUntilRef.current) return;
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
       showLoupe(e);
       startLongPress(e.clientX, e.clientY, e.pointerId);
@@ -2112,8 +2170,9 @@ export default function PlanViewer({
         const fired = longPressFiredRef.current;
         const pt = evtToPoint(e);
         cancelTouchTap();
-        // A long-press opened the menu, or a pinch happened: no point.
-        if (fired || pinchedRef.current) return;
+        // A long-press opened the menu, or a pinch happened, or a second
+        // finger was involved at any point: no point.
+        if (fired || pinchedRef.current || Date.now() < multiUntilRef.current) return;
         placePoint(pt);
         return;
       }
@@ -3215,7 +3274,20 @@ export default function PlanViewer({
       ) : null}
 
       {/* Center */}
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        // Finger census for the whole column (capture phase, so overlays
+        // count too): see fingersRef.
+        onPointerDownCapture={(e) => {
+          if (e.pointerType === "touch") fingerDown(e.pointerId);
+        }}
+        onPointerUpCapture={(e) => {
+          if (e.pointerType === "touch") fingerUp(e.pointerId);
+        }}
+        onPointerCancelCapture={(e) => {
+          if (e.pointerType === "touch") fingerUp(e.pointerId);
+        }}
+      >
         {/* Toolbar. Phone (below md): row 1 = sheets · undo/redo · scale · More;
             row 2 = every tool as a 6-column grid of 44 px icon buttons, none
             hidden off the edge. Zoom, legend, export and the panels sit in the
@@ -3729,6 +3801,19 @@ export default function PlanViewer({
                   onPointerDown={onPointerDown}
                   onPointerMove={onPointerMove}
                   onPointerUp={onPointerUp}
+                  // iOS cancels a pointer when the system takes the gesture
+                  // (edge swipe, notification…): drop whatever it was doing.
+                  onPointerCancel={() => {
+                    cancelTouchTap();
+                    selTapRef.current = null;
+                    if (dragRef.current || moveRef.current) {
+                      dragRef.current = null;
+                      dragStartRef.current = null;
+                      moveRef.current = null;
+                      setEditGeom(null);
+                    }
+                    cropDragRef.current = false;
+                  }}
                   onDoubleClick={(e) => onDoubleClick(e)}
                   className="absolute left-0 top-0"
                   style={{
@@ -3948,30 +4033,35 @@ export default function PlanViewer({
                             corner there (and carry it). Only on segments long
                             enough to leave room between the real handles. */}
                         {isSel && tool === "select" && !isCount && m.type !== "leader" && m.type !== "line"
-                          ? (() => {
-                              const closed = isFilled;
-                              const n = closed ? pts.length : pts.length - 1;
-                              const out: React.ReactElement[] = [];
-                              for (let i = 0; i < n; i++) {
-                                const a = pts[i];
-                                const b = pts[(i + 1) % pts.length];
-                                if (Math.hypot(b.x - a.x, b.y - a.y) < MID_SEG_MIN()) continue;
-                                const cx = (a.x + b.x) / 2;
-                                const cy = (a.y + b.y) / 2;
-                                const r = coarse ? 8 : 4.5;
-                                out.push(
-                                  <g key={`mid-${i}`} style={{ cursor: "copy" }}>
-                                    <circle cx={cx} cy={cy} r={r} fill="#fff" fillOpacity={0.85} stroke={m.color ?? "#A01C2D"} strokeWidth={1.5} strokeDasharray="2 2" />
-                                    <path
-                                      d={`M${cx - r * 0.5} ${cy}H${cx + r * 0.5}M${cx} ${cy - r * 0.5}V${cy + r * 0.5}`}
-                                      stroke={m.color ?? "#A01C2D"}
-                                      strokeWidth={1.5}
-                                    />
-                                  </g>,
-                                );
-                              }
-                              return out;
-                            })()
+                          ? plusHandles(m).map((h, i) => {
+                              const c = px(h.p);
+                              const r = coarse ? 8 : 4.5;
+                              const col = m.color ?? "#A01C2D";
+                              // End handles get a dotted tail back to the end vertex.
+                              const tail = h.end ? px(h.end === "end" ? geom[geom.length - 1] : geom[0]) : null;
+                              return (
+                                <g key={`plus-${i}`} style={{ cursor: "copy" }}>
+                                  {tail ? (
+                                    <line x1={tail.x} y1={tail.y} x2={c.x} y2={c.y} stroke={col} strokeWidth={1} strokeDasharray="2 3" opacity={0.7} />
+                                  ) : null}
+                                  <circle
+                                    cx={c.x}
+                                    cy={c.y}
+                                    r={h.end ? r + 1 : r}
+                                    fill="#fff"
+                                    fillOpacity={0.9}
+                                    stroke={col}
+                                    strokeWidth={1.5}
+                                    strokeDasharray={h.end ? undefined : "2 2"}
+                                  />
+                                  <path
+                                    d={`M${c.x - r * 0.5} ${c.y}H${c.x + r * 0.5}M${c.x} ${c.y - r * 0.5}V${c.y + r * 0.5}`}
+                                    stroke={col}
+                                    strokeWidth={1.5}
+                                  />
+                                </g>
+                              );
+                            })
                           : null}
                       </g>
                     );
