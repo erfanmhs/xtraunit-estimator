@@ -526,6 +526,16 @@ export default function PlanViewer({
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
+  // `phone` = a narrow screen (below Tailwind's sm): the measurements panel
+  // becomes a bottom sheet over the drawing instead of a side column.
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setPhone(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
   // Fingers currently down on the viewport (client coords) → pinch when two.
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist0: number; scale0: number; fx: number; fy: number } | null>(null);
@@ -558,7 +568,7 @@ export default function PlanViewer({
   function fingerUp(id: number) {
     fingersRef.current.delete(id);
     if (fingersRef.current.size === 0 && multiUntilRef.current === Number.MAX_SAFE_INTEGER)
-      multiUntilRef.current = Date.now() + 350;
+      multiUntilRef.current = Date.now() + 250;
   }
   // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "thinking" | "unsupported">("idle");
@@ -1969,15 +1979,25 @@ export default function PlanViewer({
       const minPts = fillShape ? 3 : 2;
       const last = draft[draft.length - 1];
       const first = draft[0];
-      const nearLast = Math.hypot(last.x - pt.x, last.y - pt.y) <= TOL() * 1.6;
+      // "Tap the last point again = finish" — a finger gets a tight radius
+      // (it has the Finish button; zoomed out, a loose one swallowed real
+      // points as accidental finishes). A mouse keeps the forgiving one.
+      const finishR = TOL() * (coarse ? 0.9 : 1.6);
+      const nearLast = Math.hypot(last.x - pt.x, last.y - pt.y) <= finishR;
       const nearFirst = Math.hypot(first.x - pt.x, first.y - pt.y) <= TOL() * 1.6;
-      // click the last vertex (incl. a double-click), or the first vertex to
-      // close a filled shape, finishes the run
-      if (draft.length >= minPts && (nearLast || nearFirst)) {
-        if (tool === "area") finalizeArea(draft);
-        else if (tool === "wall") finalizeWall(draft);
-        else if (tool === "volume") finalizeVolume(draft);
-        else finalizePolyline(draft);
+      const finish = (g: Pt[]) => {
+        if (tool === "area") finalizeArea(g);
+        else if (tool === "wall") finalizeWall(g);
+        else if (tool === "volume") finalizeVolume(g);
+        else finalizePolyline(g);
+      };
+      if (draft.length >= minPts && nearLast) {
+        finish(draft);
+      } else if (draft.length >= minPts && nearFirst) {
+        // Back at the start: a filled shape closes by itself; an open run
+        // (wall, polyline, linear volume) gets its closing segment — snapped
+        // exactly onto the first point — instead of ending one short.
+        finish(fillShape ? draft : [...draft, { ...first }]);
       } else {
         setDraft((d) => [...d, pt]);
       }
@@ -3327,6 +3347,26 @@ export default function PlanViewer({
               <span className="text-[10px] uppercase tracking-wider">Scale</span>
               {scaleSelect("min-w-0 flex-1 text-xs")}
             </label>
+            {/* Phone: the measurements panel is one tap away (it opens as a
+                bottom sheet; tapping the drawing closes it). */}
+            <button
+              type="button"
+              onClick={() => setPanelOpen((o) => !o)}
+              aria-pressed={panelOpen}
+              aria-label={panelOpen ? "Hide measurements" : "Show measurements"}
+              className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-foreground sm:hidden ${
+                panelOpen ? "border-brand bg-brand/15" : "border-border hover:border-brand"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+                <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" strokeLinecap="round" />
+              </svg>
+              {measurements.length ? (
+                <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] leading-4 text-white">
+                  {measurements.length}
+                </span>
+              ) : null}
+            </button>
             <button
               type="button"
               onClick={() => setMoreOpen(true)}
@@ -4676,16 +4716,30 @@ export default function PlanViewer({
         </div>
       </div>
 
-      {/* Right rail (collapsible + resizable): edit selected OR list */}
+      {/* Right rail (collapsible + resizable): edit selected OR list. On a
+          phone it is a bottom sheet over the drawing; a tap on the drawing
+          (the backdrop) closes it. */}
       {panelOpen ? (
         <>
-          <div
-            className="resize-handle z-10"
-            onPointerDown={(e) => startResize("right", e)}
-          />
+          {phone ? (
+            <div
+              className="fixed inset-0 z-30 bg-black/30"
+              aria-hidden
+              onPointerDown={() => setPanelOpen(false)}
+            />
+          ) : (
+            <div
+              className="resize-handle z-10"
+              onPointerDown={(e) => startResize("right", e)}
+            />
+          )}
           <aside
-            className="glass z-10 flex shrink-0 flex-col"
-            style={{ width: panelW }}
+            className={
+              phone
+                ? "glass-strong pb-safe fixed inset-x-0 bottom-0 z-40 flex max-h-[60vh] flex-col overflow-hidden rounded-t-2xl"
+                : "glass z-10 flex shrink-0 flex-col"
+            }
+            style={phone ? undefined : { width: panelW }}
           >
             <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2 py-1.5">
               {/* Next step — lives on top of the measurements panel */}

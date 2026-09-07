@@ -290,6 +290,10 @@ nothing has to be relearned.
 | Two-finger pan mid-shape left a stray point | Yes — a second finger on a pill or card was never seen as a pinch | Every finger on the viewer is counted (capture phase); a second finger anywhere cancels the aim, and for 350 ms after a multi-touch ends nothing can be placed. Cancelled pointers are cleaned up |
 | Continue a wall / polyline past its ends | No | "+" handles just past the first and last point of a selected open path: press to add a point there and drag it |
 | Aiming with the loupe opened the menu | Yes (a still finger = long-press) | In drawing tools a hold never opens anything mid-shape or on empty paper; the lift still places the point. Between shapes a hold still grabs a vertex or opens a shape's menu; Select keeps the full hold |
+| Zoomed out, the next point "finished" the run | Yes — "tap the last point again = finish" used a radius that grows in drawing units when zoomed out | A finger's finish radius is tight (0.9 × the hit tolerance; the Finish button is the reliable way). A mouse keeps the forgiving radius |
+| Closing a wall / polyline loop lost the last segment | Yes — tapping near the first point finished without it | An open run tapped back at its start gets a closing point snapped exactly onto the first point, then finishes. Filled shapes close as before |
+| Measurements panel on a phone | Behind the ⋯ sheet; opened as a side column that squeezed the drawing | A list button (with the count) in the top row toggles it; it opens as a bottom sheet over the drawing, and a tap on the drawing closes it |
+| Cool-down after a multi-touch | 350 ms | 250 ms — quicker to pick up the next point after a pan |
 
 ---
 
