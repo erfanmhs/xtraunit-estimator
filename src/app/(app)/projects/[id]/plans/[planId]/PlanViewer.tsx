@@ -1868,9 +1868,13 @@ export default function PlanViewer({
     recordHistory();
     const active = activeCountRef.current;
     if (active) {
-      const idx = active.geometry.findIndex(
-        (v) => Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6,
-      );
+      // Mouse: clicking an existing marker removes it. Finger: a tap always
+      // ADDS — a fingertip landing near a marker was removing it by accident,
+      // which read as "the count is confused". Remove a marker by holding it
+      // (Delete this marker) or from the nudge pad.
+      const idx = coarse
+        ? -1
+        : active.geometry.findIndex((v) => Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6);
       const geometry =
         idx >= 0
           ? active.geometry.filter((_, i) => i !== idx)
@@ -4163,7 +4167,9 @@ export default function PlanViewer({
                     ? `Counting: ${
                         measurements.find((m) => m.id === activeCountId)?.value ?? 0
                       } (auto-saved)`
-                    : "Click each item — every click saves"}
+                    : coarse
+                      ? "Tap each item — every tap saves · hold a marker to remove it"
+                      : "Click each item — every click saves"}
                 </span>
                 <button
                   type="button"
