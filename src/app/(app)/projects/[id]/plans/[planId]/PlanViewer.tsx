@@ -670,6 +670,11 @@ export default function PlanViewer({
   // The page bitmap is only re-rasterized once no finger is down and the
   // last gesture is this old — never in the middle of tapping.
   const idleUntilRef = useRef(0);
+  // Auto edge-pan: while a finger aims a point or drags a handle within
+  // EDGE_M px of the drawing's edge, the page slides that way (faster the
+  // closer to the edge) so a run can continue past the visible area; it
+  // stops when the finger moves back in, lifts, or the page can't scroll.
+  const edgePanRef = useRef<{ raf: number | null; vx: number; vy: number; x: number; y: number } | null>(null);
   // ── Touch editing (see TOUCH-INTERACTION.md) ───────────────────────────────
   // The vertex the nudge pad works on (a tapped handle); hold-to-grab pulse;
   // whole-shape move; and the press-vs-drag bookkeeping for a handle.
@@ -2131,6 +2136,72 @@ export default function PlanViewer({
     hideLoupe();
     clearRubber();
     aimSamplesRef.current = [];
+    edgePanStop();
+  }
+  // ── Auto edge-pan ─────────────────────────────────────────────────────────
+  function edgePanStop() {
+    const s = edgePanRef.current;
+    if (s?.raf != null) cancelAnimationFrame(s.raf);
+    edgePanRef.current = null;
+  }
+  function edgePanUpdate(clientX: number, clientY: number) {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const r = vp.getBoundingClientRect();
+    const EDGE_M = 48; // px from the edge where panning starts
+    const MAX = 14; // px per frame at the very edge
+    const speed = (d: number) => (d < EDGE_M ? ((EDGE_M - Math.max(0, d)) / EDGE_M) * MAX : 0);
+    const l = speed(clientX - r.left);
+    const rt = speed(r.right - clientX);
+    const t = speed(clientY - r.top);
+    const b = speed(r.bottom - clientY);
+    const vx = l ? -l : rt;
+    const vy = t ? -t : b;
+    if (!vx && !vy) {
+      edgePanStop();
+      return;
+    }
+    const cur = edgePanRef.current;
+    if (cur) {
+      cur.vx = vx;
+      cur.vy = vy;
+      cur.x = clientX;
+      cur.y = clientY;
+      return;
+    }
+    const st = { raf: null as number | null, vx, vy, x: clientX, y: clientY };
+    edgePanRef.current = st;
+    const tick = () => {
+      const s = edgePanRef.current;
+      const v = viewportRef.current;
+      if (!s || !v) return;
+      const sl = v.scrollLeft;
+      const stp = v.scrollTop;
+      v.scrollLeft += s.vx;
+      v.scrollTop += s.vy;
+      if (v.scrollLeft === sl && v.scrollTop === stp) {
+        edgePanStop(); // reached the end of the page
+        return;
+      }
+      // The page moved under the still finger: re-aim at the same screen spot.
+      const pt = clientToPoint(s.x, s.y);
+      if (tapRef.current) {
+        recordAim(s.x, s.y);
+        showLoupeAt(s.x, s.y, pt);
+        if (draft.length) updateRubber(pt);
+      } else if (dragRef.current) {
+        const idx = dragRef.current.index;
+        setEditGeom((g) => {
+          if (!g) return g;
+          const ng = g.map((q) => ({ ...q }));
+          ng[idx] = pt;
+          return ng;
+        });
+        showLoupeAt(s.x, s.y, pt);
+      }
+      s.raf = requestAnimationFrame(tick);
+    };
+    st.raf = requestAnimationFrame(tick);
   }
   function clientToPoint(x: number, y: number): Pt {
     const rect = svgRef.current!.getBoundingClientRect();
@@ -2457,6 +2528,7 @@ export default function PlanViewer({
       recordAim(e.clientX, e.clientY);
       showLoupe(e);
       if (draft.length) updateRubber(evtToPoint(e));
+      edgePanUpdate(e.clientX, e.clientY);
       return;
     }
     // Select tool, finger on nothing: a slide is not a selection (and not a
@@ -2481,7 +2553,10 @@ export default function PlanViewer({
         ng[dragRef.current!.index] = pt;
         return ng;
       });
-      if (touch) showLoupe(e);
+      if (touch) {
+        showLoupe(e);
+        edgePanUpdate(e.clientX, e.clientY);
+      }
       return;
     }
     // The whole shape being moved.
@@ -2575,6 +2650,7 @@ export default function PlanViewer({
       dragRef.current = null;
       dragStartRef.current = null;
       hideLoupe();
+      edgePanStop();
       if (!ds?.moved && !ds?.inserted) {
         setEditGeom(null);
         setActiveVertex({ id, index });
