@@ -134,6 +134,23 @@ body {
   }
 }
 
+/* Touch surfaces that own their gestures (the takeoff drawing, swipe rows):
+   no text selection, no iOS callout / blue selection wash on a long-press,
+   no tap highlight. Without this, holding a finger on the drawing makes the
+   whole page "go blue" as Safari tries to select it. */
+.touch-surface,
+.touch-surface * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.touch-surface input,
+.touch-surface textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Safe-area padding for bars that sit at the very bottom of a phone screen
    (home indicator). No-op on devices without an inset. */
 .pb-safe {

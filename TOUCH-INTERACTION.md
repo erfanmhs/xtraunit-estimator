@@ -278,6 +278,15 @@ nothing has to be relearned.
 | Main app navigation reachable from the viewer on a phone | No (Back only) | Yes — a "Go to" sheet in the bottom bar (Plans · Scope · Pricing · Estimate · Proposal · Projects) |
 | Phone toolbar | Text buttons in a strip that scrolled off the edge; Export unreachable; twelve color dots each stretched to 44 px tall | Row 1: Sheets · undo/redo · Scale · More. Row 2: all eleven tools as 44 px icon buttons in a 6-column grid. More sheet: zoom, legend, Export PDF, panels. Options bar is one row; colors are one swatch that opens a popover of 44 px swatches |
 | Paging quickly blanked a sheet's measurements | Yes (out-of-order responses) | Fixed — only the latest sheet's load may land |
+| Holding a finger on the drawing turned the page blue (iOS selection) | Yes | Fixed — the drawing and swipe rows opt out of text selection, callouts and tap highlight |
+| Pinch smoothness | Every frame re-rendered and re-rasterized the page | The page scales with a CSS transform while two fingers are down; the real zoom is committed once on lift. A finger sliding past the drawing's edge no longer ends the gesture |
+| Hold on a shape | Menu only | Selects it (handles on) and opens the menu |
+| Double-tap a shape (Select) / double-click | Nothing | Its menu |
+| Add a corner | Vertex menu → Split segment | Also a "+" on the middle of each long-enough edge: press it to add a corner there and carry it |
+| Delete a corner | Vertex menu only | Also a Delete point button on the nudge pad |
+| Nudge pad | Floating cells could overlap the bottom bar | Fixed 3×3 cross of 44 px arrows, bottom-right, above the bar; step, Delete point, Done |
+| Leader note on a phone | Only in the hidden side panel | A note card above the bottom bar: text, text size, arrowhead size; opens with the keyboard when a leader is new |
+| Sheet notes by voice | No | Dictate button: the browser's speech recognition transcribes, the AI tidies it into bullet notes about the sheet and appends them |
 
 ---
 

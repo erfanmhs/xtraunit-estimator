@@ -96,7 +96,7 @@ export default function SwipeRow({
   return (
     <>
       <div
-        className={`relative overflow-hidden ${className}`}
+        className={`touch-surface relative overflow-hidden ${className}`}
         style={{ touchAction: "pan-y" }}
         onPointerDown={(e) => {
           if (e.pointerType !== "touch") return;
