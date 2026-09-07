@@ -297,6 +297,24 @@ nothing has to be relearned.
 
 ---
 
+## 10a. The input pipeline (why placing a point is now smooth)
+
+Three things made "zoom, pan, tap the next point" feel laggy and hit-or-miss,
+and each is now handled on its own path:
+
+| Stage | Before | Now |
+|---|---|---|
+| **Aiming** (one finger down, sliding) | Every move updated React state for the loupe and the rubber band → the whole viewer and its SVG re-rendered at touch-event rate | The loupe and the rubber band are DOM nodes updated directly on each move; the loupe bitmap is redrawn once per animation frame. Zero renders while aiming |
+| **Placing** (lift) | The point landed where the finger left the glass; fingers roll 3–8 px on lift | The point is where the finger was **held** ~80 ms before the lift, unless it clearly slid since. A still finger's landing spot counts as its held spot |
+| **Pinch / pan** (two fingers) | Each frame re-rendered at the new zoom | The page scales and moves with one CSS transform per move; the real zoom is committed once on lift, keeping the page point under the fingers exactly where they left it |
+| **Re-raster** (sharpening after a zoom) | Started 160 ms after the zoom, sized the visible canvas first (blanking the sheet), and ran under the next tap | Waits until no finger is on the drawing and the last gesture is 400 ms old; draws into an offscreen bitmap and swaps it in — the sheet never disappears |
+| **Cool-down** | — | 250 ms after any multi-touch during which a lift places nothing (a trailing finger can't leave a point) |
+
+The layer a run records into is a chip in the options bar: one tap lists
+every layer on the sheet (continue one, with its color and settings) or takes
+a new name. It sticks across tool switches; a red dot shows it is recording
+into an existing layer.
+
 ## 11. Later (not in this round)
 
 - Snap a placed point to a nearby vertex of another shape.
