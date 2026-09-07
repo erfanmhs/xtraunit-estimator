@@ -21,6 +21,22 @@ import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
+import StageJump from "@/components/StageNav";
+import {
+  SelectIcon,
+  PanIcon,
+  LineIcon,
+  AreaIcon,
+  CountIcon,
+  PolylineIcon,
+  WallIcon,
+  VolumeIcon,
+  LeaderIcon,
+  CalibrateIcon,
+  CropIcon,
+  MoreIcon,
+  type ToolIconProps,
+} from "@/components/ToolIcons";
 import type { PlanFile } from "@/types";
 
 // On-sheet takeoff legend placement (fractions of the page + a size multiplier).
@@ -453,6 +469,10 @@ export default function PlanViewer({
   const [panelOpen, setPanelOpen] = useState(true);
   const [panelW, setPanelW] = useState(268);
   const [notesOpen, setNotesOpen] = useState(false);
+  // Phone toolbar: the "More" sheet (zoom / legend / export / panels) and the
+  // color popover — both keep the top of the screen to two short rows.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [colorOpen, setColorOpen] = useState(false);
 
   // Narrow windows (tablet, half-screen laptop): start with both side panels
   // collapsed so the DRAWING gets the width, and collapse again if the window
@@ -519,6 +539,22 @@ export default function PlanViewer({
   // The magnifier that shows what's under the fingertip (center-column coords).
   const [loupe, setLoupe] = useState<{ vx: number; vy: number; pt: Pt } | null>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
+  // ── Touch editing (see TOUCH-INTERACTION.md) ───────────────────────────────
+  // The vertex the nudge pad works on (a tapped handle); hold-to-grab pulse;
+  // whole-shape move; and the press-vs-drag bookkeeping for a handle.
+  const [activeVertex, setActiveVertex] = useState<{ id: string; index: number } | null>(null);
+  const [nudgeStep, setNudgeStep] = useState<"qft" | "ft" | "px">("qft");
+  const [grabPulse, setGrabPulse] = useState(false);
+  const moveRef = useRef<{ id: string; pointerId: number; start: Pt; orig: Pt[] } | null>(null);
+  // A handle press: where it started (client px), whether it crossed the drag
+  // threshold, and whether it came from a hold (lift without a slide = menu).
+  const dragStartRef = useRef<{ x: number; y: number; moved: boolean; hold: boolean } | null>(null);
+  // Select tool, finger: selection happens on LIFT (a second finger = pinch,
+  // holding still = menu), so a press alone changes nothing.
+  const selTapRef = useRef<{ id: number; x: number; y: number } | null>(null);
+  const moveArmedRef = useRef(false); // "Move" picked from the menu: the next drag moves the shape
+  const nudgeSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nudgeHistoryRef = useRef(false);
   // Export-to-PDF dialog state.
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSel, setExportSel] = useState<Set<string>>(new Set());
@@ -528,8 +564,9 @@ export default function PlanViewer({
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
-    kind: "measurement" | "canvas" | "sheet";
+    kind: "measurement" | "canvas" | "sheet" | "vertex";
     id?: string;
+    index?: number; // vertex menus: which point
   } | null>(null);
   const [sheetNames, setSheetNames] = useState<Record<string, string>>(() =>
     Object.fromEntries(sheets.map((s) => [s.id, s.name ?? ""])),
@@ -629,6 +666,11 @@ export default function PlanViewer({
     : null;
   const hasScale = !!(currentScale?.x && currentScale?.y);
   const selected = measurements.find((m) => m.id === selectedId) ?? null;
+  // The nudge pad's vertex — only while its shape is still the selection.
+  const activeV =
+    activeVertex && selected && activeVertex.id === selected.id && activeVertex.index < selected.geometry.length
+      ? activeVertex
+      : null;
   // A measuring tool was picked on a sheet with no scale → block with a prompt.
   const needsScale =
     !hasScale &&
@@ -674,14 +716,22 @@ export default function PlanViewer({
     setActiveCountId(null);
     setUndoStack([]);
     setRedoStack([]);
+    setActiveVertex(null);
     if (!currentSheet) return;
+    // Paging quickly fires one load per sheet; only the LATEST may land.
+    // (Without this guard a slow earlier response could overwrite the current
+    // sheet's measurements with another sheet's — or an empty list.)
+    let live = true;
     (async () => {
       const { data } = await supabase
         .from("measurements")
         .select(MEAS_COLS)
         .eq("sheet_id", currentSheet.id);
-      setMeasurements((data as Measurement[]) ?? []);
+      if (live) setMeasurements((data as Measurement[]) ?? []);
     })();
+    return () => {
+      live = false;
+    };
   }, [supabase, currentSheet?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fitWidth = useCallback(async () => {
@@ -1144,6 +1194,131 @@ export default function PlanViewer({
   // Selection tolerance in page points: a fingertip needs twice a cursor's.
   const TOL = () => (coarse ? 16 : 8) / scale;
 
+  // The vertex under a point (within the handle's hit radius), or null. The
+  // selected shape's handles win — they're drawn on top. `onlySelected` limits
+  // the search to the selection (the Select tool's handle press).
+  function vertexAt(pt: Pt, onlySelected = false): { id: string; index: number } | null {
+    const r = TOL() * 1.6;
+    const scan = (m: Measurement) => {
+      let best: { index: number; d: number } | null = null;
+      m.geometry.forEach((v, i) => {
+        const d = Math.hypot(v.x - pt.x, v.y - pt.y);
+        if (d <= r && (!best || d < best.d)) best = { index: i, d };
+      });
+      return best;
+    };
+    if (selected) {
+      const b = scan(selected);
+      if (b) return { id: selected.id, index: (b as { index: number }).index };
+    }
+    if (onlySelected) return null;
+    let found: { id: string; index: number; d: number } | null = null;
+    for (const m of measurements) {
+      if (hiddenLayers.has(layerKeyOf(m.layer))) continue;
+      const b = scan(m) as { index: number; d: number } | null;
+      if (b && (!found || b.d < found.d)) found = { id: m.id, index: b.index, d: b.d };
+    }
+    return found ? { id: found.id, index: found.index } : null;
+  }
+
+  // Fewest points a shape can keep (delete-a-point stops here).
+  function minPointsOf(m: Measurement): number {
+    if (m.type === "count") return 1;
+    if (m.type === "area" || (m.type === "volume" && m.vol_mode === "area")) return 3;
+    return 2;
+  }
+
+  // A shape's value for a (new) geometry — the same math the draw tools use.
+  function geometryValue(m: Measurement, geometry: Pt[]): number | null {
+    if (m.type === "leader") return null; // leaders carry text, not a measured value
+    if (m.type === "count") return geometry.length;
+    if (!currentScale?.x || !currentScale?.y) return m.value;
+    const sx = currentScale.x;
+    const sy = currentScale.y;
+    return m.type === "area"
+      ? polyAreaSqFt(geometry, sx, sy)
+      : m.type === "wall"
+        ? geomLenFeet(geometry, sx, sy) * (m.wall_height ?? 0) * (m.wall_sided === "double" ? 2 : 1)
+        : m.type === "volume"
+          ? m.vol_mode === "area"
+            ? polyAreaSqFt(geometry, sx, sy) * (m.vol_depth ?? 0)
+            : geomLenFeet(geometry, sx, sy) * (m.vol_width ?? 0) * (m.vol_depth ?? 0)
+          : geomLenFeet(geometry, sx, sy);
+  }
+
+  // Save a reshaped measurement: history, local state, then the database.
+  // `debounceMs` batches a burst of nudges into one save (one undo step).
+  async function commitGeometry(id: string, geometry: Pt[], debounceMs = 0) {
+    const m = measurements.find((x) => x.id === id);
+    if (!m) return;
+    const value = geometryValue(m, geometry);
+    if (debounceMs > 0) {
+      if (!nudgeHistoryRef.current) {
+        recordHistory();
+        nudgeHistoryRef.current = true;
+      }
+      setMeasurements((arr) => arr.map((x) => (x.id === id ? { ...x, geometry, value } : x)));
+      if (nudgeSaveRef.current) clearTimeout(nudgeSaveRef.current);
+      nudgeSaveRef.current = setTimeout(async () => {
+        nudgeSaveRef.current = null;
+        nudgeHistoryRef.current = false;
+        await supabase.from("measurements").update({ geometry, value }).eq("id", id);
+      }, debounceMs);
+      return;
+    }
+    recordHistory();
+    setMeasurements((arr) => arr.map((x) => (x.id === id ? { ...x, geometry, value } : x)));
+    await supabase.from("measurements").update({ geometry, value }).eq("id", id);
+  }
+
+  // Nudge pad: move the active vertex one step. Steps are ¼ ft / 1 ft on a
+  // scaled sheet (converted with the sheet's points-per-foot), or one screen
+  // pixel at the current zoom.
+  const nudgeUnit = hasScale ? nudgeStep : "px";
+  function nudgeActive(dx: number, dy: number) {
+    if (!activeV || !selected) return;
+    let sx: number;
+    let sy: number;
+    if (nudgeUnit === "px") {
+      sx = sy = 1 / scale;
+    } else {
+      const ft = nudgeUnit === "ft" ? 1 : 0.25;
+      sx = ft * (currentScale?.x ?? 0);
+      sy = ft * (currentScale?.y ?? 0);
+    }
+    if (!sx || !sy) return;
+    const geometry = selected.geometry.map((q, i) =>
+      i === activeV.index ? { x: q.x + dx * sx, y: q.y + dy * sy } : { ...q },
+    );
+    commitGeometry(selected.id, geometry, 500);
+  }
+
+  // Vertex menu: drop this point (down to the shape's minimum) or split the
+  // segment after it with a new midpoint.
+  function deleteVertex(id: string, index: number) {
+    const m = measurements.find((x) => x.id === id);
+    if (!m) return;
+    if (m.geometry.length <= minPointsOf(m)) {
+      if (m.type === "count") deleteMeasurement(id); // last marker → the count goes
+      return;
+    }
+    setActiveVertex(null);
+    commitGeometry(id, m.geometry.filter((_, i) => i !== index));
+  }
+  function splitAfterVertex(id: string, index: number) {
+    const m = measurements.find((x) => x.id === id);
+    if (!m || m.type === "count" || m.type === "leader" || m.type === "line") return;
+    const g = m.geometry;
+    const closed = m.type === "area" || (m.type === "volume" && m.vol_mode === "area");
+    const j = index + 1 < g.length ? index + 1 : closed ? 0 : index - 1;
+    if (j < 0) return;
+    const mid = { x: (g[index].x + g[j].x) / 2, y: (g[index].y + g[j].y) / 2 };
+    const at = index + 1 < g.length || closed ? index + 1 : index;
+    const next = [...g.slice(0, at), mid, ...g.slice(at)];
+    setActiveVertex({ id, index: at });
+    commitGeometry(id, next);
+  }
+
   async function insertMeasurement(
     type: string,
     geometry: Pt[],
@@ -1517,8 +1692,10 @@ export default function PlanViewer({
   }
 
   // ---- touch helpers ----
-  // Long-press (500 ms, finger still) = the right-click menu.
-  function startLongPress(cx: number, cy: number) {
+  // Long-press (450 ms, finger still). On a vertex of any shape: GRAB it — the
+  // finger can slide it right away, in any tool; lifting without a slide opens
+  // the vertex menu. On a shape: its menu. On empty canvas: the tool switcher.
+  function startLongPress(cx: number, cy: number, pointerId?: number) {
     cancelLongPress();
     longPressFiredRef.current = false;
     longPressRef.current = setTimeout(() => {
@@ -1526,10 +1703,27 @@ export default function PlanViewer({
       const rect = svgRef.current?.getBoundingClientRect();
       if (!rect) return;
       const pt = { x: (cx - rect.left) / scale, y: (cy - rect.top) / scale };
+      const v = pointerId != null && tool !== "crop" ? vertexAt(pt) : null;
+      if (v && pointerId != null) {
+        const m = measurements.find((x) => x.id === v.id);
+        if (m) {
+          tapRef.current = null; // no point gets placed on lift
+          selTapRef.current = null;
+          setSelectedId(m.id);
+          setActiveVertex(v);
+          dragRef.current = { id: m.id, index: v.index, pointerId };
+          dragStartRef.current = { x: cx, y: cy, moved: false, hold: true };
+          setEditGeom(m.geometry.map((q) => ({ ...q })));
+          setGrabPulse(true);
+          setTimeout(() => setGrabPulse(false), 400);
+          showLoupeAt(cx, cy, m.geometry[v.index]);
+          return;
+        }
+      }
       const id = pickMeasurementAt(pt);
       setMenu(id ? { x: cx, y: cy, kind: "measurement", id } : { x: cx, y: cy, kind: "canvas" });
       setLoupe(null);
-    }, 500);
+    }, 450);
   }
   function cancelLongPress() {
     if (longPressRef.current) {
@@ -1543,10 +1737,13 @@ export default function PlanViewer({
     setLoupe(null);
   }
   function showLoupe(e: React.PointerEvent) {
+    showLoupeAt(e.clientX, e.clientY, evtToPoint(e));
+  }
+  function showLoupeAt(clientX: number, clientY: number, pt: Pt) {
     const host = viewportRef.current?.parentElement; // the center column (relative)
     if (!host) return;
     const hr = host.getBoundingClientRect();
-    setLoupe({ vx: e.clientX - hr.left, vy: e.clientY - hr.top, pt: evtToPoint(e) });
+    setLoupe({ vx: clientX - hr.left, vy: clientY - hr.top, pt });
   }
   // Zoom so the page point under (clientX, clientY) stays put — the tap
   // fallback for pinch (double-tap in Pan mode, the +/− buttons).
@@ -1624,29 +1821,57 @@ export default function PlanViewer({
     // Finger on a draw tool: nothing is placed yet. The point goes where the
     // finger LIFTS (slide to aim with the loupe); a second finger turns the
     // gesture into a pinch instead; holding still opens the menu.
-    if (e.pointerType === "touch" && tool !== "select" && tool !== "crop" && tool !== "browse") {
+    const touch = e.pointerType === "touch";
+    if (touch && tool !== "select" && tool !== "crop" && tool !== "browse") {
       if (pointersRef.current.size > 1) return;
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
       showLoupe(e);
-      startLongPress(e.clientX, e.clientY);
+      startLongPress(e.clientX, e.clientY, e.pointerId);
       return;
     }
-    if (e.pointerType === "touch" && tool === "select") startLongPress(e.clientX, e.clientY);
 
     if (tool === "select") {
-      // grab a vertex handle of the selected measurement?
       if (selected) {
-        for (let i = 0; i < selected.geometry.length; i++) {
-          const v = selected.geometry[i];
-          if (Math.hypot(v.x - pt.x, v.y - pt.y) <= TOL() * 1.6) {
-            dragRef.current = { id: selected.id, index: i, pointerId: e.pointerId };
-            setEditGeom(selected.geometry.map((q) => ({ ...q })));
-            try {
-              svgRef.current?.setPointerCapture(e.pointerId);
-            } catch {}
-            return;
+        // A handle of the selected shape: press = maybe a drag (after 8 px),
+        // maybe a tap (nudge pad), maybe a hold (vertex menu).
+        const v = vertexAt(pt, true);
+        if (v) {
+          dragRef.current = { id: selected.id, index: v.index, pointerId: e.pointerId };
+          dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false };
+          setEditGeom(selected.geometry.map((q) => ({ ...q })));
+          try {
+            svgRef.current?.setPointerCapture(e.pointerId);
+          } catch {}
+          if (touch) {
+            showLoupe(e);
+            startLongPress(e.clientX, e.clientY, e.pointerId);
           }
+          return;
         }
+        // Inside a selected filled shape (or "Move" armed from the menu): drag
+        // the whole shape.
+        const filled =
+          selected.type === "area" || (selected.type === "volume" && selected.vol_mode === "area");
+        if (
+          moveArmedRef.current ||
+          (filled && selected.geometry.length >= 3 && pointInPoly(pt, selected.geometry))
+        ) {
+          moveArmedRef.current = false;
+          const orig = selected.geometry.map((q) => ({ ...q }));
+          moveRef.current = { id: selected.id, pointerId: e.pointerId, start: pt, orig };
+          setEditGeom(orig);
+          try {
+            svgRef.current?.setPointerCapture(e.pointerId);
+          } catch {}
+          return;
+        }
+      }
+      if (touch) {
+        // Finger: select on LIFT. A stray drag does nothing (no accidental pan);
+        // a hold opens the menu; a second finger makes it a pinch.
+        selTapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        startLongPress(e.clientX, e.clientY, e.pointerId);
+        return;
       }
       setSelectedId(pickMeasurementAt(pt));
       return;
@@ -1668,12 +1893,47 @@ export default function PlanViewer({
   }
 
   function onPointerMove(e: React.PointerEvent) {
+    const touch = e.pointerType === "touch";
     // A finger aiming a point: move the loupe and the rubber-band, place later.
-    if (e.pointerType === "touch" && tapRef.current?.id === e.pointerId) {
+    if (touch && tapRef.current?.id === e.pointerId) {
       if (Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10)
         cancelLongPress();
       showLoupe(e);
       if (draft.length) setHover(evtToPoint(e));
+      return;
+    }
+    // Select tool, finger on nothing: a slide is not a selection (and not a
+    // pan — that's two fingers). It only cancels the hold.
+    if (touch && selTapRef.current?.id === e.pointerId && !dragRef.current) {
+      if (Math.hypot(e.clientX - selTapRef.current.x, e.clientY - selTapRef.current.y) > 10)
+        cancelLongPress();
+      return;
+    }
+    // A vertex being dragged — any tool (Select's handle, or a hold-grab).
+    if (dragRef.current && dragRef.current.pointerId === e.pointerId) {
+      const ds = dragStartRef.current;
+      if (ds && !ds.moved) {
+        if (Math.hypot(e.clientX - ds.x, e.clientY - ds.y) <= 8) return; // still a tap
+        ds.moved = true;
+        cancelLongPress();
+      }
+      const pt = evtToPoint(e);
+      setEditGeom((g) => {
+        if (!g) return g;
+        const ng = g.map((q) => ({ ...q }));
+        ng[dragRef.current!.index] = pt;
+        return ng;
+      });
+      if (touch) showLoupe(e);
+      return;
+    }
+    // The whole shape being moved.
+    if (moveRef.current && moveRef.current.pointerId === e.pointerId) {
+      const pt = evtToPoint(e);
+      const { start, orig } = moveRef.current;
+      const dx = pt.x - start.x;
+      const dy = pt.y - start.y;
+      setEditGeom(orig.map((q) => ({ x: q.x + dx, y: q.y + dy })));
       return;
     }
     if (tool === "crop") {
@@ -1682,19 +1942,7 @@ export default function PlanViewer({
       setCropDraft((d) => (d ? { a: d.a, b: constrainCrop(d.a, pt) } : d));
       return;
     }
-    if (tool === "select") {
-      if (dragRef.current) {
-        const pt = evtToPoint(e);
-        setEditGeom((g) => {
-          if (!g) return g;
-          const ng = g.map((q) => ({ ...q }));
-          ng[dragRef.current!.index] = pt;
-          return ng;
-        });
-      }
-      return;
-    }
-    if (tool === "browse" || draft.length === 0) return;
+    if (tool === "select" || tool === "browse" || draft.length === 0) return;
     setHover(evtToPoint(e));
   }
 
@@ -1718,6 +1966,19 @@ export default function PlanViewer({
         placePoint(pt);
         return;
       }
+      // Select tool: the tap lands now (unless it became a hold / pinch / slide).
+      if (selTapRef.current?.id === e.pointerId && !dragRef.current) {
+        const st = selTapRef.current;
+        selTapRef.current = null;
+        const fired = longPressFiredRef.current;
+        cancelLongPress();
+        setLoupe(null);
+        if (fired || pinchedRef.current) return;
+        if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) return;
+        setSelectedId(pickMeasurementAt(evtToPoint(e)));
+        return;
+      }
+      selTapRef.current = null;
       cancelLongPress();
     }
     if (tool === "crop") {
@@ -1728,41 +1989,31 @@ export default function PlanViewer({
       );
       return;
     }
-    if (tool === "select" && dragRef.current && editGeom) {
-      const id = dragRef.current.id;
+    // A handle press ends: a drag commits; a tap makes it the active vertex
+    // (nudge pad); a hold that never slid opens the vertex menu.
+    if (dragRef.current && dragRef.current.pointerId === e.pointerId) {
+      const { id, index } = dragRef.current;
+      const ds = dragStartRef.current;
       dragRef.current = null;
-      const m = measurements.find((x) => x.id === id);
+      dragStartRef.current = null;
+      setLoupe(null);
+      if (!ds?.moved) {
+        setEditGeom(null);
+        setActiveVertex({ id, index });
+        if (ds?.hold) setMenu({ x: e.clientX, y: e.clientY, kind: "vertex", id, index });
+        return;
+      }
       const geometry = editGeom;
       setEditGeom(null);
-      if (m) {
-        recordHistory();
-        let value = m.value;
-        if (m.type === "leader") {
-          value = null; // leaders carry text, not a measured value
-        } else if (m.type === "count") {
-          value = geometry.length;
-        } else if (currentScale?.x && currentScale?.y) {
-          value =
-            m.type === "area"
-              ? polyAreaSqFt(geometry, currentScale.x, currentScale.y)
-              : m.type === "wall"
-                ? geomLenFeet(geometry, currentScale.x, currentScale.y) *
-                  (m.wall_height ?? 0) *
-                  (m.wall_sided === "double" ? 2 : 1)
-                : m.type === "volume"
-                  ? m.vol_mode === "area"
-                    ? polyAreaSqFt(geometry, currentScale.x, currentScale.y) *
-                      (m.vol_depth ?? 0)
-                    : geomLenFeet(geometry, currentScale.x, currentScale.y) *
-                      (m.vol_width ?? 0) *
-                      (m.vol_depth ?? 0)
-                  : geomLenFeet(geometry, currentScale.x, currentScale.y);
-        }
-        setMeasurements((arr) =>
-          arr.map((x) => (x.id === id ? { ...x, geometry, value } : x)),
-        );
-        await supabase.from("measurements").update({ geometry, value }).eq("id", id);
-      }
+      if (geometry) await commitGeometry(id, geometry);
+      return;
+    }
+    if (moveRef.current && moveRef.current.pointerId === e.pointerId) {
+      const { id } = moveRef.current;
+      moveRef.current = null;
+      const geometry = editGeom;
+      setEditGeom(null);
+      if (geometry) await commitGeometry(id, geometry);
     }
   }
 
@@ -2115,6 +2366,15 @@ export default function PlanViewer({
         pinchedRef.current = true;
         panRef.current = null;
         cancelTouchTap();
+        // Whatever the first finger had started is abandoned, untouched: a
+        // vertex snaps back, a shape move is dropped, a crop box vanishes.
+        dragRef.current = null;
+        dragStartRef.current = null;
+        moveRef.current = null;
+        selTapRef.current = null;
+        setEditGeom(null);
+        cropDragRef.current = false;
+        setCropDraft(null);
         return;
       }
       if (pointersRef.current.size > 2) return;
@@ -2187,6 +2447,26 @@ export default function PlanViewer({
   function onPanEnd(e: React.PointerEvent) {
     const vp = viewportRef.current;
     if (e.pointerType === "touch") {
+      // Pan tool: a plain tap on a shape selects it (and switches to Select).
+      if (
+        tool === "browse" &&
+        panRef.current &&
+        pointersRef.current.size === 1 &&
+        !pinchedRef.current &&
+        Math.hypot(e.clientX - panRef.current.x, e.clientY - panRef.current.y) < 10 &&
+        svgRef.current
+      ) {
+        const rect = svgRef.current.getBoundingClientRect();
+        const id = pickMeasurementAt({
+          x: (e.clientX - rect.left) / scale,
+          y: (e.clientY - rect.top) / scale,
+        });
+        if (id) {
+          lastTapRef.current = null;
+          setTool("select");
+          setSelectedId(id);
+        }
+      }
       pointersRef.current.delete(e.pointerId);
       if (pointersRef.current.size < 2) pinchRef.current = null;
       if (pointersRef.current.size === 0) panRef.current = null;
@@ -2433,19 +2713,45 @@ export default function PlanViewer({
 
   // Order matters on a phone: the tools row scrolls sideways, so the ones used
   // most sit first and stay visible.
-  const TOOLS: { id: Tool; label: string }[] = [
-    { id: "select", label: "Select" },
-    { id: "browse", label: "Pan" },
-    { id: "line", label: "Line" },
-    { id: "area", label: "Area" },
-    { id: "count", label: "Count" },
-    { id: "polyline", label: "Polyline" },
-    { id: "wall", label: "Wall" },
-    { id: "volume", label: "Volume" },
-    { id: "leader", label: "Leader" },
-    { id: "calibrate", label: "Calibrate" },
-    { id: "crop", label: "Crop" },
+  const TOOLS: { id: Tool; label: string; icon: (p: ToolIconProps) => React.ReactElement }[] = [
+    { id: "select", label: "Select", icon: SelectIcon },
+    { id: "browse", label: "Pan", icon: PanIcon },
+    { id: "line", label: "Line", icon: LineIcon },
+    { id: "area", label: "Area", icon: AreaIcon },
+    { id: "count", label: "Count", icon: CountIcon },
+    { id: "polyline", label: "Polyline", icon: PolylineIcon },
+    { id: "wall", label: "Wall", icon: WallIcon },
+    { id: "volume", label: "Volume", icon: VolumeIcon },
+    { id: "leader", label: "Leader", icon: LeaderIcon },
+    { id: "calibrate", label: "Calibrate", icon: CalibrateIcon },
+    { id: "crop", label: "Crop", icon: CropIcon },
   ];
+
+  // The scale preset picker — in the phone's top row and the desktop toolbar.
+  const scaleSelect = (cls: string) => (
+    <select
+      value={currentScale?.preset ?? ""}
+      onChange={(e) => applyPreset(e.target.value)}
+      aria-label="Sheet scale"
+      className={`rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none ${cls}`}
+    >
+      <option value="">{hasScale && !currentScale?.preset ? "Manual" : "Not set"}</option>
+      <optgroup label="Architectural">
+        {PRESETS.filter((p) => p.group === "Architectural").map((p) => (
+          <option key={p.label} value={p.label}>
+            {p.label}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="Civil / Engineering">
+        {PRESETS.filter((p) => p.group === "Civil").map((p) => (
+          <option key={p.label} value={p.label}>
+            {p.label}
+          </option>
+        ))}
+      </optgroup>
+    </select>
+  );
 
   // Running totals for this sheet, grouped by layer and summed per unit.
   // One group per layer: rows + summed totals. The panel shows these groups
@@ -2473,7 +2779,24 @@ export default function PlanViewer({
                       setSelectedId(m.id);
                     },
                   },
+                  {
+                    label: "Move",
+                    onClick: () => {
+                      // The next drag (anywhere) carries the whole shape.
+                      setTool("select");
+                      setSelectedId(m.id);
+                      moveArmedRef.current = true;
+                    },
+                  },
                   { label: "Duplicate", onClick: () => duplicateMeasurement(m) },
+                  {
+                    label: "Properties",
+                    onClick: () => {
+                      setTool("select");
+                      setSelectedId(m.id);
+                      setPanelOpen(true);
+                    },
+                  },
                   {
                     label: "Delete",
                     danger: true,
@@ -2482,6 +2805,31 @@ export default function PlanViewer({
                 ]
               : [];
           })()
+        : menu.kind === "vertex"
+          ? (() => {
+              const m = measurements.find((x) => x.id === menu.id);
+              const i = menu.index ?? 0;
+              if (!m) return [];
+              const items: { label: string; danger?: boolean; onClick: () => void }[] = [
+                {
+                  label: "Nudge",
+                  onClick: () => {
+                    setTool("select");
+                    setSelectedId(m.id);
+                    setActiveVertex({ id: m.id, index: i });
+                  },
+                },
+              ];
+              if (m.type !== "count" && m.type !== "leader" && m.type !== "line")
+                items.push({ label: "Split segment here", onClick: () => splitAfterVertex(m.id, i) });
+              if (m.geometry.length > minPointsOf(m) || m.type === "count")
+                items.push({
+                  label: m.type === "count" ? "Delete this marker" : "Delete this point",
+                  danger: true,
+                  onClick: () => deleteVertex(m.id, i),
+                });
+              return items;
+            })()
         : menu.kind === "sheet"
           ? (() => {
               const s = sheetList.find((x) => x.id === menu.id);
@@ -2573,7 +2921,7 @@ export default function PlanViewer({
                       if (rowPressRef.current) clearTimeout(rowPressRef.current);
                       rowPressRef.current = setTimeout(
                         () => setMenu({ x, y, kind: "sheet", id: s.id }),
-                        500,
+                        450,
                       );
                     }}
                     onPointerUp={() => {
@@ -2683,9 +3031,12 @@ export default function PlanViewer({
 
       {/* Center */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* Toolbar */}
-        <div className="glass-strong z-10 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
-          <div className="flex items-center gap-2 text-muted">
+        {/* Toolbar. Phone (below md): row 1 = sheets · undo/redo · scale · More;
+            row 2 = every tool as a 6-column grid of 44 px icon buttons, none
+            hidden off the edge. Zoom, legend, export and the panels sit in the
+            More sheet. md and up: one wrapping row, icons with labels. */}
+        <div className="glass-strong z-10 flex flex-col gap-1.5 px-2 py-1.5 text-sm md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-3 md:px-4 md:py-2.5">
+          <div className="flex items-center gap-1.5 text-muted md:gap-2">
             {!navOpen ? (
               <button
                 type="button"
@@ -2714,52 +3065,52 @@ export default function PlanViewer({
             >
               ↷
             </button>
+            {/* Phone: the scale and the More sheet share row 1 */}
+            <label className="flex min-w-0 flex-1 items-center gap-1 md:hidden">
+              <span className="text-[10px] uppercase tracking-wider">Scale</span>
+              {scaleSelect("min-w-0 flex-1 text-xs")}
+            </label>
+            <button
+              type="button"
+              onClick={() => setMoreOpen(true)}
+              aria-label="More viewer controls"
+              aria-haspopup="dialog"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border text-foreground hover:border-brand md:hidden"
+            >
+              <MoreIcon className="h-5 w-5" />
+            </button>
           </div>
 
-          {/* Scrolls sideways on narrow screens instead of clipping tools off. */}
-          <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto">
-            {TOOLS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => selectTool(t.id)}
-                className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1 transition-colors ${
-                  tool === t.id
-                    ? "border-brand bg-brand/15 text-foreground"
-                    : "border-border text-muted hover:border-brand"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          {/* Tools: a 6-column grid on phones (two rows, all visible); a row
+              of icon + label buttons from md up. */}
+          <div className="grid grid-cols-6 gap-1 md:flex md:min-w-0 md:max-w-full md:flex-wrap md:items-center">
+            {TOOLS.map((t) => {
+              const Ico = t.icon;
+              const active = tool === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => selectTool(t.id)}
+                  aria-pressed={active}
+                  title={t.label}
+                  className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-md border px-1 text-[10px] leading-none transition-colors md:min-h-0 md:shrink-0 md:flex-row md:gap-1.5 md:whitespace-nowrap md:px-2.5 md:py-1 md:text-xs ${
+                    active
+                      ? "border-brand bg-brand/15 text-foreground"
+                      : "border-border text-muted hover:border-brand"
+                  }`}
+                >
+                  <Ico className="h-5 w-5 md:h-4 md:w-4" />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-3 text-muted">
+          <div className="hidden items-center gap-3 text-muted md:flex">
             <label className="flex items-center gap-1.5">
               <span className="text-xs uppercase tracking-wider">Scale</span>
-              <select
-                value={currentScale?.preset ?? ""}
-                onChange={(e) => applyPreset(e.target.value)}
-                className="rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none"
-              >
-                <option value="">
-                  {hasScale && !currentScale?.preset ? "Manual" : "Not set"}
-                </option>
-                <optgroup label="Architectural">
-                  {PRESETS.filter((p) => p.group === "Architectural").map((p) => (
-                    <option key={p.label} value={p.label}>
-                      {p.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Civil / Engineering">
-                  {PRESETS.filter((p) => p.group === "Civil").map((p) => (
-                    <option key={p.label} value={p.label}>
-                      {p.label}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
+              {scaleSelect("")}
             </label>
             <div className="flex items-center gap-1">
               <button
@@ -2819,32 +3170,176 @@ export default function PlanViewer({
           </div>
         </div>
 
-        {/* New-measurement attributes (Line / Polyline / Area / Wall / Volume / Count) */}
+        {/* Phone "More" sheet: zoom, legend, export, panels */}
+        {moreOpen ? (
+          <div
+            className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 md:hidden"
+            onClick={() => setMoreOpen(false)}
+          >
+            <div
+              role="dialog"
+              aria-label="Viewer controls"
+              className="glass-strong pb-safe w-full max-w-sm rounded-t-2xl p-3 text-sm"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-muted">Zoom</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setScale((s) => Math.max(0.1, s / 1.25))}
+                    aria-label="Zoom out"
+                    className="h-11 w-11 rounded-md border border-border text-lg text-foreground"
+                  >
+                    −
+                  </button>
+                  <span className="w-14 text-center tabular-nums text-foreground">{Math.round(scale * 100)}%</span>
+                  <button
+                    type="button"
+                    onClick={() => setScale((s) => Math.min(6, s * 1.25))}
+                    aria-label="Zoom in"
+                    className="h-11 w-11 rounded-md border border-border text-lg text-foreground"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    onClick={fitWidth}
+                    className="h-11 rounded-md border border-border px-3 text-foreground"
+                  >
+                    Fit
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-1">
+                {ledgerRows.length ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateLedger({ visible: !currentLedger?.visible });
+                      setMoreOpen(false);
+                    }}
+                    className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                  >
+                    {currentLedger?.visible ? "Hide legend" : "Show legend"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    openExport();
+                  }}
+                  disabled={status !== "ready"}
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10 disabled:opacity-40"
+                >
+                  Export marked-up PDF…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPanelOpen((o) => !o);
+                    setMoreOpen(false);
+                  }}
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                >
+                  {panelOpen ? "Hide measurements panel" : "Show measurements panel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNavOpen((o) => !o);
+                    setMoreOpen(false);
+                  }}
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                >
+                  {navOpen ? "Hide sheet list" : "Show sheet list"}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(false)}
+                className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-white/10 text-muted hover:text-foreground"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* New-measurement attributes (Line / Polyline / Area / Wall / Volume / Count).
+            One short row: the layer name takes the width; on phones the color is
+            a single swatch that opens a popover of 44 px swatches (twelve
+            inline dots each stretched to 44 px by the touch rule was what made
+            this bar so tall). */}
         {tool === "line" ||
         tool === "polyline" ||
         tool === "area" ||
         tool === "wall" ||
         tool === "volume" ||
         tool === "count" ? (
-          <div className="glass z-10 flex flex-wrap items-center gap-3 px-4 py-2 text-sm">
-            <span className="text-xs uppercase tracking-wider text-muted">Layer</span>
-            <input
-              value={layer}
-              onChange={(e) => setLayer(e.target.value)}
-              placeholder="e.g. Exterior wall"
-              className="rounded-md border border-border bg-background px-2 py-1 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
-            />
-            <span className="text-xs uppercase tracking-wider text-muted">Color</span>
-            <div className="flex items-center gap-1">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  style={{ background: c }}
-                  className={`h-5 w-5 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
-                />
-              ))}
+          <div className="glass z-10 flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1 text-xs md:gap-3 md:px-4 md:py-2 md:text-sm">
+            <label className="flex min-w-0 flex-1 basis-36 items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
+              <input
+                value={layer}
+                onChange={(e) => setLayer(e.target.value)}
+                placeholder="e.g. Exterior wall"
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none md:w-48 md:flex-none"
+              />
+            </label>
+            <div className="relative flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
+              {/* Phone: one swatch → popover */}
+              <button
+                type="button"
+                onClick={() => setColorOpen((o) => !o)}
+                aria-label="Pick a color"
+                aria-haspopup="true"
+                aria-expanded={colorOpen}
+                className="flex h-10 w-10 min-h-0 items-center justify-center rounded-md border border-border md:hidden"
+              >
+                <span className="h-5 w-5 rounded-full" style={{ background: color }} />
+              </button>
+              {/* md+: the dots inline */}
+              <div className="hidden items-center gap-1 md:flex">
+                {COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setColor(c)}
+                    aria-label={`Color ${c}`}
+                    aria-pressed={color === c}
+                    style={{ background: c }}
+                    className={`h-5 w-5 min-h-0 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
+                  />
+                ))}
+              </div>
+              {colorOpen ? (
+                <>
+                  <div className="fixed inset-0 z-20 md:hidden" onClick={() => setColorOpen(false)} />
+                  <div className="glass-strong absolute right-0 top-full z-30 mt-1 grid grid-cols-6 gap-0.5 rounded-xl p-1.5 md:hidden">
+                    {COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => {
+                          setColor(c);
+                          setColorOpen(false);
+                        }}
+                        aria-label={`Color ${c}`}
+                        aria-pressed={color === c}
+                        className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-white/10"
+                      >
+                        <span
+                          className={`h-6 w-6 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
+                          style={{ background: c }}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </div>
             {tool === "wall" ? (
               <>
@@ -2951,7 +3446,9 @@ export default function PlanViewer({
               </div>
             ) : null}
             {!hasScale && tool !== "count" ? (
-              <span className="text-xs text-brand-soft">Set a scale before measuring.</span>
+              <span className="basis-full text-brand-soft md:basis-auto md:text-xs">
+                Set a scale before measuring.
+              </span>
             ) : null}
           </div>
         ) : null}
@@ -3223,19 +3720,39 @@ export default function PlanViewer({
                             {lbl.text}
                           </text>
                         ) : null}
-                        {isSel && tool === "select"
-                          ? pts.map((p, i) => (
-                              <circle
-                                key={i}
-                                cx={p.x}
-                                cy={p.y}
-                                r={coarse ? 11 : 5}
-                                fill="#fff"
-                                stroke={m.color ?? "#A01C2D"}
-                                strokeWidth={2}
-                                style={{ cursor: "grab" }}
-                              />
-                            ))
+                        {/* Handles: every vertex of the selection, in any tool
+                            (a hold grabs one from a drawing tool too). The
+                            active vertex (nudge pad) is filled; a fresh grab
+                            pulses once so the finger knows it has it. */}
+                        {isSel
+                          ? pts.map((p, i) => {
+                              const isActive = !!activeV && activeV.index === i;
+                              const r = (coarse ? 11 : 5) + (isActive ? 2 : 0);
+                              return (
+                                <g key={i}>
+                                  {isActive && grabPulse ? (
+                                    <circle
+                                      cx={p.x}
+                                      cy={p.y}
+                                      r={r * 2.2}
+                                      fill={m.color ?? "#A01C2D"}
+                                      fillOpacity={0.25}
+                                      className="animate-ping"
+                                      style={{ transformOrigin: `${p.x}px ${p.y}px` }}
+                                    />
+                                  ) : null}
+                                  <circle
+                                    cx={p.x}
+                                    cy={p.y}
+                                    r={r}
+                                    fill={isActive ? (m.color ?? "#A01C2D") : "#fff"}
+                                    stroke={isActive ? "#fff" : (m.color ?? "#A01C2D")}
+                                    strokeWidth={2}
+                                    style={{ cursor: tool === "select" ? "grab" : "crosshair" }}
+                                  />
+                                </g>
+                              );
+                            })
                           : null}
                       </g>
                     );
@@ -3423,10 +3940,71 @@ export default function PlanViewer({
         {loupe ? (
           <div
             className="pointer-events-none absolute z-30 overflow-hidden rounded-full border-2 border-brand bg-white shadow-xl"
-            style={{ left: loupe.vx - 60, top: loupe.vy - 60 - 90, width: 120, height: 120 }}
+            // Above the finger; flips below it near the top edge of the screen.
+            style={{
+              left: Math.max(4, loupe.vx - 60),
+              top: loupe.vy < 170 ? loupe.vy + 50 : loupe.vy - 60 - 90,
+              width: 120,
+              height: 120,
+            }}
             aria-hidden
           >
             <canvas ref={loupeCanvasRef} width={120} height={120} className="block" />
+          </div>
+        ) : null}
+
+        {/* Nudge pad: fine-tune the tapped vertex one step at a time. */}
+        {activeV && selected && draft.length === 0 && !menu ? (
+          <div
+            className="glass-strong absolute bottom-12 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-2xl px-2.5 py-1.5 text-xs"
+            role="group"
+            aria-label="Nudge the selected point"
+          >
+            <div className="grid grid-cols-3 gap-0.5">
+              {(
+                [
+                  [null, [0, -1, "↑", "Up"], null],
+                  [[-1, 0, "←", "Left"], null, [1, 0, "→", "Right"]],
+                  [null, [0, 1, "↓", "Down"], null],
+                ] as ([number, number, string, string] | null)[][]
+              ).flat().map((cell, i) =>
+                cell ? (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-label={`Nudge ${cell[3].toLowerCase()}`}
+                    onClick={() => nudgeActive(cell[0], cell[1])}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-base text-foreground hover:border-brand pointer-coarse:h-11 pointer-coarse:w-11"
+                  >
+                    {cell[2]}
+                  </button>
+                ) : (
+                  <span key={i} className="h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11" aria-hidden />
+                ),
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-muted">
+                Point {activeV.index + 1} of {selected.geometry.length}
+              </span>
+              <select
+                value={nudgeUnit}
+                onChange={(e) => setNudgeStep(e.target.value as "qft" | "ft" | "px")}
+                aria-label="Nudge step"
+                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus:border-brand focus:outline-none"
+              >
+                {hasScale ? <option value="qft">¼ ft per tap</option> : null}
+                {hasScale ? <option value="ft">1 ft per tap</option> : null}
+                <option value="px">1 px per tap</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setActiveVertex(null)}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:border-brand pointer-coarse:min-h-9"
+              >
+                Done
+              </button>
+            </div>
           </div>
         ) : null}
 
@@ -3589,13 +4167,18 @@ export default function PlanViewer({
             the drawing rather than floating over it, so the pager and the
             notes never fight for the same corner and nothing hides the sheet. */}
         <div className="glass-strong pb-safe z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
-          {/* Phones hide the app rail on the viewer — this is the way back. */}
-          <Link
-            href={`/projects/${projectId}`}
-            className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand md:hidden"
-          >
-            ‹ Back
-          </Link>
+          {/* Phones hide the app rail on the viewer — Back returns to the
+              project's Plans page; "Go to" reaches every other stage (Scope,
+              Pricing…) without leaving the takeoff first. */}
+          <div className="flex items-center gap-1.5 md:hidden">
+            <Link
+              href={`/projects/${projectId}`}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand"
+            >
+              ‹ Back
+            </Link>
+            <StageJump projectId={projectId} />
+          </div>
           <p className="hidden min-w-0 truncate text-[11px] text-muted md:block">
             {status === "ready" ? (
               <>
@@ -3901,7 +4484,9 @@ export default function PlanViewer({
             <p className="text-xs text-muted">
               {selected.type === "leader"
                 ? "Tip: drag the white handles to move the arrow tip or the text box."
-                : "Tip: drag the white handles on the sheet to reshape."}
+                : coarse
+                  ? "Tip: drag a white handle to reshape · tap a handle for the nudge pad · hold a handle for more."
+                  : "Tip: drag the white handles on the sheet to reshape · click a handle for the nudge pad."}
             </p>
             <div className="flex gap-2 pt-1">
               <button
@@ -4237,7 +4822,7 @@ export default function PlanViewer({
                   it.onClick();
                   setMenu(null);
                 }}
-                className={`block w-full rounded-lg px-3 py-1.5 text-left transition-colors ${
+                className={`block w-full rounded-lg px-3 py-1.5 text-left transition-colors pointer-coarse:min-h-11 pointer-coarse:py-2.5 ${
                   it.danger
                     ? "text-brand-soft hover:bg-brand/20"
                     : "text-foreground hover:bg-white/10"

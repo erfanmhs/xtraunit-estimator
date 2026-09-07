@@ -9,6 +9,99 @@ import { useRouter } from "next/navigation";
 import { startPricing, getPricingRun, cancelPricing } from "./actions";
 import type { ScopeRun } from "../scope/actions";
 
+// The pricing job's steps, matched to its stage text. Pricing is one AI call
+// for all lines (no per-division stream), so this shows WHERE it is and how
+// many lines came from your history vs the AI, plus the clock.
+const STEPS: { label: string; test: RegExp }[] = [
+  { label: "Gather scope & history", test: /^(Starting|Gathering)/ },
+  { label: "Match your price history", test: /^Matching/ },
+  { label: "AI pricing", test: /pricing \d+ lines? with AI/ },
+  { label: "Save", test: /^Saving/ },
+];
+
+function Progress({
+  run,
+  onCancel,
+  cancelling,
+}: {
+  run: ScopeRun;
+  onCancel: () => void;
+  cancelling: boolean;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = Math.max(0, Math.floor((now - new Date(run.created_at).getTime()) / 1000));
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const stage = run.stage ?? "";
+  const activeIdx = STEPS.findIndex((s) => s.test.test(stage));
+  const matched = stage.match(/(\d+) matched from history/)?.[1];
+  const aiLines = stage.match(/pricing (\d+) lines? with AI/)?.[1];
+
+  return (
+    <div className="glass w-full max-w-md rounded-xl p-4">
+      <div className="mb-2 flex items-center justify-between text-sm">
+        <span className="text-foreground">Suggesting prices…</span>
+        <span className="tabular-nums text-muted" aria-label="Elapsed">
+          {mins}:{secs.toString().padStart(2, "0")}
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+        <div
+          className="h-full rounded-full bg-brand transition-[width] duration-700 ease-out"
+          style={{ width: `${Math.min(100, Math.max(2, run.progress))}%` }}
+        />
+      </div>
+      <ol className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+        {STEPS.map((s, i) => {
+          const state = i < activeIdx ? "done" : i === activeIdx ? "active" : "todo";
+          return (
+            <li
+              key={s.label}
+              className={`flex items-center gap-1 ${
+                state === "done" ? "text-green-300" : state === "active" ? "text-foreground" : "text-muted/60"
+              }`}
+            >
+              <span aria-hidden>{state === "done" ? "✓" : state === "active" ? "●" : "○"}</span>
+              {s.label}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-2 text-sm leading-relaxed text-foreground">{run.stage ?? "Working…"}</p>
+      {matched || aiLines ? (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
+          {matched ? (
+            <span>
+              <span className="text-green-300">{matched}</span> from your history
+            </span>
+          ) : null}
+          {aiLines ? (
+            <span>
+              <span className="text-foreground">{aiLines}</span> being priced by the AI — they land
+              together when it finishes
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="mt-3 flex items-center justify-between">
+        <p className="text-[11px] text-muted/70">You can leave this page — it keeps going in the background.</p>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={cancelling}
+          className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand hover:text-brand-soft disabled:opacity-50"
+        >
+          {cancelling ? "Cancelling…" : "Cancel"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SuggestPanel({
   projectId,
   initialRun,
@@ -94,32 +187,7 @@ export default function SuggestPanel({
     setCancelling(false);
   }
 
-  if (run?.status === "running") {
-    return (
-      <div className="glass w-full max-w-md rounded-xl p-4">
-        <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="text-foreground">Suggesting prices…</span>
-        </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-          <div
-            className="h-full rounded-full bg-brand transition-[width] duration-700 ease-out"
-            style={{ width: `${Math.min(100, Math.max(2, run.progress))}%` }}
-          />
-        </div>
-        <div className="mt-2 flex items-center justify-between">
-          <p className="text-sm leading-relaxed text-foreground">{run.stage ?? "Working…"}</p>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={cancelling}
-            className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand hover:text-brand-soft disabled:opacity-50"
-          >
-            {cancelling ? "Cancelling…" : "Cancel"}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  if (run?.status === "running") return <Progress run={run} onCancel={onCancel} cancelling={cancelling} />;
 
   return (
     <div className="flex flex-col items-start gap-1.5">

@@ -11,6 +11,7 @@ import {
   runApplyFindings,
   abortScopeRun,
 } from "@/lib/scope/run";
+import { chunkTrades } from "@/lib/scope/generate";
 import {
   lineItemPatch,
   tradesInput,
@@ -25,6 +26,23 @@ import {
 import { enforceAiLimit } from "@/lib/ai-usage";
 import { enqueueJob, requestCancel, normalizeRun, ACTIVE_STATUSES } from "@/lib/jobs/queue";
 
+/** One division group of a scope run, for the live progress view. */
+export type RunStep = {
+  key: string;
+  label: string; // "03 · 04 · 05"
+  status: "done" | "active" | "pending";
+  lines: number; // drafted so far (done groups)
+  sample: string[]; // the first few line descriptions, as they land
+};
+/** What a running scope job is doing right now, derived from its row. */
+export type RunDetail = {
+  phase: "read" | "draft" | "review" | "save" | "done";
+  steps: RunStep[];
+  linesSoFar: number;
+  findingsSoFar: number;
+  attempt: number | null;
+};
+
 export type ScopeRun = {
   id: string;
   status: string;
@@ -33,7 +51,69 @@ export type ScopeRun = {
   error: string | null;
   created_at: string;
   updated_at: string;
+  detail?: RunDetail | null;
 };
+
+// Build the progress detail from the stage text + the checkpoint (migration
+// 0034: finished division groups are saved as they complete, so the UI can
+// show each group's lines while the rest are still drafting).
+function buildRunDetail(
+  stage: string | null,
+  trades: string[],
+  checkpoint: unknown,
+  attempt: number | null,
+): RunDetail {
+  const chunks = chunkTrades(trades);
+  const cp = (checkpoint ?? {}) as {
+    chunks?: Record<string, { lineItems?: { description?: string }[]; findings?: unknown[] }>;
+  };
+  const done = cp.chunks && typeof cp.chunks === "object" ? cp.chunks : {};
+  const s = stage ?? "";
+  const activeCodes = new Set(
+    (s.match(/divisions ([\d, ]+) \(/)?.[1] ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean),
+  );
+  let linesSoFar = 0;
+  let findingsSoFar = 0;
+  const steps: RunStep[] = chunks.map((chunk) => {
+    const codes = chunk.map((t) => t.split(" ")[0]);
+    const key = chunk.join("|");
+    const d = done[key];
+    if (d) {
+      const items = d.lineItems ?? [];
+      linesSoFar += items.length;
+      findingsSoFar += d.findings?.length ?? 0;
+      return {
+        key,
+        label: codes.join(" · "),
+        status: "done" as const,
+        lines: items.length,
+        sample: items
+          .slice(0, 3)
+          .map((li) => li.description ?? "")
+          .filter(Boolean),
+      };
+    }
+    const active = codes.some((c) => activeCodes.has(c));
+    return { key, label: codes.join(" · "), status: active ? ("active" as const) : ("pending" as const), lines: 0, sample: [] };
+  });
+  const phase: RunDetail["phase"] = /^Reading/.test(s)
+    ? "read"
+    : /^(Drafting|Resuming)/.test(s)
+      ? "draft"
+      : /^Reviewing/.test(s)
+        ? "review"
+        : /^Saving/.test(s)
+          ? "save"
+          : /^Done/.test(s)
+            ? "done"
+            : steps.some((x) => x.status === "done")
+              ? "draft"
+              : "read";
+  return { phase, steps, linesSoFar, findingsSoFar, attempt };
+}
 
 export async function startScope(
   projectId: string,
@@ -425,6 +505,27 @@ export async function getScopeRun(projectId: string): Promise<ScopeRun | null> {
   if (!data) return null;
 
   const run = normalizeRun(data as ScopeRun);
+  // Live progress detail (only worth the extra reads while it's running):
+  // the checkpoint of finished division groups + the trades this run covers.
+  if (run.status === "running" || run.status === "queued") {
+    const [cpRes, projRes] = await Promise.all([
+      supabase.from("scope_runs").select("checkpoint,payload,attempts").eq("id", run.id).maybeSingle(),
+      supabase.from("projects").select("gen_trades").eq("id", projectId).maybeSingle(),
+    ]);
+    if (!cpRes.error && cpRes.data) {
+      const row = cpRes.data as {
+        checkpoint: unknown;
+        payload: { trades?: string[] } | null;
+        attempts: number | null;
+      };
+      const trades = Array.isArray(row.payload?.trades)
+        ? row.payload!.trades!
+        : Array.isArray((projRes.data as { gen_trades?: string[] } | null)?.gen_trades)
+          ? ((projRes.data as { gen_trades: string[] }).gen_trades)
+          : [];
+      run.detail = buildRunDetail(run.stage, trades, row.checkpoint, row.attempts ?? null);
+    }
+  }
   // If a "running" job hasn't updated in 8 minutes, treat it as failed
   // (the process likely restarted mid-run). A queued/worker job heartbeats
   // updated_at every 30 s and is requeued automatically, so it never trips this.

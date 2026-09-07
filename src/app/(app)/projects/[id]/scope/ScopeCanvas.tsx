@@ -7,6 +7,7 @@
  * kept (dimmed + struck through) and can be restored or permanently removed.
  */
 import { useEffect, useState, useTransition } from "react";
+import SwipeRow from "@/components/SwipeRow";
 import {
   updateLineItem,
   setLineStatus,
@@ -331,7 +332,31 @@ function Row({
   const actionBtn =
     "rounded px-1.5 py-0.5 transition-colors text-muted hover:bg-white/5 hover:text-foreground";
 
+  // Touch: swipe left for Exclude / Delete (Restore / Delete when excluded);
+  // hold for every action. The buttons below stay as the visible fallback.
+  const swipe = excluded
+    ? [
+        { label: "Restore", onClick: onRestore },
+        { label: "Delete", onClick: onDelete, tone: "danger" as const },
+      ]
+    : [
+        { label: "Exclude", onClick: onExclude },
+        { label: "Delete", onClick: onDelete, tone: "danger" as const },
+      ];
+  const sheet = excluded
+    ? swipe
+    : [
+        {
+          label: confirmed ? "Undo confirm" : "Confirm",
+          onClick: onConfirm,
+          tone: "primary" as const,
+        },
+        { label: "Edit", onClick: onEdit },
+        ...swipe,
+      ];
+
   return (
+    <SwipeRow actions={swipe} sheetActions={sheet}>
     <div className={`group py-1 ${excluded ? "opacity-50" : ""}`}>
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -437,6 +462,7 @@ function Row({
         </div>
       ) : null}
     </div>
+    </SwipeRow>
   );
 }
 
