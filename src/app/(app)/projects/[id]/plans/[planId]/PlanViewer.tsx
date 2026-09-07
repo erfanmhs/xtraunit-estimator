@@ -3083,7 +3083,7 @@ export default function PlanViewer({
 
           {/* Tools: a 6-column grid on phones (two rows, all visible); a row
               of icon + label buttons from md up. */}
-          <div className="grid grid-cols-6 gap-1 md:flex md:min-w-0 md:max-w-full md:items-center md:overflow-x-auto">
+          <div className="grid grid-cols-6 gap-1 md:flex md:min-w-0 md:max-w-full md:flex-wrap md:items-center">
             {TOOLS.map((t) => {
               const Ico = t.icon;
               const active = tool === t.id;
@@ -3318,7 +3318,7 @@ export default function PlanViewer({
               {colorOpen ? (
                 <>
                   <div className="fixed inset-0 z-20 md:hidden" onClick={() => setColorOpen(false)} />
-                  <div className="glass-strong absolute left-0 top-full z-30 mt-1 grid grid-cols-6 gap-0.5 rounded-xl p-1.5 md:hidden">
+                  <div className="glass-strong absolute right-0 top-full z-30 mt-1 grid grid-cols-6 gap-0.5 rounded-xl p-1.5 md:hidden">
                     {COLORS.map((c) => (
                       <button
                         key={c}

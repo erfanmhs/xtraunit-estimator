@@ -276,6 +276,8 @@ nothing has to be relearned.
 | Menu items 44 px on touch | No | Yes |
 | Double-tap to finish a shape | No (desktop double-click only) | Yes |
 | Main app navigation reachable from the viewer on a phone | No (Back only) | Yes — a "Go to" sheet in the bottom bar (Plans · Scope · Pricing · Estimate · Proposal · Projects) |
+| Phone toolbar | Text buttons in a strip that scrolled off the edge; Export unreachable; twelve color dots each stretched to 44 px tall | Row 1: Sheets · undo/redo · Scale · More. Row 2: all eleven tools as 44 px icon buttons in a 6-column grid. More sheet: zoom, legend, Export PDF, panels. Options bar is one row; colors are one swatch that opens a popover of 44 px swatches |
+| Paging quickly blanked a sheet's measurements | Yes (out-of-order responses) | Fixed — only the latest sheet's load may land |
 
 ---
 
