@@ -36,6 +36,20 @@ function chip(active: boolean) {
   }`;
 }
 
+const PHASES: { key: NonNullable<ScopeRun["detail"]>["phase"]; label: string }[] = [
+  { key: "read", label: "Read plans" },
+  { key: "draft", label: "Draft divisions" },
+  { key: "review", label: "Review gaps" },
+  { key: "save", label: "Save" },
+];
+
+/**
+ * Live progress: the four phases, the elapsed clock, and — while drafting —
+ * every division group with its state. Finished groups show how many lines
+ * they produced and the first few, so the scope is visibly filling in rather
+ * than a bar creeping along. Detail comes from the run's checkpoint; without
+ * it (older DB) the stage text alone still shows.
+ */
 function Progress({
   run,
   onCancel,
@@ -56,11 +70,20 @@ function Progress({
   );
   const mins = Math.floor(elapsed / 60);
   const secs = elapsed % 60;
+  const d = run.detail ?? null;
+  const phaseIdx = d ? PHASES.findIndex((p) => p.key === d.phase) : -1;
+  const doneGroups = d ? d.steps.filter((s) => s.status === "done").length : 0;
+
   return (
     <div className="glass w-full max-w-md rounded-xl p-4">
       <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="text-foreground">Generating scope…</span>
-        <span className="text-muted">
+        <span className="text-foreground">
+          Generating scope…
+          {d && d.attempt && d.attempt > 1 ? (
+            <span className="ml-1.5 text-[11px] text-amber-300">resumed (attempt {d.attempt})</span>
+          ) : null}
+        </span>
+        <span className="tabular-nums text-muted" aria-label="Elapsed">
           {mins}:{secs.toString().padStart(2, "0")}
         </span>
       </div>
@@ -70,7 +93,92 @@ function Progress({
           style={{ width: `${Math.min(100, Math.max(2, run.progress))}%` }}
         />
       </div>
+
+      {/* The four phases */}
+      {d ? (
+        <ol className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+          {PHASES.map((p, i) => {
+            const state = i < phaseIdx ? "done" : i === phaseIdx ? "active" : "todo";
+            return (
+              <li
+                key={p.key}
+                className={`flex items-center gap-1 ${
+                  state === "done" ? "text-green-300" : state === "active" ? "text-foreground" : "text-muted/60"
+                }`}
+              >
+                <span aria-hidden>
+                  {state === "done" ? "✓" : state === "active" ? "●" : "○"}
+                </span>
+                {p.label}
+                {p.key === "draft" && d.steps.length ? (
+                  <span className="tabular-nums text-muted">
+                    {doneGroups}/{d.steps.length}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+
       <p className="mt-2 text-sm leading-relaxed text-foreground">{run.stage ?? "Working…"}</p>
+
+      {/* Division groups, streaming in as each finishes */}
+      {d && d.steps.length ? (
+        <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/20 p-2 text-xs">
+          {d.steps.map((s) => (
+            <div key={s.key} className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className={
+                    s.status === "done"
+                      ? "text-green-300"
+                      : s.status === "active"
+                        ? "animate-pulse text-brand-soft"
+                        : "text-muted/50"
+                  }
+                >
+                  {s.status === "done" ? "✓" : s.status === "active" ? "●" : "○"}
+                </span>
+                <span
+                  className={`min-w-0 flex-1 truncate ${
+                    s.status === "pending" ? "text-muted/70" : "text-foreground"
+                  }`}
+                >
+                  Div {s.label}
+                </span>
+                <span className="shrink-0 tabular-nums text-muted">
+                  {s.status === "done"
+                    ? `${s.lines} line${s.lines === 1 ? "" : "s"}`
+                    : s.status === "active"
+                      ? "drafting…"
+                      : ""}
+                </span>
+              </div>
+              {s.sample.length ? (
+                <ul className="ml-5 text-[11px] leading-snug text-muted/80">
+                  {s.sample.map((t, i) => (
+                    <li key={i} className="truncate">
+                      · {t}
+                    </li>
+                  ))}
+                  {s.lines > s.sample.length ? (
+                    <li className="text-muted/50">… and {s.lines - s.sample.length} more</li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </div>
+          ))}
+          {d.linesSoFar > 0 ? (
+            <p className="border-t border-white/10 pt-1 text-[11px] text-muted">
+              {d.linesSoFar} lines drafted so far
+              {d.findingsSoFar ? ` · ${d.findingsSoFar} findings` : ""}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mt-3 flex items-center justify-between">
         <p className="text-[11px] text-muted/70">
           You can leave this page — it keeps generating in the background.

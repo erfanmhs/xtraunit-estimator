@@ -141,7 +141,7 @@ One menu component, four contents. Opened by long-press (touch) or right-click
 | A shape | Edit (switch to Select with it selected) · Duplicate · Move · Properties (opens the Edit panel) · **Delete** |
 | A vertex of the selected shape | Nudge (opens the pad) · Delete this point (polylines / areas with more than the minimum points) · Split segment here (polylines / areas) |
 | Empty canvas | Switch tool: Select · Line · Area · Polyline · Wall · Volume · Count · Leader · Crop |
-| A sheet row | Open · Rename · Categorize (discipline) · Delete sheet |
+| A sheet row | Open · Rename · Delete sheet (the category dropdown sits in the row itself) |
 
 ---
 
