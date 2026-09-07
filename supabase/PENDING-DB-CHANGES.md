@@ -15,7 +15,23 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-Nothing pending.
+From the code health audit on 2026-09-07. Run these three in order. Each is
+safe on its own, safe to re-run, and none of them touches your data.
+
+- [ ] 0036_lock_down_worker_functions.sql — **the important one.** Two database
+      functions the background worker uses (claim a job, recover a stuck one)
+      could be called by anybody, including someone not signed in, because the
+      key that reaches them ships inside every web page. Someone could have
+      claimed your AI jobs and stalled them. This locks both to the worker
+      only. Your public proposal link keeps working — those functions are
+      meant to be public and are deliberately left alone.
+- [ ] 0037_rls_auth_initplan.sql — speed. Every security rule was re-checking
+      who you are once per row; now it works it out once per query. Same rules,
+      same protection, much less work as projects get bigger.
+- [ ] 0038_foreign_key_indexes.sql — speed. Adds twelve missing indexes, which
+      makes ordinary lookups and deleting a project or sheet noticeably
+      quicker. Run it when nobody is mid-takeoff; it locks each table for a
+      second or two while it builds.
 
 ---
 
