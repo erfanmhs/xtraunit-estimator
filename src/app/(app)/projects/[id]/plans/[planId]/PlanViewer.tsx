@@ -678,6 +678,9 @@ export default function PlanViewer({
   const [markedSheets, setMarkedSheets] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState<string | null>(null);
   const [exportLegend, setExportLegend] = useState(true);
+  // The context menu is measured after it mounts and moved so all of it is
+  // on-screen: opens upward from a low item, slides left from a right one.
+  const menuRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -1039,6 +1042,23 @@ export default function PlanViewer({
     return () => clearTimeout(t);
   }, [scale, rasterScale, coarse, baseDims.w, baseDims.h]);
 
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!menu || !el) return;
+    const pad = 8;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    let left = menu.x;
+    let top = menu.y;
+    if (left + w > W - pad) left = Math.max(pad, W - pad - w);
+    if (top + h > H - pad) top = Math.max(pad, menu.y - h); // flip above the finger
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.visibility = "visible";
+  }, [menu]);
 
   // Keyboard: Esc cancels/steps back, Delete removes selection, Space pans.
   useEffect(() => {
@@ -5697,14 +5717,11 @@ export default function PlanViewer({
             }}
           />
           <div
+            ref={menuRef}
             className="glass-strong fixed z-[61] min-w-[170px] rounded-xl p-1 text-sm"
-            style={{
-              left: Math.min(
-                menu.x,
-                (typeof window !== "undefined" ? window.innerWidth : 99999) - 190,
-              ),
-              top: menu.y,
-            }}
+            // Placed by the layout effect below once its size is known: it
+            // flips upward from a low item and never leaves the screen.
+            style={{ left: menu.x, top: menu.y, visibility: "hidden" }}
           >
             {menu.kind === "canvas" ? (
               <p className="px-3 py-1 text-[10px] uppercase tracking-wider text-muted">
