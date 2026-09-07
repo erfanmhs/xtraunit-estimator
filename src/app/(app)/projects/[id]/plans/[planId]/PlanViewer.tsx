@@ -545,11 +545,19 @@ export default function PlanViewer({
   // backdrop-filter makes it the containing block — so taps on the drawing
   // never closed the picker.)
   const popoverRef = useRef<HTMLDivElement>(null);
-  function popover(close: () => void, body: React.ReactNode, width = "w-80") {
+  const layerAnchorRef = useRef<DOMRect | null>(null); // the layer chip's box when opened
+  function popover(close: () => void, body: React.ReactNode, width = "w-80", anchor?: DOMRect | null) {
     if (phone) {
+      // Small popover pinned under its control (portaled so the backdrop is
+      // truly full-screen); falls back to a bottom sheet with no anchor.
+      const W = typeof window !== "undefined" ? window.innerWidth : 375;
+      const H = typeof window !== "undefined" ? window.innerHeight : 800;
+      const pw = Math.min(288, W - 16);
+      const left = anchor ? Math.max(8, Math.min(anchor.left, W - 8 - pw)) : 8;
+      const top = anchor ? Math.min(anchor.bottom + 4, H - 120) : undefined;
       return createPortal(
         <div
-          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50"
+          className={`fixed inset-0 z-[70] ${anchor ? "" : "flex items-end justify-center bg-black/50"}`}
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) close();
           }}
@@ -557,7 +565,12 @@ export default function PlanViewer({
           <div
             ref={popoverRef}
             role="dialog"
-            className="glass-strong pb-safe max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-2xl"
+            className={
+              anchor
+                ? "glass-strong fixed max-h-[45vh] overflow-y-auto rounded-xl"
+                : "glass-strong pb-safe max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-2xl"
+            }
+            style={anchor ? { left, top, width: pw } : undefined}
           >
             {body}
           </div>
@@ -3942,7 +3955,10 @@ export default function PlanViewer({
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
               <button
                 type="button"
-                onClick={() => setLayerOpen((o) => !o)}
+                onClick={(e) => {
+                  layerAnchorRef.current = e.currentTarget.getBoundingClientRect();
+                  setLayerOpen((o) => !o);
+                }}
                 aria-haspopup="listbox"
                 aria-expanded={layerOpen}
                 title="The layer new runs are added to"
@@ -3985,10 +4001,10 @@ export default function PlanViewer({
                       </div>
                       {layerGroups.length ? (
                         <>
-                          <p className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wider text-muted">
-                            Continue a layer on this sheet
+                          <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-muted">
+                            Continue a layer
                           </p>
-                          <div className="max-h-[45vh] overflow-y-auto sm:max-h-56">
+                          <div className="max-h-[32vh] overflow-y-auto sm:max-h-56">
                             {layerGroups.map((g) => {
                               const active = layerKeyOf(layer) === g.layer;
                               return (
@@ -4001,15 +4017,14 @@ export default function PlanViewer({
                                     if (!MEASURE_TOOLS.includes(tool) && kind && MEASURE_TOOLS.includes(kind)) setTool(kind);
                                     setLayerOpen(false);
                                   }}
-                                  className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-foreground hover:bg-white/10 ${
+                                  className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-foreground hover:bg-white/10 ${
                                     active ? "bg-brand/15" : ""
                                   }`}
                                 >
-                                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: g.color }} />
+                                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: g.color }} />
                                   <span className="min-w-0 flex-1 truncate">{g.layer}</span>
-                                  <span className="shrink-0 text-xs text-muted">
-                                    {g.rows.length} run{g.rows.length === 1 ? "" : "s"}
-                                    {g.lines.length ? ` · ${g.lines.join(", ")}` : ""}
+                                  <span className="shrink-0 text-[10px] text-muted">
+                                    {g.lines.length ? g.lines.join(" · ") : `${g.rows.length}`}
                                   </span>
                                 </button>
                               );
@@ -4018,10 +4033,40 @@ export default function PlanViewer({
                         </>
                       ) : null}
                     </div>,
-                    "w-80",
+                    "w-72",
+                    layerAnchorRef.current,
                   )
                 : null}
             </div>
+            {/* Dictate — speak a note about this sheet (opens Notes for AI and
+                starts listening); sits beside the color so it's one tap away
+                while drawing. */}
+            <button
+              type="button"
+              onClick={() => {
+                setNotesOpen(true);
+                if (voiceState === "listening") stopVoice();
+                else startVoice();
+              }}
+              disabled={voiceState === "thinking"}
+              aria-pressed={voiceState === "listening"}
+              aria-label={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
+              title={voiceState === "listening" ? "Stop dictating" : "Dictate a note about this sheet"}
+              className={`flex h-10 w-10 min-h-0 shrink-0 items-center justify-center rounded-md border transition-colors disabled:opacity-50 md:h-8 md:w-8 ${
+                voiceState === "listening"
+                  ? "border-brand bg-brand text-white"
+                  : "border-border text-foreground hover:border-brand"
+              }`}
+            >
+              {voiceState === "listening" ? (
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" aria-hidden />
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" strokeLinecap="round" />
+                </svg>
+              )}
+            </button>
             <div className="relative flex items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
               {/* Phone: one swatch → popover */}
