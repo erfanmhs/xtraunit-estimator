@@ -17,6 +17,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
@@ -537,6 +538,62 @@ export default function PlanViewer({
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
+  // A popover under a control. On phones it is a bottom sheet rendered at the
+  // document root with a real full-screen backdrop; on wider screens a
+  // dropdown, dismissed by any press outside it. (A `fixed` backdrop placed
+  // INSIDE the frosted options bar was clipped to the bar — the bar's
+  // backdrop-filter makes it the containing block — so taps on the drawing
+  // never closed the picker.)
+  const popoverRef = useRef<HTMLDivElement>(null);
+  function popover(close: () => void, body: React.ReactNode, width = "w-80") {
+    if (phone) {
+      return createPortal(
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) close();
+          }}
+        >
+          <div
+            ref={popoverRef}
+            role="dialog"
+            className="glass-strong pb-safe max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-2xl"
+          >
+            {body}
+          </div>
+        </div>,
+        document.body,
+      );
+    }
+    return (
+      <div
+        ref={popoverRef}
+        role="dialog"
+        className={`glass-strong absolute left-0 top-full z-30 mt-1 rounded-xl ${width}`}
+      >
+        {body}
+      </div>
+    );
+  }
+  // Desktop dropdowns close on any press outside them.
+  useEffect(() => {
+    if (!layerOpen || phone) return;
+    const onDown = (e: PointerEvent) => {
+      const el = popoverRef.current;
+      const t = e.target as Node | null;
+      if (el && t && !el.contains(t) && !(t as HTMLElement).closest?.('[title="The layer new runs are added to"]'))
+        setLayerOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLayerOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [layerOpen, phone]);
   // Fingers currently down on the viewport (client coords) → pinch when two.
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist0: number; scale0: number; fx: number; fy: number } | null>(null);
@@ -554,10 +611,10 @@ export default function PlanViewer({
   const fingersRef = useRef(new Map<number, number>()); // pointerId → time it landed
   const multiUntilRef = useRef(0);
   // Bookkeeping for the census: a finger whose lift was never delivered
-  // (it happens) is forgotten after 20 s so it can't block placing forever.
+  // (it happens) is forgotten after 6 s so it can't block placing for long.
   function fingerDown(id: number) {
     const now = Date.now();
-    for (const [k, t] of fingersRef.current) if (now - t > 20000) fingersRef.current.delete(k);
+    for (const [k, t] of fingersRef.current) if (now - t > 6000) fingersRef.current.delete(k);
     fingersRef.current.set(id, now);
     if (fingersRef.current.size > 1) {
       multiUntilRef.current = Number.MAX_SAFE_INTEGER; // until every finger lifts
@@ -1402,7 +1459,9 @@ export default function PlanViewer({
   }
   function midpointAt(pt: Pt): { at: number; p: Pt } | null {
     if (!selected) return null;
-    const r = TOL() * 1.4;
+    // Tight on purpose: the "+" is small, and a press anywhere else on the
+    // shape must still select / hold-for-menu rather than add a corner.
+    const r = TOL() * 0.9;
     let best: { at: number; p: Pt; d: number } | null = null;
     for (const h of plusHandles(selected)) {
       const d = Math.hypot(h.p.x - pt.x, h.p.y - pt.y);
@@ -1517,11 +1576,38 @@ export default function PlanViewer({
     extra: Partial<Measurement> = {},
   ) {
     if (!currentSheet) return;
+    // Optimistic: the shape appears and the draft clears NOW, not when the
+    // network answers. (Clearing the draft after the await wiped whatever
+    // the user had started drawing next on a slow connection, and the saved
+    // shape "vanished" until the round trip came back.)
+    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: Measurement = {
+      id: tempId,
+      type,
+      geometry,
+      value,
+      unit,
+      layer: layer || null,
+      color,
+      wall_sided: null,
+      wall_height: null,
+      vol_mode: null,
+      vol_width: null,
+      vol_depth: null,
+      ...extra,
+    };
+    recordHistory();
+    setMeasurements((m) => [...m, optimistic]);
+    setDraft([]);
+    setHover(null);
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return;
-    recordHistory();
+    if (!user) {
+      setMeasurements((m) => m.filter((x) => x.id !== tempId));
+      setError("Not signed in — that measurement wasn't saved.");
+      return;
+    }
     const { data, error: insErr } = await supabase
       .from("measurements")
       .insert({
@@ -1539,13 +1625,23 @@ export default function PlanViewer({
       })
       .select(MEAS_COLS)
       .single();
-    setDraft([]);
-    setHover(null);
     if (insErr || !data) {
+      setMeasurements((m) => m.filter((x) => x.id !== tempId));
       setError("Could not save that measurement.");
       return;
     }
-    setMeasurements((m) => [...m, data as Measurement]);
+    // Swap the placeholder for the saved row (keeps its real id for edits).
+    setMeasurements((m) => m.map((x) => (x.id === tempId ? (data as Measurement) : x)));
+    if (selectedId === tempId) setSelectedId((data as Measurement).id);
+    // Drawing into a hidden layer shows it again — a run that vanishes the
+    // moment it is saved looks like it was lost.
+    const key = layerKeyOf(layer || null);
+    if (hiddenLayers.has(key))
+      setHiddenLayers((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
   }
 
   function finalizeLine(p0: Pt, p1: Pt) {
@@ -1569,11 +1665,40 @@ export default function PlanViewer({
 
   async function insertLeader(geometry: Pt[]) {
     if (!currentSheet) return;
+    // Draft clears and the arrow shows right away; the note card opens once
+    // the row exists (its text edits need the real id).
+    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    recordHistory();
+    setMeasurements((m) => [
+      ...m,
+      {
+        id: tempId,
+        type: "leader",
+        geometry,
+        value: null,
+        unit: null,
+        layer: layer || null,
+        color,
+        wall_sided: null,
+        wall_height: null,
+        vol_mode: null,
+        vol_width: null,
+        vol_depth: null,
+        text: "",
+        font_size: LEADER_FONT_DEFAULT,
+        head_size: LEADER_HEAD_DEFAULT,
+      },
+    ]);
+    setDraft([]);
+    setHover(null);
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return;
-    recordHistory();
+    if (!user) {
+      setMeasurements((m) => m.filter((x) => x.id !== tempId));
+      setError("Not signed in — that leader wasn't saved.");
+      return;
+    }
     const { data, error: insErr } = await supabase
       .from("measurements")
       .insert({
@@ -1593,15 +1718,14 @@ export default function PlanViewer({
       })
       .select(MEAS_COLS)
       .single();
-    setDraft([]);
-    setHover(null);
     if (insErr || !data) {
+      setMeasurements((m) => m.filter((x) => x.id !== tempId));
       setError("Could not add the leader. (Has migration 0023 been run?)");
       return;
     }
-    // Drop straight into Select so the user can type the note in the panel.
+    // Drop straight into Select so the user can type the note.
     const md = data as Measurement;
-    setMeasurements((m) => [...m, md]);
+    setMeasurements((m) => m.map((x) => (x.id === tempId ? md : x)));
     setTool("select");
     setSelectedId(md.id);
   }
@@ -3446,8 +3570,11 @@ export default function PlanViewer({
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         // Finger census for the whole column (capture phase, so overlays
         // count too): see fingersRef.
+        // Only presses physically inside this column count. React also routes
+        // a portal's events (the phone bottom sheets) through here; a finger on
+        // a sheet's backdrop must not register as a finger on the drawing.
         onPointerDownCapture={(e) => {
-          if (e.pointerType === "touch") fingerDown(e.pointerId);
+          if (e.pointerType === "touch" && e.currentTarget.contains(e.target as Node)) fingerDown(e.pointerId);
         }}
         onPointerUpCapture={(e) => {
           if (e.pointerType === "touch") fingerUp(e.pointerId);
@@ -3747,59 +3874,69 @@ export default function PlanViewer({
                 ) : null}
                 <span className="text-muted" aria-hidden>▾</span>
               </button>
-              {layerOpen ? (
-                <>
-                  <div className="fixed inset-0 z-20" onClick={() => setLayerOpen(false)} />
-                  <div className="glass-strong absolute left-0 top-full z-30 mt-1 w-80 max-w-[calc(100vw-1rem)] rounded-xl p-1.5 text-sm">
-                    <input
-                      value={layer}
-                      onChange={(e) => setLayer(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === "Escape") setLayerOpen(false);
-                      }}
-                      autoFocus={!layer.trim()}
-                      spellCheck
-                      placeholder="New layer name (e.g. Exterior wall)"
-                      aria-label="Layer name"
-                      className="w-full rounded-md border border-border bg-background px-2 py-2 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
-                    />
-                    {layerGroups.length ? (
-                      <>
-                        <p className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wider text-muted">
-                          Continue a layer on this sheet
-                        </p>
-                        <div className="max-h-56 overflow-y-auto">
-                          {layerGroups.map((g) => {
-                            const active = layerKeyOf(layer) === g.layer;
-                            return (
-                              <button
-                                key={g.layer}
-                                type="button"
-                                onClick={() => {
-                                  continueLayer(g);
-                                  const kind = g.rows[0]?.type as Tool | undefined;
-                                  if (!MEASURE_TOOLS.includes(tool) && kind && MEASURE_TOOLS.includes(kind)) setTool(kind);
-                                  setLayerOpen(false);
-                                }}
-                                className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-foreground hover:bg-white/10 ${
-                                  active ? "bg-brand/15" : ""
-                                }`}
-                              >
-                                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: g.color }} />
-                                <span className="min-w-0 flex-1 truncate">{g.layer}</span>
-                                <span className="shrink-0 text-xs text-muted">
-                                  {g.rows.length} run{g.rows.length === 1 ? "" : "s"}
-                                  {g.lines.length ? ` · ${g.lines.join(", ")}` : ""}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
-                </>
-              ) : null}
+              {layerOpen
+                ? popover(
+                    () => setLayerOpen(false),
+                    <div className="p-1.5 text-sm">
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={layer}
+                          onChange={(e) => setLayer(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === "Escape") setLayerOpen(false);
+                          }}
+                          autoFocus={!layer.trim()}
+                          spellCheck
+                          placeholder="New layer name (e.g. Exterior wall)"
+                          aria-label="Layer name"
+                          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-2 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setLayerOpen(false)}
+                          className="glass-brand min-h-10 shrink-0 rounded-md px-3 font-medium text-foreground"
+                        >
+                          Done
+                        </button>
+                      </div>
+                      {layerGroups.length ? (
+                        <>
+                          <p className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wider text-muted">
+                            Continue a layer on this sheet
+                          </p>
+                          <div className="max-h-[45vh] overflow-y-auto sm:max-h-56">
+                            {layerGroups.map((g) => {
+                              const active = layerKeyOf(layer) === g.layer;
+                              return (
+                                <button
+                                  key={g.layer}
+                                  type="button"
+                                  onClick={() => {
+                                    continueLayer(g);
+                                    const kind = g.rows[0]?.type as Tool | undefined;
+                                    if (!MEASURE_TOOLS.includes(tool) && kind && MEASURE_TOOLS.includes(kind)) setTool(kind);
+                                    setLayerOpen(false);
+                                  }}
+                                  className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-foreground hover:bg-white/10 ${
+                                    active ? "bg-brand/15" : ""
+                                  }`}
+                                >
+                                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: g.color }} />
+                                  <span className="min-w-0 flex-1 truncate">{g.layer}</span>
+                                  <span className="shrink-0 text-xs text-muted">
+                                    {g.rows.length} run{g.rows.length === 1 ? "" : "s"}
+                                    {g.lines.length ? ` · ${g.lines.join(", ")}` : ""}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      ) : null}
+                    </div>,
+                    "w-80",
+                  )
+                : null}
             </div>
             <div className="relative flex items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
@@ -3831,7 +3968,7 @@ export default function PlanViewer({
               {colorOpen ? (
                 <>
                   <div className="fixed inset-0 z-20 md:hidden" onClick={() => setColorOpen(false)} />
-                  <div className="glass-strong absolute right-0 top-full z-30 mt-1 grid grid-cols-6 gap-0.5 rounded-xl p-1.5 md:hidden">
+                  <div className="glass-strong absolute right-0 top-full z-30 mt-1 grid grid-cols-6 gap-0.5 rounded-xl p-1.5 md:hidden" data-popover="color">
                     {COLORS.map((c) => (
                       <button
                         key={c}
@@ -4518,6 +4655,26 @@ export default function PlanViewer({
         </div>
 
         {/* Loupe: what's under the fingertip, magnified, above the finger */}
+        {/* Save / tool errors — visible as a toast (they used to be set but
+            only rendered on the loading screen, so a failed save just looked
+            like the shape vanishing). */}
+        {status === "ready" && error ? (
+          <div
+            role="alert"
+            className="absolute left-1/2 top-3 z-40 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-brand/40 bg-brand/90 px-4 py-2.5 text-sm text-white shadow-xl"
+          >
+            <span className="min-w-0">{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss"
+              className="min-h-0 shrink-0 rounded-md px-2 py-0.5 text-white/80 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
+
         {/* Loupe: always in the DOM, shown/moved imperatively while a finger
             aims (see showLoupeAt) so no render happens per move. */}
         <div
