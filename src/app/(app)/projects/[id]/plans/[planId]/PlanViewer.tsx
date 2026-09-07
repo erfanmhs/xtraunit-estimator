@@ -1432,7 +1432,9 @@ export default function PlanViewer({
   }
 
   function evtToPoint(e: React.PointerEvent): Pt {
-    const rect = svgRef.current!.getBoundingClientRect();
+    // Null-safe: a pointer event can land after the overlay is gone (sheet
+    // switch mid-gesture) — better a harmless point than a crash.
+    const rect = svgRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
     return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
   }
   // Selection tolerance in page points: a fingertip needs twice a cursor's.
@@ -2204,7 +2206,7 @@ export default function PlanViewer({
     st.raf = requestAnimationFrame(tick);
   }
   function clientToPoint(x: number, y: number): Pt {
-    const rect = svgRef.current!.getBoundingClientRect();
+    const rect = svgRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
     return { x: (x - rect.left) / scale, y: (y - rect.top) / scale };
   }
   function recordAim(x: number, y: number) {
@@ -2547,10 +2549,15 @@ export default function PlanViewer({
         cancelLongPress();
       }
       const pt = evtToPoint(e);
+      // Capture the index NOW. The updater below runs later, during React's
+      // next render — by then a fast lift may already have cleared dragRef,
+      // and reading it there crashed the whole viewer ("null is not an
+      // object (evaluating 'el.current.index')").
+      const idx = dragRef.current.index;
       setEditGeom((g) => {
         if (!g) return g;
         const ng = g.map((q) => ({ ...q }));
-        ng[dragRef.current!.index] = pt;
+        ng[idx] = pt;
         return ng;
       });
       if (touch) {
