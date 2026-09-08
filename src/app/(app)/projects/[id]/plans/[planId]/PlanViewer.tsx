@@ -32,6 +32,11 @@ import {
   segFeet,
   type Pt,
 } from "@/lib/takeoff/geometry";
+import {
+  buildLayerGroups,
+  labelText,
+  recomputeValue,
+} from "@/lib/takeoff/measurements";
 import StageJump from "@/components/StageNav";
 import SwipeRow from "@/components/SwipeRow";
 import { polishSheetNotes } from "./actions";
@@ -134,40 +139,6 @@ const MEAS_COLS =
 const LEADER_FONT_DEFAULT = 14;
 const LEADER_HEAD_DEFAULT = 12;
 
-// Recompute a measurement's value for a given scale (points-per-foot).
-// Count is independent of scale, so its value is left untouched.
-function recomputeValue(m: Measurement, sx: number, sy: number): number | null {
-  switch (m.type) {
-    case "line":
-    case "polyline":
-      return geomLenFeet(m.geometry, sx, sy);
-    case "area":
-      return polyAreaSqFt(m.geometry, sx, sy);
-    case "wall":
-      return (
-        geomLenFeet(m.geometry, sx, sy) *
-        (m.wall_height ?? 0) *
-        (m.wall_sided === "double" ? 2 : 1)
-      );
-    case "volume":
-      return m.vol_mode === "area"
-        ? polyAreaSqFt(m.geometry, sx, sy) * (m.vol_depth ?? 0)
-        : geomLenFeet(m.geometry, sx, sy) *
-            (m.vol_width ?? 0) *
-            (m.vol_depth ?? 0);
-    default:
-      return m.value;
-  }
-}
-
-function labelText(m: Measurement): string {
-  if (m.value == null) return "";
-  if (m.type === "volume")
-    return `${m.value.toFixed(0)} cf · ${(m.value / CF_PER_CY).toFixed(2)} cy`;
-  if (m.type === "count") return `${m.value} ea`;
-  return `${m.value.toFixed(1)} ${m.unit ?? ""}`;
-}
-
 const PRESETS: { label: string; inPerFt: number; group: string }[] = [
   { label: '3"=1\'', inPerFt: 3, group: "Architectural" },
   { label: '1-1/2"=1\'', inPerFt: 1.5, group: "Architectural" },
@@ -213,38 +184,6 @@ const MEASURE_TOOLS: Tool[] = [
 
 // Group measurements into layer takeoff lines (shared by the side panel, the
 // on-sheet legend, and the PDF export).
-function buildLayerGroups(measurements: Measurement[]) {
-  const groups: {
-    layer: string;
-    color: string;
-    rows: Measurement[];
-    units: Record<string, number>;
-  }[] = [];
-  for (const m of measurements) {
-    const key = layerKeyOf(m.layer);
-    let g = groups.find((x) => x.layer === key);
-    if (!g) {
-      g = { layer: key, color: m.color ?? "#A01C2D", rows: [], units: {} };
-      groups.push(g);
-    }
-    g.rows.push(m);
-    if (m.value != null) {
-      const unit = m.unit || "";
-      g.units[unit] = (g.units[unit] ?? 0) + m.value;
-    }
-  }
-  return groups.map((g) => ({
-    ...g,
-    lines: Object.entries(g.units).map(([unit, sum]) =>
-      unit === "cf"
-        ? `${sum.toFixed(0)} cf · ${(sum / CF_PER_CY).toFixed(2)} cy`
-        : unit === "ea"
-          ? `${sum} ea`
-          : `${sum.toFixed(1)} ${unit}`,
-    ),
-  }));
-}
-
 function hexToRgba(hex: string, a: number): string {
   const h = (hex || "#A01C2D").replace("#", "");
   const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
