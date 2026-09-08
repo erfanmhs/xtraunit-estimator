@@ -73,7 +73,6 @@ export default function EstimateView({
         initialMarkups.overhead_pct + initialMarkups.profit_pct,
       ),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMarkups]);
 
   // Live percentage values (formula-evaluated; fall back to last saved).
