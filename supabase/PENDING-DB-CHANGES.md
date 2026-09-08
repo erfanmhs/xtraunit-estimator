@@ -15,23 +15,7 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-From the code health audit on 2026-09-07. Run these three in order. Each is
-safe on its own, safe to re-run, and none of them touches your data.
-
-- [ ] 0036_lock_down_worker_functions.sql — **the important one.** Two database
-      functions the background worker uses (claim a job, recover a stuck one)
-      could be called by anybody, including someone not signed in, because the
-      key that reaches them ships inside every web page. Someone could have
-      claimed your AI jobs and stalled them. This locks both to the worker
-      only. Your public proposal link keeps working — those functions are
-      meant to be public and are deliberately left alone.
-- [ ] 0037_rls_auth_initplan.sql — speed. Every security rule was re-checking
-      who you are once per row; now it works it out once per query. Same rules,
-      same protection, much less work as projects get bigger.
-- [ ] 0038_foreign_key_indexes.sql — speed. Adds twelve missing indexes, which
-      makes ordinary lookups and deleting a project or sheet noticeably
-      quicker. Run it when nobody is mid-takeoff; it locks each table for a
-      second or two while it builds.
+Nothing pending.
 
 ---
 
@@ -72,3 +56,10 @@ safe on its own, safe to re-run, and none of them touches your data.
 - [x] 0033_proposal_redesign.sql — run 2026-09-06 (web proposal fields, share link, `get_public_proposal` / `accept_proposal`; verified)
 - [x] 0034_job_queue.sql — run 2026-09-06 (durable job queue columns, `claim_next_job` / `reclaim_orphaned_jobs`; verified)
 - [x] 0035_sheet_crop.sql — run 2026-09-06 (`sheets.crop` + `source_sheet_id`; verified)
+- [x] 0036_lock_down_worker_functions.sql — run 2026-09-07 (claim_next_job,
+      reclaim_orphaned_jobs and handle_new_user are now service_role only;
+      set_updated_at has a fixed search_path; verified)
+- [x] 0037_rls_auth_initplan.sql — run 2026-09-07 (all 55 policies now
+      evaluate the user once per query; verified, 0 left per-row)
+- [x] 0038_foreign_key_indexes.sql — run 2026-09-07 (all 12 indexes present;
+      verified)
