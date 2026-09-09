@@ -34,6 +34,13 @@ import {
   type Pt,
 } from "@/lib/takeoff/geometry";
 import {
+  createTouchGate,
+  fingerDown as gateFingerDown,
+  fingerUp as gateFingerUp,
+  gestureBlocked as gateGestureBlocked,
+  placementBlocked as gatePlacementBlocked,
+} from "@/lib/takeoff/touchGate";
+import {
   buildLayerGroups,
   labelText,
   recomputeValue,
@@ -627,16 +634,29 @@ export default function PlanViewer({
   // capture phase. A second finger ANYWHERE cancels a one-finger aim, and for
   // a moment after a multi-touch ends nothing can be placed — so a two-finger
   // pan never leaves a stray point behind.
-  const fingersRef = useRef(new Map<number, number>()); // pointerId → time it landed
-  const multiUntilRef = useRef(0);
-  // Bookkeeping for the census: a finger whose lift was never delivered
-  // (it happens) is forgotten after 6 s so it can't block placing for long.
+  const gateRef = useRef(createTouchGate());
+  /** What the viewer's own pinch bookkeeping currently says. */
+  function surroundings() {
+    return {
+      pointerCount: pointersRef.current.size,
+      pinching: pinchRef.current != null,
+    };
+  }
+  function gestureBlocked() {
+    return gateGestureBlocked(gateRef.current, surroundings());
+  }
+  function placementBlocked() {
+    return gatePlacementBlocked(gateRef.current, surroundings());
+  }
+  useEffect(() => {
+    // The re-render carrying the new scale has happened by the time this runs,
+    // so the measured rect and `scale` agree again and points land correctly.
+    gateRef.current.zoomSettling = false;
+  }, [scale]);
+
   function fingerDown(id: number) {
-    const now = Date.now();
-    for (const [k, t] of fingersRef.current) if (now - t > 6000) fingersRef.current.delete(k);
-    fingersRef.current.set(id, now);
-    if (fingersRef.current.size > 1) {
-      multiUntilRef.current = Number.MAX_SAFE_INTEGER; // until every finger lifts
+    if (gateFingerDown(gateRef.current, id, surroundings())) {
+      // This touch is navigation: abandon whatever the first finger started.
       pinchedRef.current = true;
       cancelTouchEdits();
       selTapRef.current = null;
@@ -665,9 +685,7 @@ export default function PlanViewer({
     setHover(null);
   }
   function fingerUp(id: number) {
-    fingersRef.current.delete(id);
-    if (fingersRef.current.size === 0 && multiUntilRef.current === Number.MAX_SAFE_INTEGER)
-      multiUntilRef.current = Date.now() + 250;
+    gateFingerUp(gateRef.current, id, surroundings());
     idleUntilRef.current = Date.now() + 400;
   }
   // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
@@ -1095,7 +1113,7 @@ export default function PlanViewer({
     // page does; running it under a tap is what made taps feel dead.
     let t: ReturnType<typeof setTimeout>;
     const tick = () => {
-      if (fingersRef.current.size > 0 || Date.now() < idleUntilRef.current) {
+      if (gateRef.current.fingers.size > 0 || Date.now() < idleUntilRef.current) {
         t = setTimeout(tick, 120);
         return;
       }
@@ -2540,9 +2558,10 @@ export default function PlanViewer({
     const touch = e.pointerType === "touch";
     // A second finger is navigation, whatever the tool. Without this the
     // finger that completes a pinch could grab a handle or start a crop on
-    // its way down, and the pinch would edit the drawing.
-    if (touch && (fingersRef.current.size > 1 || Date.now() < multiUntilRef.current))
-      return;
+    // its way down, and the pinch would edit the drawing. A touch that lands
+    // while the latch is set is part of the gesture that is still finishing,
+    // so it starts nothing either.
+    if (touch && gestureBlocked()) return;
     if (touch && tool !== "select" && tool !== "crop" && tool !== "browse") {
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
       aimSamplesRef.current = [];
@@ -2739,9 +2758,9 @@ export default function PlanViewer({
         const held = stableAimPoint(e.clientX, e.clientY - liftOf(e));
         const pt = clientToPoint(held.x, held.y);
         cancelTouchTap();
-        // A long-press opened the menu, or a pinch happened, or a second
-        // finger was involved at any point: no point.
-        if (fired || pinchedRef.current || Date.now() < multiUntilRef.current) return;
+        // A long-press opened the menu, or this touch was part of a pinch, or
+        // the zoom it committed has not landed yet: no point.
+        if (fired || pinchedRef.current || placementBlocked()) return;
         placePoint(pt);
         return;
       }
@@ -3276,6 +3295,9 @@ export default function PlanViewer({
           const final = Math.max(0.1, Math.min(6, p.scale0 * live.k));
           if (Math.abs(final - scale) / scale > 0.002) {
             focusRef.current = { fx: p.fx, fy: p.fy, vx, vy };
+            // Until this lands, the SVG's rect and `scale` disagree — see
+            // the gate's zoomSettling. Nothing may be placed in that window.
+            gateRef.current.zoomSettling = true;
             setScale(final);
           } else {
             const crect = canvas.getBoundingClientRect();
@@ -3925,7 +3947,7 @@ export default function PlanViewer({
       <div
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         // Finger census for the whole column (capture phase, so overlays
-        // count too): see fingersRef.
+        // count too): see the touch gate.
         // Only presses physically inside this column count. React also routes
         // a portal's events (the phone bottom sheets) through here; a finger on
         // a sheet's backdrop must not register as a finger on the drawing.
