@@ -119,6 +119,35 @@ describe("censuses that disagree", () => {
   });
 });
 
+describe("the capture-phase ordering trap", () => {
+  it("releases when the lifting finger is discounted from the viewport count", () => {
+    // The viewer counts fingers in a CAPTURE handler, which runs before the
+    // viewport's own bubble handler has removed the finger from its map. So
+    // the caller must pass the count of OTHER fingers. Getting this wrong
+    // latched the gate forever and silently ate every tap after one pinch.
+    const g = createTouchGate();
+    fingerDown(g, 1, viewport(1));
+    fingerDown(g, 2, viewport(2));
+    fingerUp(g, 1, viewport(1)); // finger 2 still down
+    expect(g.latched).toBe(true);
+
+    // Last finger up. The viewport map still holds it at this instant, so the
+    // caller discounts it and passes 0.
+    fingerUp(g, 2, viewport(0));
+    expect(g.latched).toBe(false);
+  });
+
+  it("stays latched if the caller forgets to discount it", () => {
+    // Documents the failure mode, so nobody 'simplifies' the call site back.
+    const g = createTouchGate();
+    fingerDown(g, 1, viewport(1));
+    fingerDown(g, 2, viewport(2));
+    fingerUp(g, 1, viewport(1));
+    fingerUp(g, 2, viewport(1)); // not discounted — the bug
+    expect(g.latched).toBe(true);
+  });
+});
+
 describe("the zoom settling after a pinch", () => {
   it("blocks a point until the new scale has actually rendered", () => {
     const g = createTouchGate();

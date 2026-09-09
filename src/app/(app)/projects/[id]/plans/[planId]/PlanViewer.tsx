@@ -685,7 +685,16 @@ export default function PlanViewer({
     setHover(null);
   }
   function fingerUp(id: number) {
-    gateFingerUp(gateRef.current, id, surroundings());
+    // The census runs in the CAPTURE phase, so this fires BEFORE the
+    // viewport's own pointerup has removed this finger from `pointersRef`.
+    // Discount it, or the two censuses can never both read zero and the latch
+    // stays set for the life of the page — every later tap silently ignored.
+    const others =
+      pointersRef.current.size - (pointersRef.current.has(id) ? 1 : 0);
+    gateFingerUp(gateRef.current, id, {
+      pointerCount: others,
+      pinching: pinchRef.current != null,
+    });
     idleUntilRef.current = Date.now() + 400;
   }
   // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
@@ -2667,13 +2676,21 @@ export default function PlanViewer({
     const touch = e.pointerType === "touch";
     // A finger aiming a point: move the loupe and the rubber-band, place later.
     if (touch && tapRef.current?.id === e.pointerId) {
-      if (Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10)
-        cancelLongPress();
+      const slid =
+        Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10;
+      if (slid) cancelLongPress();
       // No React state here — direct DOM updates keep this at frame rate.
       recordAim(e.clientX, e.clientY - liftOf(e));
       showLoupe(e);
       updateRubber(evtToAim(e));
-      edgePanUpdate(e.clientX, e.clientY);
+      // Auto-pan ONLY once the finger is genuinely being slid, never for a
+      // finger holding still. A phone screen is 375 px wide, so the edges are
+      // exactly where points get placed; a stationary thumb 30 px from the
+      // edge used to scroll the sheet 80 px in a third of a second, and the
+      // point landed wherever the drawing had run to. Deliberately sliding
+      // towards the edge to reach off-screen still pans.
+      if (slid) edgePanUpdate(e.clientX, e.clientY);
+      else edgePanStop();
       return;
     }
     // Select tool, finger on nothing: a slide is not a selection (and not a
@@ -2710,7 +2727,11 @@ export default function PlanViewer({
       if (touch) {
         // The loupe shows the handle itself, not the finger.
         showLoupeAt(e.clientX, e.clientY, pt);
-        edgePanUpdate(e.clientX, e.clientY);
+        // Same rule as aiming: a handle held still near the edge must not
+        // drag the whole sheet along with it. `moved` is set once the finger
+        // clears the 8 px tap slop.
+        if (dragStartRef.current?.moved) edgePanUpdate(e.clientX, e.clientY);
+        else edgePanStop();
       }
       return;
     }
