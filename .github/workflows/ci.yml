@@ -1,8 +1,8 @@
 name: CI
 
 # Runs the same checks you'd run by hand — on every pull request, and on every
-# push to main — so a change that doesn't type-check, lint, or build can't slip
-# through. Free on GitHub-hosted runners.
+# push to main — so a change that doesn't type-check, lint, test, or build
+# can't slip through. Free on GitHub-hosted runners.
 
 on:
   pull_request:
@@ -11,6 +11,8 @@ on:
 
 jobs:
   checks:
+    # NOTE: this name is what the branch ruleset requires before a merge.
+    # Renaming it here means updating the rule on GitHub too.
     name: Typecheck · Lint · Build
     runs-on: ubuntu-latest
     steps:
@@ -29,6 +31,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build

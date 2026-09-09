@@ -56,3 +56,10 @@ Nothing pending.
 - [x] 0033_proposal_redesign.sql — run 2026-09-06 (web proposal fields, share link, `get_public_proposal` / `accept_proposal`; verified)
 - [x] 0034_job_queue.sql — run 2026-09-06 (durable job queue columns, `claim_next_job` / `reclaim_orphaned_jobs`; verified)
 - [x] 0035_sheet_crop.sql — run 2026-09-06 (`sheets.crop` + `source_sheet_id`; verified)
+- [x] 0036_lock_down_worker_functions.sql — run 2026-09-07 (claim_next_job,
+      reclaim_orphaned_jobs and handle_new_user are now service_role only;
+      set_updated_at has a fixed search_path; verified)
+- [x] 0037_rls_auth_initplan.sql — run 2026-09-07 (all 55 policies now
+      evaluate the user once per query; verified, 0 left per-row)
+- [x] 0038_foreign_key_indexes.sql — run 2026-09-07 (all 12 indexes present;
+      verified)

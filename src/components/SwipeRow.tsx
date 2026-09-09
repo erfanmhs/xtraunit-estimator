@@ -21,17 +21,16 @@ export type SwipeAction = {
   tone?: "danger" | "primary" | "neutral";
 };
 
-// The row currently showing its actions — opening another closes it. Keyed by
-// a per-instance token, NOT by the close function: `close` is a new identity
-// on every render, so comparing functions made an open row think another row
-// had opened and it closed itself on the next press — which swallowed the tap
-// on its own Delete button. (A holder object, not a bare variable: React's
-// purity lint allows mutating a property from an event handler, not
-// reassigning a module binding.)
-const openRow: { token: object | null; close: (() => void) | null } = {
-  token: null,
-  close: null,
-};
+// Only one row shows its actions at a time. Rows announce an opening on the
+// document and every other row closes itself — no shared mutable module state,
+// which keeps this pure and lets each row own its own state.
+//
+// It is keyed by a per-instance token rather than by the close function:
+// `close` is a new identity on every render, so an earlier version that
+// compared functions made an open row think another row had opened, and it
+// closed itself on the next press — swallowing the tap on its own Delete
+// button.
+const OPEN_EVENT = "swiperow:open";
 
 const ACTION_W = 76; // px per revealed action
 
@@ -82,22 +81,16 @@ export default function SwipeRow({
   }
   function close() {
     setOffset(0);
-    if (openRow.token === token) {
-      openRow.token = null;
-      openRow.close = null;
-    }
   }
-  // A row that unmounts while open (its layer was just deleted) must not stay
-  // registered, or the next row's first press would call into it.
-  useEffect(
-    () => () => {
-      if (openRow.token === token) {
-        openRow.token = null;
-        openRow.close = null;
-      }
-    },
-    [token],
-  );
+  // Close when another row opens. (A row that unmounts just stops listening,
+  // so a deleted row can't leave anything behind.)
+  useEffect(() => {
+    const onOther = (e: Event) => {
+      if ((e as CustomEvent).detail !== token) setOffset(0);
+    };
+    document.addEventListener(OPEN_EVENT, onOther);
+    return () => document.removeEventListener(OPEN_EVENT, onOther);
+  }, [token]);
 
   useEffect(() => {
     if (!sheet) return;
@@ -124,7 +117,6 @@ export default function SwipeRow({
         style={{ touchAction: "pan-y" }}
         onPointerDown={(e) => {
           if (e.pointerType !== "touch") return;
-          if (openRow.token && openRow.token !== token) openRow.close?.();
           gesture.current = { id: e.pointerId, x: e.clientX, y: e.clientY, start: offset, axis: null };
           cancelHold();
           holdRef.current = setTimeout(() => {
@@ -159,8 +151,8 @@ export default function SwipeRow({
           const next = g.start + dx;
           if (next < -width / 2) {
             setOffset(-width);
-            openRow.token = token;
-            openRow.close = close;
+            // Tell the other rows to close; ours ignores its own token.
+            document.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: token }));
           } else close();
         }}
         onPointerCancel={() => {

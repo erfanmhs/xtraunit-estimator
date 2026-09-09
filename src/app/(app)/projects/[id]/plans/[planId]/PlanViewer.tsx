@@ -22,6 +22,21 @@ import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
 import { DISCIPLINE_OPTIONS } from "@/lib/scope/discipline";
+import {
+  CF_PER_CY,
+  distToSeg,
+  geomLenFeet,
+  layerKeyOf,
+  pointInPoly,
+  polyAreaSqFt,
+  segFeet,
+  type Pt,
+} from "@/lib/takeoff/geometry";
+import {
+  buildLayerGroups,
+  labelText,
+  recomputeValue,
+} from "@/lib/takeoff/measurements";
 import StageJump from "@/components/StageNav";
 import SwipeRow from "@/components/SwipeRow";
 import { polishSheetNotes } from "./actions";
@@ -61,7 +76,6 @@ type Sheet = {
   source_sheet_id?: string | null;
   created_at?: string;
 };
-type Pt = { x: number; y: number };
 
 // Standard paper shapes for the Crop tool (inches). Only the SHAPE is held —
 // the size is whatever you drag; the readout shows it in inches.
@@ -121,44 +135,9 @@ type Tool =
 
 const MEAS_COLS =
   "id,type,geometry,value,unit,layer,color,wall_sided,wall_height,vol_mode,vol_width,vol_depth,text,font_size,head_size";
-const CF_PER_CY = 27;
 // Leader annotation defaults (PDF points). User grows/shrinks each per leader.
 const LEADER_FONT_DEFAULT = 14;
 const LEADER_HEAD_DEFAULT = 12;
-
-// Recompute a measurement's value for a given scale (points-per-foot).
-// Count is independent of scale, so its value is left untouched.
-function recomputeValue(m: Measurement, sx: number, sy: number): number | null {
-  switch (m.type) {
-    case "line":
-    case "polyline":
-      return geomLenFeet(m.geometry, sx, sy);
-    case "area":
-      return polyAreaSqFt(m.geometry, sx, sy);
-    case "wall":
-      return (
-        geomLenFeet(m.geometry, sx, sy) *
-        (m.wall_height ?? 0) *
-        (m.wall_sided === "double" ? 2 : 1)
-      );
-    case "volume":
-      return m.vol_mode === "area"
-        ? polyAreaSqFt(m.geometry, sx, sy) * (m.vol_depth ?? 0)
-        : geomLenFeet(m.geometry, sx, sy) *
-            (m.vol_width ?? 0) *
-            (m.vol_depth ?? 0);
-    default:
-      return m.value;
-  }
-}
-
-function labelText(m: Measurement): string {
-  if (m.value == null) return "";
-  if (m.type === "volume")
-    return `${m.value.toFixed(0)} cf · ${(m.value / CF_PER_CY).toFixed(2)} cy`;
-  if (m.type === "count") return `${m.value} ea`;
-  return `${m.value.toFixed(1)} ${m.unit ?? ""}`;
-}
 
 const PRESETS: { label: string; inPerFt: number; group: string }[] = [
   { label: '3"=1\'', inPerFt: 3, group: "Architectural" },
@@ -202,86 +181,9 @@ const MEASURE_TOOLS: Tool[] = [
   "leader",
 ];
 // Layers group by trimmed name; unnamed measurements share the "Unlabeled" group.
-function layerKeyOf(layer: string | null): string {
-  return (layer ?? "").trim() || "Unlabeled";
-}
-
-function segFeet(a: Pt, b: Pt, sx: number, sy: number): number {
-  return Math.hypot((b.x - a.x) / sx, (b.y - a.y) / sy);
-}
-function geomLenFeet(g: Pt[], sx: number, sy: number): number {
-  let t = 0;
-  for (let i = 1; i < g.length; i++) t += segFeet(g[i - 1], g[i], sx, sy);
-  return t;
-}
-// Polygon area in square feet (shoelace), honoring separate H/V scales.
-function polyAreaSqFt(g: Pt[], sx: number, sy: number): number {
-  if (g.length < 3) return 0;
-  let a = 0;
-  for (let i = 0; i < g.length; i++) {
-    const p = g[i];
-    const q = g[(i + 1) % g.length];
-    a += (p.x / sx) * (q.y / sy) - (q.x / sx) * (p.y / sy);
-  }
-  return Math.abs(a) / 2;
-}
-function pointInPoly(p: Pt, g: Pt[]): boolean {
-  let inside = false;
-  for (let i = 0, j = g.length - 1; i < g.length; j = i++) {
-    const a = g[i];
-    const b = g[j];
-    if (
-      a.y > p.y !== b.y > p.y &&
-      p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x
-    ) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-function distToSeg(p: Pt, a: Pt, b: Pt): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-}
 
 // Group measurements into layer takeoff lines (shared by the side panel, the
 // on-sheet legend, and the PDF export).
-function buildLayerGroups(measurements: Measurement[]) {
-  const groups: {
-    layer: string;
-    color: string;
-    rows: Measurement[];
-    units: Record<string, number>;
-  }[] = [];
-  for (const m of measurements) {
-    const key = layerKeyOf(m.layer);
-    let g = groups.find((x) => x.layer === key);
-    if (!g) {
-      g = { layer: key, color: m.color ?? "#A01C2D", rows: [], units: {} };
-      groups.push(g);
-    }
-    g.rows.push(m);
-    if (m.value != null) {
-      const unit = m.unit || "";
-      g.units[unit] = (g.units[unit] ?? 0) + m.value;
-    }
-  }
-  return groups.map((g) => ({
-    ...g,
-    lines: Object.entries(g.units).map(([unit, sum]) =>
-      unit === "cf"
-        ? `${sum.toFixed(0)} cf · ${(sum / CF_PER_CY).toFixed(2)} cy`
-        : unit === "ea"
-          ? `${sum} ea`
-          : `${sum.toFixed(1)} ${unit}`,
-    ),
-  }));
-}
-
 function hexToRgba(hex: string, a: number): string {
   const h = (hex || "#A01C2D").replace("#", "");
   const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
