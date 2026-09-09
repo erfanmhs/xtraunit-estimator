@@ -232,7 +232,7 @@ export default function ScopeCanvas({
                 onClick={() => setAddingDiv(addingDiv === g.key ? null : g.key)}
                 className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-muted transition-colors hover:border-brand hover:text-foreground"
               >
-                + Add line
+                + Add Item
               </button>
             ) : null}
           </div>

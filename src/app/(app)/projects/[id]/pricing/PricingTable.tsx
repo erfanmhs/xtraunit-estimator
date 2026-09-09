@@ -96,6 +96,28 @@ const GRID =
 
 const CELL =
   "rounded-md border border-border bg-input px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand";
+// Money fields carry a "$" inside them, on the left, so it is obvious at a
+// glance that a price is wanted and not a quantity. The extra left padding
+// keeps a long number from running under it.
+const CELL_MONEY = `${CELL} w-full pl-4`;
+
+/** A price field with its currency mark. */
+function Money({
+  className = "",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <span className={`relative inline-block min-w-0 ${className}`}>
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] leading-none text-muted"
+      >
+        $
+      </span>
+      <input type="text" inputMode="decimal" {...props} className={CELL_MONEY} />
+    </span>
+  );
+}
 
 export default function PricingTable({
   projectId,
@@ -349,7 +371,7 @@ export default function PricingTable({
               onClick={onClearAll}
               className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:border-brand hover:text-brand-soft"
             >
-              Clear all
+              Clear all prices
             </button>
           ) : null}
           {needsConfirm > 0 ? (
@@ -435,7 +457,7 @@ export default function PricingTable({
                       }
                       className="rounded-md border border-border px-2 py-0.5 text-xs text-muted transition-colors hover:border-brand hover:text-foreground"
                     >
-                      + Add line
+                      + Add Item
                     </button>
                   ) : null}
                 </div>
@@ -675,7 +697,7 @@ function Row({
                 onClick={onClear}
                 className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
               >
-                Clear
+                Clear price
               </button>
             ) : null}
             <button
@@ -700,15 +722,13 @@ function Row({
             className={`flex min-w-0 items-center gap-1 ${usingTotal ? "opacity-40" : ""}`}
           >
             <span className="shrink-0 text-[10px] text-muted xl:hidden">{label}</span>
-            <input
-              type="text"
-              inputMode="decimal"
+            <Money
               value={vals[k]}
               onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))}
               onBlur={saveIfChanged}
               placeholder="0"
               aria-label={label}
-              className={`min-w-0 flex-1 sm:w-14 sm:flex-none xl:w-full ${CELL}`}
+              className="flex-1 sm:w-14 sm:flex-none xl:w-full"
             />
           </label>
         ))}
@@ -717,9 +737,7 @@ function Row({
             sum) as its placeholder; typing here overrides the buckets. */}
         <label className="flex min-w-0 items-center gap-1">
           <span className="shrink-0 text-[10px] font-medium text-brand-soft xl:hidden">Total</span>
-          <input
-            type="text"
-            inputMode="decimal"
+          <Money
             value={total}
             onChange={(e) => setTotal(e.target.value)}
             onBlur={saveIfChanged}
@@ -730,7 +748,7 @@ function Row({
                 ? `${usd.format(previewTotal ?? 0)} = ${isUnit ? `${li.quantity ?? 0} × ${usd.format(previewSum)}` : "sum of the buckets"} · type a number to override`
                 : "One final price for this line — overrides the buckets"
             }
-            className={`min-w-0 flex-1 placeholder:text-foreground/70 sm:w-[4.5rem] sm:flex-none xl:w-full ${CELL}`}
+            className="flex-1 sm:w-[4.5rem] sm:flex-none xl:w-full"
           />
         </label>
 
@@ -811,7 +829,7 @@ function AddRow({
             disabled={!description.trim()}
             className="glass-brand rounded-md px-3 py-1 font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
           >
-            Add
+            Add item
           </button>
           <button
             type="button"

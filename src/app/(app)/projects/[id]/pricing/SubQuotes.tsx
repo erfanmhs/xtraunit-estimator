@@ -189,7 +189,7 @@ export default function SubQuotes({
           }}
           className="glass-brand shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30"
         >
-          {open ? "Close" : "+ Add sub quote"}
+          {open ? "Cancel" : "+ Add Quote"}
         </button>
       </div>
 
@@ -230,7 +230,7 @@ export default function SubQuotes({
                 title="Remove quote and un-price the lines it covers (confirmed lines stay)"
                 className="shrink-0 text-[11px] text-muted transition-colors hover:text-brand-soft"
               >
-                Remove
+                Remove Quote
               </button>
             </div>
           ))}
@@ -348,7 +348,7 @@ export default function SubQuotes({
               disabled={!!busy}
               className="glass-brand rounded-lg px-4 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
             >
-              Apply quote to covered lines
+              Apply Quote
             </button>
           </div>
         </div>

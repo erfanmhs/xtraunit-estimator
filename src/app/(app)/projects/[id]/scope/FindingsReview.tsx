@@ -210,21 +210,6 @@ export default function FindingsReview({
             {applyRun?.stage ?? "Applying your responses to the scope…"}
           </span>
         </div>
-      ) : pendingCount > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg glass px-4 py-2.5">
-          <span className="text-sm text-muted">
-            {pendingCount} response{pendingCount > 1 ? "s" : ""} ready to apply —
-            updates the scope directly, no full regenerate.
-          </span>
-          <button
-            type="button"
-            onClick={onApply}
-            disabled={applying}
-            className="glass-brand shrink-0 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
-          >
-            Apply to scope
-          </button>
-        </div>
       ) : null}
 
       {applyRun?.status === "error" && applyRun.error ? (
@@ -302,6 +287,29 @@ export default function FindingsReview({
           );
         })}
       </div>
+
+      {/*
+        The apply bar lives BELOW the list, because you apply your answers
+        after you have read and answered them — not before. It used to sit in
+        the header, above everything it acts on. Sticky so it stays in reach
+        while working down a long list of questions.
+      */}
+      {!running && pendingCount > 0 ? (
+        <div className="sticky bottom-0 z-10 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface/95 px-4 py-2.5 backdrop-blur pb-safe">
+          <span className="text-sm text-muted">
+            {pendingCount} response{pendingCount > 1 ? "s" : ""} ready to apply —
+            updates the scope directly, no full regenerate.
+          </span>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={applying}
+            className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
+          >
+            {applying ? "Applying…" : "Apply to Scope"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
