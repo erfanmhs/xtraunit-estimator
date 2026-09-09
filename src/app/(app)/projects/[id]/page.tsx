@@ -2,8 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import PageHeader from "@/components/PageHeader";
-import OverflowMenu from "@/components/OverflowMenu";
-import DeleteProjectItem from "./DeleteProjectItem";
+import ProjectMenu from "./ProjectMenu";
 import PlanManager from "./PlanManager";
 import type { PlanFile, Project } from "@/types";
 
@@ -44,9 +43,11 @@ export default async function ProjectDetailPage({
             .join(" · ") || null
         }
         menu={
-          <OverflowMenu>
-            <DeleteProjectItem id={project.id} name={project.name} />
-          </OverflowMenu>
+          <ProjectMenu
+            project={project}
+            canArchive={"archived_at" in data}
+            archived={!!(data as { archived_at?: string | null }).archived_at}
+          />
         }
       />
 
