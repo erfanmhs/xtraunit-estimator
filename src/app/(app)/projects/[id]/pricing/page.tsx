@@ -98,7 +98,7 @@ export default async function PricingPage({
             </p>
           </div>
         ) : lines.length === 0 ? (
-          <div className="mt-10 rounded-xl glass p-8 text-center">
+          <div className="mt-10 rounded-xl panel p-8 text-center">
             <p className="text-sm text-muted">
               No scope lines to price yet. Generate and review the{" "}
               <Link

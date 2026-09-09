@@ -120,7 +120,7 @@ export default function BenchmarksEditor({
               value={b.label}
               onChange={(e) => set(i, "label", e.target.value)}
               placeholder="e.g. ADU"
-              className="flex-1 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+              className="flex-1 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
             />
             <input
               type="text"
@@ -128,7 +128,7 @@ export default function BenchmarksEditor({
               value={b.low}
               onChange={(e) => set(i, "low", e.target.value)}
               placeholder="250"
-              className="w-24 rounded-md border border-border bg-black/20 px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
+              className="w-24 rounded-md border border-border bg-input px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
             />
             <input
               type="text"
@@ -136,7 +136,7 @@ export default function BenchmarksEditor({
               value={b.high}
               onChange={(e) => set(i, "high", e.target.value)}
               placeholder="300"
-              className="w-24 rounded-md border border-border bg-black/20 px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
+              className="w-24 rounded-md border border-border bg-input px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
             />
             <button
               type="button"

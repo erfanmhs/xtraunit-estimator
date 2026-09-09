@@ -279,7 +279,7 @@ export default function FindingsReview({
               {!collapsed[kind] ? (
                 <>
                 <p className="mt-0.5 text-[11px] text-muted/60">{FINDING_HINT[kind]}</p>
-                <ul className="mt-2 divide-y divide-white/5">
+                <ul className="mt-2 divide-y divide-border">
                   {rows.map((f) =>
                     kind === "question" ? (
                       <QuestionRow
@@ -307,7 +307,7 @@ export default function FindingsReview({
 }
 
 const NOTE_CLASS =
-  "w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
+  "w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
 
 /** A toggle chip. `on` = selected state; tapping again is the undo. */
 function Chip({

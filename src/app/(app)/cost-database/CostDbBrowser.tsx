@@ -161,7 +161,7 @@ export default function CostDbBrowser({
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search your price history… (description, section, division)"
-        className="w-full max-w-md rounded-lg border border-border bg-black/20 px-3 py-2 text-sm text-foreground outline-none focus:border-brand"
+        className="w-full max-w-md rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-brand"
       />
 
       {error ? (
@@ -193,7 +193,7 @@ export default function CostDbBrowser({
               </button>
 
               {!isCollapsed ? (
-                <div className="mt-2 divide-y divide-white/5">
+                <div className="mt-2 divide-y divide-border">
                   {g.rows.map((e) =>
                     editingId === e.id ? (
                       <EditEntry
@@ -226,7 +226,7 @@ export default function CostDbBrowser({
                           <button
                             type="button"
                             onClick={() => onDelete(e.id)}
-                            className="ml-auto rounded px-2 py-1 text-muted transition-colors hover:bg-white/5 hover:text-brand-soft"
+                            className="ml-auto rounded px-2 py-1 text-muted transition-colors hover:bg-foreground/5 hover:text-brand-soft"
                           >
                             Delete
                           </button>
@@ -297,14 +297,14 @@ function EditEntry({
           value={description}
           onChange={(ev) => setDescription(ev.target.value)}
           autoFocus
-          className="flex-1 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+          className="flex-1 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
         />
         <input
           type="text"
           value={unit}
           onChange={(ev) => setUnit(ev.target.value)}
           placeholder="unit"
-          className="w-20 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+          className="w-20 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
         />
       </div>
       {/* 3-column grid on phones, a wrapping row from sm up. */}
@@ -319,7 +319,7 @@ function EditEntry({
               onChange={(ev) => setVals((v) => ({ ...v, [k]: ev.target.value }))}
               placeholder="0"
               aria-label={label}
-              className="min-w-0 flex-1 rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand sm:w-[72px] sm:flex-none"
+              className="min-w-0 flex-1 rounded-md border border-border bg-input px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand sm:w-[72px] sm:flex-none"
             />
           </label>
         ))}
@@ -334,7 +334,7 @@ function EditEntry({
             }
             placeholder="—"
             aria-label="Total"
-            className="min-w-0 flex-1 rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand sm:w-[90px] sm:flex-none"
+            className="min-w-0 flex-1 rounded-md border border-border bg-input px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand sm:w-[90px] sm:flex-none"
           />
         </label>
         <div className="col-span-3 flex items-center justify-end gap-2 text-xs sm:col-span-1 sm:ml-auto">

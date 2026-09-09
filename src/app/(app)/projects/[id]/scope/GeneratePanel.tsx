@@ -125,7 +125,7 @@ function Progress({
 
       {/* Division groups, streaming in as each finishes */}
       {d && d.steps.length ? (
-        <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/20 p-2 text-xs">
+        <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border bg-input p-2 text-xs">
           {d.steps.map((s) => (
             <div key={s.key} className="flex flex-col gap-0.5">
               <div className="flex items-center gap-2">
@@ -171,7 +171,7 @@ function Progress({
             </div>
           ))}
           {d.linesSoFar > 0 ? (
-            <p className="border-t border-white/10 pt-1 text-[11px] text-muted">
+            <p className="border-t border-border pt-1 text-[11px] text-muted">
               {d.linesSoFar} lines drafted so far
               {d.findingsSoFar ? ` · ${d.findingsSoFar} findings` : ""}
             </p>

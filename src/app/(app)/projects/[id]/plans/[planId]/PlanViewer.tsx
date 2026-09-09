@@ -3735,7 +3735,7 @@ export default function PlanViewer({
             className="glass z-10 flex shrink-0 flex-col"
             style={{ width: navW }}
           >
-            <div className="flex items-start justify-between gap-2 border-b border-white/10 px-3 py-3">
+            <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-3">
               <div className="min-w-0">
                 <Link
                   href={`/projects/${projectId}`}
@@ -3766,7 +3766,7 @@ export default function PlanViewer({
                 type="button"
                 onClick={() => setNavOpen(false)}
                 title="Hide sheets"
-                className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-muted transition-colors hover:border-brand hover:text-foreground"
+                className="shrink-0 rounded-md border border-border px-2 py-1 text-muted transition-colors hover:border-brand hover:text-foreground"
               >
                 «
               </button>
@@ -3809,13 +3809,13 @@ export default function PlanViewer({
                     className={`rounded-lg text-sm transition-colors ${s.crop ? "ml-3" : ""} ${
                       active
                         ? "glass-brand text-foreground"
-                        : "text-muted hover:bg-white/5 hover:text-foreground"
+                        : "text-muted hover:bg-foreground/5 hover:text-foreground"
                     }`}
                   >
                     <div className="group flex items-center gap-1 px-2 py-1.5">
                       {s.crop ? (
                         <span
-                          className="shrink-0 rounded border border-white/15 px-1 text-[9px] uppercase tracking-wider text-muted"
+                          className="shrink-0 rounded border border-border px-1 text-[9px] uppercase tracking-wider text-muted"
                           title="Cropped from this page — the original is untouched"
                         >
                           crop
@@ -4128,7 +4128,7 @@ export default function PlanViewer({
                       updateLedger({ visible: !currentLedger?.visible });
                       setMoreOpen(false);
                     }}
-                    className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                    className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10"
                   >
                     {currentLedger?.visible ? "Hide legend" : "Show legend"}
                   </button>
@@ -4140,7 +4140,7 @@ export default function PlanViewer({
                     openExport();
                   }}
                   disabled={status !== "ready"}
-                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10 disabled:opacity-40"
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10 disabled:opacity-40"
                 >
                   Export marked-up PDF…
                 </button>
@@ -4150,7 +4150,7 @@ export default function PlanViewer({
                     setPanelOpen((o) => !o);
                     setMoreOpen(false);
                   }}
-                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10"
                 >
                   {panelOpen ? "Hide measurements panel" : "Show measurements panel"}
                 </button>
@@ -4160,7 +4160,7 @@ export default function PlanViewer({
                     setNavOpen((o) => !o);
                     setMoreOpen(false);
                   }}
-                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10"
                 >
                   {navOpen ? "Hide sheet list" : "Show sheet list"}
                 </button>
@@ -4168,7 +4168,7 @@ export default function PlanViewer({
               <button
                 type="button"
                 onClick={() => setMoreOpen(false)}
-                className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-white/10 text-muted hover:text-foreground"
+                className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-border text-muted hover:text-foreground"
               >
                 Close
               </button>
@@ -4246,7 +4246,7 @@ export default function PlanViewer({
                                     if (!MEASURE_TOOLS.includes(tool) && kind && MEASURE_TOOLS.includes(kind)) setTool(kind);
                                     setLayerOpen(false);
                                   }}
-                                  className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-foreground hover:bg-white/10 ${
+                                  className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-foreground hover:bg-foreground/10 ${
                                     active ? "bg-brand/15" : ""
                                   }`}
                                 >
@@ -4276,7 +4276,7 @@ export default function PlanViewer({
                                         openLayerEditor(g);
                                       }
                                     }}
-                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-white/10 hover:text-foreground"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-foreground/10 hover:text-foreground"
                                   >
                                     ✎
                                   </span>
@@ -4333,7 +4333,7 @@ export default function PlanViewer({
                         }}
                         aria-label={`Color ${c}`}
                         aria-pressed={color === c}
-                        className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-white/10"
+                        className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-foreground/10"
                       >
                         <span
                           className={`h-6 w-6 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
@@ -4510,7 +4510,7 @@ export default function PlanViewer({
             if (e.pointerType !== "touch") onPanEnd(e);
           }}
           onContextMenu={onCanvasContextMenu}
-          className="touch-surface relative min-h-0 flex-1 overflow-auto bg-black/40"
+          className="touch-surface relative min-h-0 flex-1 overflow-auto bg-background/70"
           // touch-action none: the browser hands us every finger instead of
           // scrolling/zooming the page itself — required for pinch + draw.
           style={{
@@ -5101,7 +5101,7 @@ export default function PlanViewer({
               autoFocus={!(selected.text ?? "").trim()}
               spellCheck
               placeholder="What is the arrow pointing at?"
-              className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
+              className="mt-1 w-full resize-none rounded-lg border border-border bg-background/60 px-2.5 py-1.5 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
             />
             <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
               {(
@@ -5401,7 +5401,7 @@ export default function PlanViewer({
                   "• Door & window schedule is on sheet A-6\n" +
                   "• Exclude the canopy — owner-furnished"
                 }
-                className="max-h-[40vh] min-h-[7rem] w-full resize-y rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
+                className="max-h-[40vh] min-h-[7rem] w-full resize-y rounded-lg border border-border bg-background/60 px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
               />
             </div>
           </div>
@@ -5501,7 +5501,7 @@ export default function PlanViewer({
         <>
           {phone ? (
             <div
-              className="fixed inset-0 z-30 bg-black/30"
+              className="fixed inset-0 z-30 bg-background/60"
               aria-hidden
               onPointerDown={() => setPanelOpen(false)}
             />
@@ -5519,7 +5519,7 @@ export default function PlanViewer({
             }
             style={phone ? undefined : { width: panelW }}
           >
-            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2 py-1.5">
+            <div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5">
               {/* Next step — lives on top of the measurements panel */}
               <Link
                 href={`/projects/${projectId}/scope`}
@@ -5531,7 +5531,7 @@ export default function PlanViewer({
                 type="button"
                 onClick={() => setPanelOpen(false)}
                 title="Hide panel"
-                className="rounded-md border border-white/10 px-2 py-0.5 text-muted transition-colors hover:border-brand hover:text-foreground"
+                className="rounded-md border border-border px-2 py-0.5 text-muted transition-colors hover:border-brand hover:text-foreground"
               >
                 »
               </button>
@@ -5765,7 +5765,7 @@ export default function PlanViewer({
           </div>
         ) : (
           <>
-            <div className="border-b border-white/10 px-4 py-3">
+            <div className="border-b border-border px-4 py-3">
               <p className="text-sm font-medium text-foreground">Measurements</p>
               <p className="text-xs text-muted">
                 {measurements.length} on this sheet · click one to edit
@@ -5815,7 +5815,7 @@ export default function PlanViewer({
                       ]}
                     >
                     <div
-                      className={`rounded-md border border-white/5 ${isHidden ? "opacity-50" : ""}`}
+                      className={`rounded-md border border-border ${isHidden ? "opacity-50" : ""}`}
                     >
                       <div className="flex items-center gap-1.5 px-2 py-1.5">
                         {/* Record toggle: red = drawing adds to this layer; green = idle */}
@@ -5883,7 +5883,7 @@ export default function PlanViewer({
                       </div>
 
                       {isEditing ? (
-                        <div className="flex flex-col gap-2 border-t border-white/5 px-2 pb-2 pt-2">
+                        <div className="flex flex-col gap-2 border-t border-border px-2 pb-2 pt-2">
                           {/* Rename — applies to every run in the layer.
                               Saves by itself when you tab/click away (or
                               press Enter); no button to remember. */}
@@ -6108,7 +6108,7 @@ export default function PlanViewer({
                 className={`block w-full rounded-lg px-3 py-1.5 text-left transition-colors pointer-coarse:min-h-11 pointer-coarse:py-2.5 ${
                   it.danger
                     ? "text-brand-soft hover:bg-brand/20"
-                    : "text-foreground hover:bg-white/10"
+                    : "text-foreground hover:bg-foreground/10"
                 }`}
               >
                 {it.label}
@@ -6158,7 +6158,7 @@ export default function PlanViewer({
                 return (
                   <label
                     key={s.id}
-                    className="flex items-center gap-2 rounded px-1.5 py-1 text-sm text-foreground hover:bg-white/5"
+                    className="flex items-center gap-2 rounded px-1.5 py-1 text-sm text-foreground hover:bg-foreground/5"
                   >
                     <input
                       type="checkbox"

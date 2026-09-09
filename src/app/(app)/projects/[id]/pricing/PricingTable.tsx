@@ -95,7 +95,7 @@ const GRID =
   "xl:grid xl:grid-cols-[minmax(0,1fr)_repeat(5,3.75rem)_4.5rem_5.5rem_5.5rem_6rem] xl:items-center xl:gap-x-1.5";
 
 const CELL =
-  "rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand";
+  "rounded-md border border-border bg-input px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand";
 
 export default function PricingTable({
   projectId,
@@ -442,7 +442,7 @@ export default function PricingTable({
               </div>
 
               {!isCollapsed ? (
-                <div className="mt-2 divide-y divide-white/5">
+                <div className="mt-2 divide-y divide-border">
                   {/* Column headers — only when rows are one line (xl+) */}
                   <div className={`${GRID} hidden pb-1 text-[10px] uppercase tracking-wider text-muted xl:grid`}>
                     <span>Line</span>
@@ -627,7 +627,7 @@ function Row({
             }}
             autoFocus
             spellCheck
-            className="w-full rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
+            className="w-full rounded-md border border-border bg-input px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
           />
         ) : (
           <p
@@ -673,7 +673,7 @@ function Row({
               <button
                 type="button"
                 onClick={onClear}
-                className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-foreground"
+                className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
               >
                 Clear
               </button>
@@ -682,7 +682,7 @@ function Row({
               type="button"
               onClick={onExclude}
               title="Exclude from scope & pricing (restore from the Scope page)"
-              className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-foreground"
+              className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
             >
               Exclude
             </button>
@@ -739,7 +739,7 @@ function Row({
           onChange={(e) => setSource(e.target.value)}
           onBlur={saveIfChanged}
           aria-label="Price source"
-          className="col-span-3 rounded-md border border-border bg-black/20 px-1 py-1 text-[11px] text-muted outline-none focus:border-brand sm:col-span-1 xl:w-full"
+          className="col-span-3 rounded-md border border-border bg-input px-1 py-1 text-[11px] text-muted outline-none focus:border-brand sm:col-span-1 xl:w-full"
         >
           {SOURCES.map(([v, label]) => (
             <option key={v} value={v}>
@@ -786,7 +786,7 @@ function AddRow({
         placeholder="New scope line…"
         autoFocus
         spellCheck
-        className="w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+        className="w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
       />
       <div className="mt-1.5 flex items-center gap-2">
         <input
@@ -795,14 +795,14 @@ function AddRow({
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           placeholder="Qty"
-          className="w-24 rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
+          className="w-24 rounded-md border border-border bg-input px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
         />
         <input
           type="text"
           value={unit}
           onChange={(e) => setUnit(e.target.value)}
           placeholder="unit (sf, ea, lf…)"
-          className="w-40 rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
+          className="w-40 rounded-md border border-border bg-input px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
         />
         <div className="ml-auto flex items-center gap-2 text-xs">
           <button

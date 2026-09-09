@@ -43,7 +43,7 @@ export default function CostDatabaseTabs({
 
   return (
     <div className="mt-6">
-      <div className="flex flex-wrap gap-1 border-b border-white/10">
+      <div className="flex flex-wrap gap-1 border-b border-border">
         {tabs.map((t) => (
           <button
             key={t.id}

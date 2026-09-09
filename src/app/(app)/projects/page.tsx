@@ -41,7 +41,7 @@ function stageOrder(s: Record<string, Stage>) {
 const DOT: Record<Stage, string> = {
   done: "bg-green-400",
   partial: "bg-amber-400",
-  todo: "bg-white/15",
+  todo: "bg-muted/30",
 };
 
 /** Six little dots — the same done / in-progress colors as the rail's stage tabs. */
@@ -121,7 +121,7 @@ export default async function ProjectsPage() {
                 <Link
                   key={p.id}
                   href={`/projects/${p.id}`}
-                  className="flex flex-col gap-3 rounded-xl glass p-5 transition-colors hover:border-brand/60"
+                  className="flex flex-col gap-3 rounded-xl panel p-5 transition-colors hover:border-brand/60"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <h2 className="min-w-0 font-medium text-foreground">{p.name}</h2>

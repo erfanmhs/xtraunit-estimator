@@ -209,7 +209,7 @@ export default async function ScopePage({
         <PreparePlans plans={planFiles ?? []} sheets={ingestSheets} />
 
         {lineItems.length === 0 ? (
-          <div className="mt-10 rounded-xl glass p-8 text-center">
+          <div className="mt-10 rounded-xl panel p-8 text-center">
             <p className="text-sm text-muted">
               No scope yet. The AI reads your plans and takeoff drivers and drafts
               the scope by CSI division. Measure your key quantities first, then

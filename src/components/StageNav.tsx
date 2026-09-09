@@ -159,7 +159,7 @@ export default function StageJump({
                     key={s.key}
                     href={s.href}
                     onClick={() => setOpen(false)}
-                    className="flex min-h-12 items-center gap-3 rounded-lg px-3 text-sm text-foreground transition-colors hover:bg-white/10"
+                    className="flex min-h-12 items-center gap-3 rounded-lg px-3 text-sm text-foreground transition-colors hover:bg-foreground/10"
                   >
                     <Ico className="h-5 w-5 text-brand-soft" />
                     {s.label}
@@ -167,11 +167,11 @@ export default function StageJump({
                 );
               })}
             </div>
-            <div className="mt-1 border-t border-white/10 pt-1">
+            <div className="mt-1 border-t border-border pt-1">
               <Link
                 href="/projects"
                 onClick={() => setOpen(false)}
-                className="flex min-h-12 items-center gap-3 rounded-lg px-3 text-sm text-foreground transition-colors hover:bg-white/10"
+                className="flex min-h-12 items-center gap-3 rounded-lg px-3 text-sm text-foreground transition-colors hover:bg-foreground/10"
               >
                 <FolderIcon className="h-5 w-5 text-muted" />
                 All projects

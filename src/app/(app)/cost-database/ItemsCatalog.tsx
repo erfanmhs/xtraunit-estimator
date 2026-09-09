@@ -183,7 +183,7 @@ export default function ItemsCatalog({
         {groups.map((g) => {
           const isCollapsed = collapsed.has(g.key);
           return (
-          <div key={g.key} className="rounded-lg border border-white/5">
+          <div key={g.key} className="rounded-lg border border-border">
             <button
               type="button"
               onClick={() => toggleCollapse(g.key)}
@@ -201,7 +201,7 @@ export default function ItemsCatalog({
               </span>
             </button>
             {!isCollapsed ? (
-            <div className="divide-y divide-white/5 px-2 pb-1">
+            <div className="divide-y divide-border px-2 pb-1">
               {g.rows.map((it) =>
                 editingId === it.id ? (
                   <EditItem
@@ -330,7 +330,7 @@ function ItemRow({
           placeholder={
             it.std_cost_computed != null ? String(it.std_cost_computed) : "$"
           }
-          className="w-24 rounded-md border border-border bg-black/20 px-2 py-1 text-right text-sm text-foreground outline-none focus:border-brand"
+          className="w-24 rounded-md border border-border bg-input px-2 py-1 text-right text-sm text-foreground outline-none focus:border-brand"
         />
       </div>
       <button
@@ -338,7 +338,7 @@ function ItemRow({
         onClick={onDelete}
         title="Delete item"
         aria-label="Delete item"
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-lg text-muted transition-colors hover:bg-white/5 hover:text-brand-soft"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-lg text-muted transition-colors hover:bg-foreground/5 hover:text-brand-soft"
       >
         ×
       </button>
@@ -364,14 +364,14 @@ function EditItem({
         value={name}
         onChange={(e) => setName(e.target.value)}
         autoFocus
-        className="flex-1 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+        className="flex-1 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
       />
       <input
         type="text"
         value={unit}
         onChange={(e) => setUnit(e.target.value)}
         placeholder="unit"
-        className="w-20 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+        className="w-20 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
       />
       <button
         type="button"

@@ -20,16 +20,11 @@ export default async function AppLayout({
     // Column on phones (content above the bottom tab bar), row from `sm` up
     // (rail on the left). The bar is rendered by AppSidebar with `order-last`.
     <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden sm:flex-row">
-      {/* Same garnet wash + glow as the login page — one consistent backdrop
-          for the whole app; the glass panels pick it up through their blur. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_60%_at_50%_50%,rgba(160,28,45,0.45),rgba(160,28,45,0.12)_45%,transparent_78%)]"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-1/2 top-1/2 h-[62vh] w-[62vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/30 blur-[140px]"
-      />
+      {/* One consistent backdrop for the whole app. The glass panels pick it
+          up through their blur — without something behind them they stop
+          looking like glass. Neutral slate with one small pool of brand
+          colour; see `.app-ambient` in globals.css. */}
+      <div aria-hidden className="app-ambient pointer-events-none absolute inset-0" />
       <AppSidebar email={user?.email ?? null} />
       <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {children}

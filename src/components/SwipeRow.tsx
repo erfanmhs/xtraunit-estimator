@@ -108,7 +108,7 @@ export default function SwipeRow({
       ? "bg-brand text-white"
       : t === "primary"
         ? "bg-green-600 text-white"
-        : "bg-white/15 text-foreground";
+        : "bg-muted/30 text-foreground";
 
   return (
     <>
@@ -225,7 +225,7 @@ export default function SwipeRow({
                   setSheet(false);
                   a.onClick();
                 }}
-                className={`flex min-h-12 w-full items-center rounded-lg px-4 text-left text-sm transition-colors hover:bg-white/10 ${
+                className={`flex min-h-12 w-full items-center rounded-lg px-4 text-left text-sm transition-colors hover:bg-foreground/10 ${
                   a.tone === "danger"
                     ? "text-brand-soft"
                     : a.tone === "primary"
@@ -239,7 +239,7 @@ export default function SwipeRow({
             <button
               type="button"
               onClick={() => setSheet(false)}
-              className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-white/10 text-sm text-muted hover:text-foreground"
+              className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-border text-sm text-muted hover:text-foreground"
             >
               Cancel
             </button>

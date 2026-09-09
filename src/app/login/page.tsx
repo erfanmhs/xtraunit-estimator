@@ -9,17 +9,9 @@ import { siteConfig } from "@/config/site";
 export default function LoginPage() {
   return (
     <main className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
-      {/* Garnet gradient wash — makes the brand red clearly visible over the dark base */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_60%_at_50%_32%,rgba(160,28,45,0.45),rgba(160,28,45,0.12)_45%,transparent_78%)]"
-      />
-      {/* Soft garnet glow on top for depth — centered on the form so the halo
-          around it is even all the way around */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-1/2 top-1/2 h-[62vh] w-[62vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/30 blur-[140px]"
-      />
+      {/* The same cool backdrop as the rest of the app, so signing in doesn't
+          look like a different product. See `.app-ambient` in globals.css. */}
+      <div aria-hidden className="app-ambient pointer-events-none absolute inset-0" />
 
       <div className="relative w-full max-w-sm">
         <div className="flex flex-col items-center gap-8 rounded-2xl border border-border bg-surface/70 p-8 backdrop-blur-sm">
