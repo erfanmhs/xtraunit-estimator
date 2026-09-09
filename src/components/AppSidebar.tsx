@@ -33,6 +33,7 @@ import {
   LogoutIcon,
   type Icon,
 } from "@/components/StageNav";
+import NavPending from "./NavPending";
 
 const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/projects", label: "Projects", icon: FolderIcon },
@@ -201,7 +202,9 @@ export default function AppSidebar({ email }: { email: string | null }) {
             return (
               <Link key={n.href} href={n.href} title={n.label} className={item(active && !projectId)}>
                 <span className="flex w-8 shrink-0 justify-center">
-                  <Ico className="h-5 w-5" />
+                  <NavPending className="h-5 w-5">
+                    <Ico className="h-5 w-5" />
+                  </NavPending>
                 </span>
                 <span className={label}>{n.label}</span>
               </Link>
@@ -224,7 +227,9 @@ export default function AppSidebar({ email }: { email: string | null }) {
                 return (
                   <Link key={s.key} href={s.href} title={s.label} className={item(s.active)}>
                     <span className="relative flex w-8 shrink-0 justify-center">
-                      <Ico className="h-5 w-5" />
+                      <NavPending className="h-5 w-5">
+                        <Ico className="h-5 w-5" />
+                      </NavPending>
                       {dot ? (
                         <span
                           className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-background ${dot}`}
