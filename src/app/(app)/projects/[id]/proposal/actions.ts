@@ -57,13 +57,37 @@ const proposalPatch = z.object({
 });
 export type ProposalPatch = z.infer<typeof proposalPatch>;
 
-// Columns that exist before migration 0033 (fallback when it hasn't run).
-const LEGACY_KEYS = new Set([
+// Columns that exist before migration 0033 (fallback when it hasn't run),
+// plus the three every version of the table has.
+//
+// `as const` matters: it keeps these as literal key types so the fallback row
+// below stays a known shape. Building it with Object.fromEntries instead
+// produced a bare string index signature, which TypeScript 7 rejects when it
+// is handed to a Supabase upsert.
+const LEGACY_KEYS = [
+  "project_id",
+  "owner_id",
+  "updated_at",
   "client_name",
   "proposal_date",
   "project_description",
   "understanding",
-]);
+] as const;
+
+/** Copy just the named keys, keeping each one's type. */
+function pick<T extends object, K extends PropertyKey>(
+  obj: T,
+  keys: readonly K[],
+): Pick<T, Extract<K, keyof T>> {
+  const out = {} as Pick<T, Extract<K, keyof T>>;
+  for (const k of keys) {
+    if (k in obj) {
+      const key = k as unknown as Extract<K, keyof T>;
+      out[key] = obj[key];
+    }
+  }
+  return out;
+}
 
 export async function saveProposal(
   projectId: string,
@@ -91,11 +115,7 @@ export async function saveProposal(
   if (!error) return { ok: true };
 
   // Migration 0033 not run yet → save what the older table can hold.
-  const legacy = Object.fromEntries(
-    Object.entries(row).filter(
-      ([k]) => LEGACY_KEYS.has(k) || ["project_id", "owner_id", "updated_at"].includes(k),
-    ),
-  );
+  const legacy = pick(row, LEGACY_KEYS);
   const retry = await supabase.from("proposals").upsert(legacy, { onConflict: "project_id" });
   if (retry.error)
     return { ok: false, error: "Could not save. (Has migration 0017 been run in Supabase?)" };
