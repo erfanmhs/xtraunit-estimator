@@ -23,6 +23,7 @@ import {
 import { updateLineItem, setLineStatus, addLineItem, deleteLineItem } from "../scope/actions";
 import { evalFormula } from "@/lib/formula";
 import SwipeRow from "@/components/SwipeRow";
+import Caret from "@/components/Caret";
 
 export type PricedLine = {
   id: string;
@@ -95,22 +96,51 @@ const GRID =
   "xl:grid xl:grid-cols-[minmax(0,1fr)_repeat(5,3.75rem)_4.5rem_5.5rem_5.5rem_6rem] xl:items-center xl:gap-x-1.5";
 
 const CELL =
-  "rounded-md border border-border bg-black/20 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand";
+  "rounded-md border border-border bg-input px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-brand";
+// Money fields carry a "$" inside them, on the left, so it is obvious at a
+// glance that a price is wanted and not a quantity. The extra left padding
+// keeps a long number from running under it.
+const CELL_MONEY = `${CELL} w-full pl-4`;
+
+/** A price field with its currency mark. */
+function Money({
+  className = "",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <span className={`relative inline-block min-w-0 ${className}`}>
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] leading-none text-muted"
+      >
+        $
+      </span>
+      <input type="text" inputMode="decimal" {...props} className={CELL_MONEY} />
+    </span>
+  );
+}
 
 export default function PricingTable({
   projectId,
   initialItems,
+  initialExcluded = [],
 }: {
   projectId: string;
   initialItems: PricedLine[];
+  initialExcluded?: PricedLine[];
 }) {
   const [items, setItems] = useState<PricedLine[]>(initialItems);
+  // Excluded lines keep their numbers and live at the bottom of the page.
+  const [excluded, setExcluded] = useState<PricedLine[]>(initialExcluded);
+  // The line waiting on a "yes, exclude it" answer.
+  const [confirmExclude, setConfirmExclude] = useState<PricedLine | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [addingDiv, setAddingDiv] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   useEffect(() => setItems(initialItems), [initialItems]);
+  useEffect(() => setExcluded(initialExcluded), [initialExcluded]);
 
   function run(
     optimistic: () => void,
@@ -219,17 +249,38 @@ export default function PricingTable({
     );
   }
 
+  // Exclude moves the line to the Exclusions section WITH its numbers; it
+  // never wipes a price. Restore puts it back exactly as it was.
   function onExclude(id: string) {
+    const li = items.find((x) => x.id === id);
+    if (!li) return;
+    setConfirmExclude(null);
     run(
-      () => setItems((prev) => prev.filter((li) => li.id !== id)),
+      () => {
+        setItems((prev) => prev.filter((x) => x.id !== id));
+        setExcluded((prev) => [...prev, { ...li, status: "excluded" }]);
+      },
       () => setLineStatus(id, "excluded"),
     );
   }
 
-  // Remove the line for good (Exclude keeps it, struck through, on Scope).
-  function onDelete(id: string) {
+  function onRestore(id: string) {
+    const li = excluded.find((x) => x.id === id);
+    if (!li) return;
     run(
-      () => setItems((prev) => prev.filter((li) => li.id !== id)),
+      () => {
+        setExcluded((prev) => prev.filter((x) => x.id !== id));
+        setItems((prev) => [...prev, { ...li, status: "proposed" }]);
+      },
+      () => setLineStatus(id, "proposed"),
+    );
+  }
+
+  // Delete is only offered from the Exclusions section — you have to exclude
+  // a line before you can destroy it, so one mis-tap can never lose work.
+  function onDeleteExcluded(id: string) {
+    run(
+      () => setExcluded((prev) => prev.filter((x) => x.id !== id)),
       () => deleteLineItem(id),
     );
   }
@@ -319,7 +370,7 @@ export default function PricingTable({
     <div className="mt-6">
       {/* Totals bar: the two numbers, the status counts, the bulk actions.
           Wraps in that order at narrow widths; nothing is crammed in a corner. */}
-      <div className="glass sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl px-4 py-2.5">
+      <div className="glass-strong sticky top-0 z-20 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl px-4 py-2.5">
         <div>
           <p className="text-[10px] uppercase tracking-wider text-muted">
             Confirmed
@@ -349,7 +400,7 @@ export default function PricingTable({
               onClick={onClearAll}
               className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:border-brand hover:text-brand-soft"
             >
-              Clear all
+              Clear all prices
             </button>
           ) : null}
           {needsConfirm > 0 ? (
@@ -396,7 +447,7 @@ export default function PricingTable({
                   aria-expanded={!isCollapsed}
                 >
                   <span className="text-xs text-muted">
-                    {isCollapsed ? "▸" : "▾"}
+                    <Caret open={!isCollapsed} />
                   </span>
                   <h2 className="truncate font-heading text-sm uppercase tracking-wider text-brand-soft">
                     {g.key}
@@ -435,14 +486,14 @@ export default function PricingTable({
                       }
                       className="rounded-md border border-border px-2 py-0.5 text-xs text-muted transition-colors hover:border-brand hover:text-foreground"
                     >
-                      + Add line
+                      + Add Item
                     </button>
                   ) : null}
                 </div>
               </div>
 
               {!isCollapsed ? (
-                <div className="mt-2 divide-y divide-white/5">
+                <div className="mt-2 divide-y divide-border">
                   {/* Column headers — only when rows are one line (xl+) */}
                   <div className={`${GRID} hidden pb-1 text-[10px] uppercase tracking-wider text-muted xl:grid`}>
                     <span>Line</span>
@@ -464,8 +515,7 @@ export default function PricingTable({
                       onConfirm={() => onConfirm(li.id)}
                       onClear={() => onClear(li.id)}
                       onEditDesc={(d) => onEditDesc(li.id, d)}
-                      onExclude={() => onExclude(li.id)}
-                      onDelete={() => onDelete(li.id)}
+                      onExclude={() => setConfirmExclude(li)}
                     />
                   ))}
                   {addingDiv === g.key ? (
@@ -480,9 +530,200 @@ export default function PricingTable({
           );
         })}
       </div>
+
+      <ExclusionsSection
+        rows={excluded}
+        onRestore={onRestore}
+        onDelete={onDeleteExcluded}
+      />
+
+      {confirmExclude ? (
+        <ConfirmExclude
+          line={confirmExclude}
+          onCancel={() => setConfirmExclude(null)}
+          onConfirm={() => onExclude(confirmExclude.id)}
+        />
+      ) : null}
     </div>
   );
 }
+
+/**
+ * Excluded lines, at the bottom of the page.
+ *
+ * They keep their quantity and their price — excluding is a decision about
+ * what is in the bid, not an instruction to throw the numbers away. From here
+ * a line can be put back, or deleted for good. This is the ONLY place a line
+ * can be deleted, so nothing is ever one mis-tap from gone.
+ */
+function ExclusionsSection({
+  rows,
+  onRestore,
+  onDelete,
+}: {
+  rows: PricedLine[];
+  onRestore: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<PricedLine | null>(null);
+  if (rows.length === 0) return null;
+  const total = rows.reduce((a, li) => a + lineTotal(li), 0);
+
+  return (
+    <section className="mt-6 rounded-xl panel p-3 sm:p-4">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <Caret open={open} />
+        <h3 className="text-sm uppercase tracking-wider text-muted">Exclusions</h3>
+        <span className="text-[11px] text-muted/70">
+          {rows.length} line{rows.length > 1 ? "s" : ""}
+          {total > 0 ? ` · ${usd.format(total)} not in the bid` : ""}
+        </span>
+      </button>
+
+      {open ? (
+        <>
+          <p className="mt-2 text-xs text-muted/80">
+            Not in the bid, but kept with their numbers. These can be listed in
+            the proposal under Exclusions so the client sees what is not
+            included.
+          </p>
+          <div className="mt-2 divide-y divide-border">
+            {rows.map((li) => (
+              <div key={li.id} className="py-2">
+                <p className="flex items-start gap-2 text-sm text-muted">
+                  <span className="mt-0.5 shrink-0 font-mono text-[10px]">
+                    {li.division_code ?? "—"}
+                  </span>
+                  <span className="min-w-0 line-through">{li.description}</span>
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6">
+                {li.quantity != null ? (
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted">
+                    {li.quantity} {li.unit ?? ""}
+                  </span>
+                ) : null}
+                <span className="shrink-0 text-xs tabular-nums text-muted">
+                  {lineTotal(li) > 0 ? usd.format(lineTotal(li)) : "—"}
+                </span>
+                <span className="ml-auto flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onRestore(li.id)}
+                    className="rounded border border-border px-2 py-0.5 text-[11px] text-foreground transition-colors hover:border-brand hover:text-brand-soft"
+                  >
+                    Put back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(li)}
+                    className="rounded px-2 py-0.5 text-[11px] text-muted transition-colors hover:text-brand-soft"
+                  >
+                    Delete
+                  </button>
+                </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {confirmDelete ? (
+        <ConfirmDialog
+          title="Delete this line for good?"
+          body={confirmDelete.description}
+          note="This cannot be undone. To keep it out of the bid but keep the record, leave it excluded instead."
+          confirmLabel="Delete"
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            onDelete(confirmDelete.id);
+            setConfirmDelete(null);
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function ConfirmExclude({
+  line,
+  onCancel,
+  onConfirm,
+}: {
+  line: PricedLine;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <ConfirmDialog
+      title="Exclude this line?"
+      body={line.description}
+      note="It moves to Exclusions at the bottom of this page and keeps its quantity and price. You can put it back any time."
+      confirmLabel="Exclude"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  );
+}
+
+/** A yes / no question, centred, with the destructive answer on the right. */
+function ConfirmDialog({
+  title,
+  body,
+  note,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: string;
+  note: string;
+  confirmLabel: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl panel p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h4 className="font-heading text-base text-foreground">{title}</h4>
+        <p className="mt-1.5 text-sm text-foreground/90">{body}</p>
+        <p className="mt-2 text-xs text-muted">{note}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-border px-4 py-2 text-sm text-foreground transition-colors hover:border-brand"
+          >
+            No, keep it
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-strong"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function Row({
   item: li,
@@ -491,7 +732,6 @@ function Row({
   onClear,
   onEditDesc,
   onExclude,
-  onDelete,
 }: {
   item: PricedLine;
   onSave: (patch: PricePatch) => void;
@@ -499,7 +739,6 @@ function Row({
   onClear: () => void;
   onEditDesc: (description: string) => void;
   onExclude: () => void;
-  onDelete: () => void;
 }) {
   const [vals, setVals] = useState<Record<string, string>>(() => fromItem(li));
   const [total, setTotal] = useState(li.cost_total ? String(li.cost_total) : "");
@@ -590,12 +829,11 @@ function Row({
     .join(" · ");
   const statusText = proposed ? "needs confirm" : confirmed ? "confirmed" : "unpriced";
 
-  // Touch: swipe left for Exclude / Delete; hold for every action. The
-  // visible buttons stay for everyone.
-  const swipe = [
-    { label: "Exclude", onClick: onExclude },
-    { label: "Delete", onClick: onDelete, tone: "danger" as const },
-  ];
+  // Exclude is reachable by a deliberate gesture only — swipe left, or hold
+  // for the full sheet. It is no longer a plain text button sitting beside
+  // "Clear price" on every row, which is what made it so easy to hit by
+  // accident. Delete is not here at all: a line has to be excluded first.
+  const swipe = [{ label: "Exclude", onClick: onExclude, tone: "danger" as const }];
   const sheet = [
     ...(proposed ? [{ label: "Confirm price", onClick: onConfirm, tone: "primary" as const }] : []),
     ...(proposed || confirmed ? [{ label: "Clear price", onClick: onClear }] : []),
@@ -627,7 +865,7 @@ function Row({
             }}
             autoFocus
             spellCheck
-            className="w-full rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
+            className="w-full rounded-md border border-border bg-input px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
           />
         ) : (
           <p
@@ -673,19 +911,11 @@ function Row({
               <button
                 type="button"
                 onClick={onClear}
-                className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-foreground"
+                className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
               >
-                Clear
+                Clear price
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={onExclude}
-              title="Exclude from scope & pricing (restore from the Scope page)"
-              className="rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-foreground"
-            >
-              Exclude
-            </button>
           </span>
         </div>
       </div>
@@ -700,15 +930,13 @@ function Row({
             className={`flex min-w-0 items-center gap-1 ${usingTotal ? "opacity-40" : ""}`}
           >
             <span className="shrink-0 text-[10px] text-muted xl:hidden">{label}</span>
-            <input
-              type="text"
-              inputMode="decimal"
+            <Money
               value={vals[k]}
               onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))}
               onBlur={saveIfChanged}
               placeholder="0"
               aria-label={label}
-              className={`min-w-0 flex-1 sm:w-14 sm:flex-none xl:w-full ${CELL}`}
+              className="flex-1 sm:w-14 sm:flex-none xl:w-full"
             />
           </label>
         ))}
@@ -717,9 +945,7 @@ function Row({
             sum) as its placeholder; typing here overrides the buckets. */}
         <label className="flex min-w-0 items-center gap-1">
           <span className="shrink-0 text-[10px] font-medium text-brand-soft xl:hidden">Total</span>
-          <input
-            type="text"
-            inputMode="decimal"
+          <Money
             value={total}
             onChange={(e) => setTotal(e.target.value)}
             onBlur={saveIfChanged}
@@ -730,7 +956,7 @@ function Row({
                 ? `${usd.format(previewTotal ?? 0)} = ${isUnit ? `${li.quantity ?? 0} × ${usd.format(previewSum)}` : "sum of the buckets"} · type a number to override`
                 : "One final price for this line — overrides the buckets"
             }
-            className={`min-w-0 flex-1 placeholder:text-foreground/70 sm:w-[4.5rem] sm:flex-none xl:w-full ${CELL}`}
+            className="flex-1 sm:w-[4.5rem] sm:flex-none xl:w-full"
           />
         </label>
 
@@ -739,7 +965,7 @@ function Row({
           onChange={(e) => setSource(e.target.value)}
           onBlur={saveIfChanged}
           aria-label="Price source"
-          className="col-span-3 rounded-md border border-border bg-black/20 px-1 py-1 text-[11px] text-muted outline-none focus:border-brand sm:col-span-1 xl:w-full"
+          className="col-span-3 rounded-md border border-border bg-input px-1 py-1 text-[11px] text-muted outline-none focus:border-brand sm:col-span-1 xl:w-full"
         >
           {SOURCES.map(([v, label]) => (
             <option key={v} value={v}>
@@ -786,7 +1012,7 @@ function AddRow({
         placeholder="New scope line…"
         autoFocus
         spellCheck
-        className="w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+        className="w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
       />
       <div className="mt-1.5 flex items-center gap-2">
         <input
@@ -795,14 +1021,14 @@ function AddRow({
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           placeholder="Qty"
-          className="w-24 rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
+          className="w-24 rounded-md border border-border bg-input px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
         />
         <input
           type="text"
           value={unit}
           onChange={(e) => setUnit(e.target.value)}
           placeholder="unit (sf, ea, lf…)"
-          className="w-40 rounded-md border border-border bg-black/20 px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
+          className="w-40 rounded-md border border-border bg-input px-2 py-1 text-sm text-foreground outline-none focus:border-brand"
         />
         <div className="ml-auto flex items-center gap-2 text-xs">
           <button
@@ -811,7 +1037,7 @@ function AddRow({
             disabled={!description.trim()}
             className="glass-brand rounded-md px-3 py-1 font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
           >
-            Add
+            Add item
           </button>
           <button
             type="button"

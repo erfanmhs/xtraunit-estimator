@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import PageHeader from "@/components/PageHeader";
+import ThemeToggle from "@/components/ThemeToggle";
 import SettingsForm from "./SettingsForm";
 import type { CompanySettings } from "./actions";
 import { resolveProfile } from "@/lib/proposal/profile";
@@ -37,6 +38,14 @@ export default async function SettingsPage() {
           title="Settings"
           subtitle="Company identity for proposals, and the markup defaults every new estimate starts from."
         />
+        <section className="mb-5 rounded-xl panel p-5">
+          <h2 className="font-heading text-base text-foreground">Appearance</h2>
+          <p className="mt-0.5 mb-3 text-sm text-muted">
+            Dark is the default. This is remembered on this device only.
+          </p>
+          <ThemeToggle />
+        </section>
+
         <SettingsForm
           initial={initial}
           profile={profile}

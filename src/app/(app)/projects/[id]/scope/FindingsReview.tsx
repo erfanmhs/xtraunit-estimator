@@ -24,6 +24,7 @@ import {
   getApplyRun,
   type ScopeRun,
 } from "./actions";
+import Caret from "@/components/Caret";
 
 export type Finding = {
   id: string;
@@ -210,21 +211,6 @@ export default function FindingsReview({
             {applyRun?.stage ?? "Applying your responses to the scope…"}
           </span>
         </div>
-      ) : pendingCount > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg glass px-4 py-2.5">
-          <span className="text-sm text-muted">
-            {pendingCount} response{pendingCount > 1 ? "s" : ""} ready to apply —
-            updates the scope directly, no full regenerate.
-          </span>
-          <button
-            type="button"
-            onClick={onApply}
-            disabled={applying}
-            className="glass-brand shrink-0 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
-          >
-            Apply to scope
-          </button>
-        </div>
       ) : null}
 
       {applyRun?.status === "error" && applyRun.error ? (
@@ -257,7 +243,7 @@ export default function FindingsReview({
                   className="flex min-w-0 flex-1 items-center gap-2 text-left"
                   aria-expanded={!collapsed[kind]}
                 >
-                  <span className="text-xs text-muted">{collapsed[kind] ? "▸" : "▾"}</span>
+                  <Caret open={!collapsed[kind]} className="text-muted" />
                   <h3 className="text-sm uppercase tracking-wider text-muted">
                     {FINDING_LABEL[kind] ?? kind}
                   </h3>
@@ -279,7 +265,7 @@ export default function FindingsReview({
               {!collapsed[kind] ? (
                 <>
                 <p className="mt-0.5 text-[11px] text-muted/60">{FINDING_HINT[kind]}</p>
-                <ul className="mt-2 divide-y divide-white/5">
+                <ul className="mt-2 divide-y divide-border">
                   {rows.map((f) =>
                     kind === "question" ? (
                       <QuestionRow
@@ -302,12 +288,35 @@ export default function FindingsReview({
           );
         })}
       </div>
+
+      {/*
+        The apply bar lives BELOW the list, because you apply your answers
+        after you have read and answered them — not before. It used to sit in
+        the header, above everything it acts on. Sticky so it stays in reach
+        while working down a long list of questions.
+      */}
+      {!running && pendingCount > 0 ? (
+        <div className="sticky bottom-0 z-10 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface/95 px-4 py-2.5 backdrop-blur pb-safe">
+          <span className="text-sm text-muted">
+            {pendingCount} response{pendingCount > 1 ? "s" : ""} ready to apply —
+            updates the scope directly, no full regenerate.
+          </span>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={applying}
+            className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
+          >
+            {applying ? "Applying…" : "Apply to Scope"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 const NOTE_CLASS =
-  "w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
+  "w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
 
 /** A toggle chip. `on` = selected state; tapping again is the undo. */
 function Chip({

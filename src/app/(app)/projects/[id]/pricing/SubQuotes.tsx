@@ -189,7 +189,7 @@ export default function SubQuotes({
           }}
           className="glass-brand shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30"
         >
-          {open ? "Close" : "+ Add sub quote"}
+          {open ? "Cancel" : "+ Add Quote"}
         </button>
       </div>
 
@@ -206,7 +206,7 @@ export default function SubQuotes({
 
       {/* Existing quotes */}
       {quotes.length > 0 ? (
-        <div className="mt-3 divide-y divide-white/5">
+        <div className="mt-3 divide-y divide-border">
           {quotes.map((q) => (
             <div key={q.id} className="flex items-center gap-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
@@ -230,7 +230,7 @@ export default function SubQuotes({
                 title="Remove quote and un-price the lines it covers (confirmed lines stay)"
                 className="shrink-0 text-[11px] text-muted transition-colors hover:text-brand-soft"
               >
-                Remove
+                Remove Quote
               </button>
             </div>
           ))}
@@ -239,7 +239,7 @@ export default function SubQuotes({
 
       {/* Add form */}
       {open ? (
-        <div className="mt-3 rounded-lg border border-white/10 p-3">
+        <div className="mt-3 rounded-lg border border-border p-3">
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={fileRef}
@@ -257,7 +257,7 @@ export default function SubQuotes({
           </div>
 
           {extraction ? (
-            <div className="mt-2 rounded-md border border-border bg-black/20 px-3 py-2 text-xs text-muted">
+            <div className="mt-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-muted">
               <p className="text-foreground">{extraction.summary}</p>
               {extraction.exclusions.length ? (
                 <p className="mt-1">
@@ -275,7 +275,7 @@ export default function SubQuotes({
               onChange={(e) => setSubName(e.target.value)}
               placeholder="Sub name (ABC Plumbing)"
               spellCheck
-              className="w-48 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+              className="w-48 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
             />
             <input
               type="text"
@@ -283,14 +283,14 @@ export default function SubQuotes({
               onChange={(e) => setTrade(e.target.value)}
               placeholder="Trade"
               spellCheck
-              className="w-32 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+              className="w-32 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
             />
             <input
               type="text"
               value={quoteDate}
               onChange={(e) => setQuoteDate(e.target.value)}
               placeholder="Quote date"
-              className="w-28 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+              className="w-28 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
             />
             <input
               type="text"
@@ -298,7 +298,7 @@ export default function SubQuotes({
               value={total}
               onChange={(e) => setTotal(e.target.value)}
               placeholder="Total $"
-              className="w-32 rounded-md border border-border bg-black/20 px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
+              className="w-32 rounded-md border border-border bg-input px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
             />
           </div>
 
@@ -348,7 +348,7 @@ export default function SubQuotes({
               disabled={!!busy}
               className="glass-brand rounded-lg px-4 py-1.5 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
             >
-              Apply quote to covered lines
+              Apply Quote
             </button>
           </div>
         </div>

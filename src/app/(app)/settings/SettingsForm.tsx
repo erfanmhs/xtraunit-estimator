@@ -18,9 +18,10 @@ import {
   type ProposalTerms,
   type ProjectReference,
 } from "@/lib/proposal/profile";
+import Caret from "@/components/Caret";
 
 const REF_FIELD =
-  "rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
+  "rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
 
 const IDENTITY_FIELDS = [
   ["company_name", "Company name", "XtraUnit Construction"],
@@ -132,7 +133,7 @@ export default function SettingsForm({
                   setIdentity((s) => ({ ...s, [k]: e.target.value }))
                 }
                 placeholder={placeholder}
-                className="rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+                className="rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
               />
             </label>
           ))}
@@ -161,7 +162,7 @@ export default function SettingsForm({
                   onChange={(e) =>
                     setPcts((s) => ({ ...s, [k]: e.target.value }))
                   }
-                  className="w-24 rounded-md border border-border bg-black/20 px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
+                  className="w-24 rounded-md border border-border bg-input px-2 py-1.5 text-right text-sm text-foreground outline-none focus:border-brand"
                 />
                 <span className="text-sm text-muted">%</span>
               </span>
@@ -293,7 +294,7 @@ function ProposalProfileSection({
           onClick={() => setShowNotes((v) => !v)}
           className="text-xs text-brand-soft hover:underline"
         >
-          {showNotes ? "▾" : "▸"} Draft these from a few notes (AI)
+          <Caret open={showNotes} size={16} /> Draft these from a few notes (AI)
         </button>
         {showNotes ? (
           <div className="mt-3 space-y-2">
@@ -311,7 +312,7 @@ function ProposalProfileSection({
                 }
                 placeholder={ph}
                 rows={2}
-                className="w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+                className="w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
               />
             ))}
             <button
@@ -347,14 +348,14 @@ function ProposalProfileSection({
                   value={b.title}
                   onChange={(e) => setBullet(i, "title", e.target.value)}
                   placeholder="Title"
-                  className="rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand sm:w-44"
+                  className="rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand sm:w-44"
                 />
                 <input
                   type="text"
                   value={b.body}
                   onChange={(e) => setBullet(i, "body", e.target.value)}
                   placeholder="One sentence"
-                  className="flex-1 rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+                  className="flex-1 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
                 />
               </div>
             ))}
@@ -402,7 +403,7 @@ function ProposalProfileSection({
             }
             rows={6}
             spellCheck
-            className="mt-1.5 w-full rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
+            className="mt-1.5 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
           />
         </div>
 
@@ -513,7 +514,7 @@ function ProfileField({
         spellCheck
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
-        className="rounded-md border border-border bg-black/20 px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none focus:border-brand"
+        className="rounded-md border border-border bg-input px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none focus:border-brand"
       />
     </label>
   );

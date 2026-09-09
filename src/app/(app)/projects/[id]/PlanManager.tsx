@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import PlanTriage from "./PlanTriage";
 import type { PlanFile } from "@/types";
+import Caret from "@/components/Caret";
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return "";
@@ -34,6 +35,7 @@ export default function PlanManager({
 
   const [triageFile, setTriageFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [open, setOpen] = useState(files.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -92,13 +94,31 @@ export default function PlanManager({
   }
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl glass p-6">
-      <div className="flex items-center justify-between">
+    <section className="rounded-xl panel p-5">
+      {/*
+        Collapsible, so Plans is the same size as Scope, Pricing, Estimate and
+        Proposal instead of towering over them. It opens by itself when there
+        is nothing uploaded yet — on a new project the upload target IS the
+        next thing to do — and stays shut once there are files, which is the
+        state a project spends nearly all its life in.
+      */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 text-left"
+      >
+        <Caret open={open} size={20} />
         <h2 className="font-heading text-lg text-foreground">Plans</h2>
-        <span className="text-xs text-muted">
-          {files.length} {files.length === 1 ? "file" : "files"}
+        <span className="ml-auto text-xs text-muted">
+          {files.length === 0
+            ? "none yet"
+            : `${files.length} ${files.length === 1 ? "file" : "files"}`}
         </span>
-      </div>
+      </button>
+
+      {open ? (
+      <div className="mt-4 flex flex-col gap-4">
 
       <label
         onDragOver={(e) => {
@@ -180,6 +200,9 @@ export default function PlanManager({
           ))}
         </ul>
       ) : null}
+      </div>
+      ) : null}
     </section>
   );
 }
+

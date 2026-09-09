@@ -15,7 +15,14 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-Nothing pending.
+- [ ] **0039_project_archive_and_order.sql** — adds `archived_at` and
+      `sort_order` to `projects`, for archiving ("minimize") a project and for
+      dragging the project list into your own order. Additive only; it also
+      seeds the current newest-first order so your first drag starts from the
+      list you already see. Nothing is deleted and no policy changes.
+
+      Until you run it the app still works: archiving and reordering are hidden,
+      and everything else behaves exactly as it does now.
 
 ---
 

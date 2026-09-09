@@ -63,6 +63,131 @@ export async function deleteProject(formData: FormData) {
   redirect("/projects");
 }
 
+/** Edit a project's details in place. */
+export async function updateProject(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (!id) redirect("/projects");
+
+  const parsed = projectInput.safeParse({
+    name: String(formData.get("name") ?? ""),
+    client_name: emptyToNull(formData.get("client_name")),
+    address: emptyToNull(formData.get("address")),
+    project_type: emptyToNull(formData.get("project_type")),
+    notes: emptyToNull(formData.get("notes")),
+  });
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "Please check the form.";
+    redirect(`/projects/${id}?error=${encodeURIComponent(msg)}`);
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("projects")
+    .update(parsed.data)
+    .eq("id", id);
+  if (error) redirect(`/projects/${id}?error=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${id}`);
+  redirect(`/projects/${id}`);
+}
+
+/**
+ * Copy a project so a similar job can start from a finished one.
+ *
+ * The scope and its prices come across, because that is the whole point — a
+ * second ADU on the same block is 90% the same bid. The PLANS deliberately do
+ * not: they are tens of megabytes of PDF belonging to a different address, and
+ * a takeoff measured on those sheets would be wrong on the new job. So the
+ * copy starts at "scope written, prices in, plans to upload".
+ *
+ * Prices are copied as `proposed`, never `confirmed`. A number carried over
+ * from another project is a starting point someone still has to agree to, and
+ * silently marking it confirmed would let a stale price reach a bid unchecked.
+ */
+export async function duplicateProject(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (!id) redirect("/projects");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: src } = await supabase
+    .from("projects")
+    .select("name,client_name,address,project_type,notes,region,gen_trades")
+    .eq("id", id)
+    .single();
+  if (!src) redirect("/projects");
+
+  const { data: copy, error } = await supabase
+    .from("projects")
+    .insert({ ...src, owner_id: user.id, name: `${src.name} (copy)` })
+    .select("id")
+    .single();
+  if (error || !copy) redirect(`/projects/${id}`);
+
+  const { data: lines } = await supabase
+    .from("line_items")
+    .select(
+      "division_code,division_name,section_code,section_name,description,quantity,unit,source_kind,evidence,status,confidence,ai_generated,notes,sort_order,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence",
+    )
+    .eq("project_id", id);
+
+  if (lines?.length) {
+    await supabase.from("line_items").insert(
+      lines.map((li) => ({
+        ...li,
+        project_id: copy.id,
+        owner_id: user.id,
+        plan_file_id: null, // the plans did not come with it
+        price_status: hasAnyPrice(li) ? "proposed" : null,
+        user_edited: false,
+      })),
+    );
+  }
+
+  revalidatePath("/projects");
+  redirect(`/projects/${copy.id}`);
+}
+
+function hasAnyPrice(li: Record<string, unknown>): boolean {
+  return [
+    "cost_labor",
+    "cost_material",
+    "cost_sub",
+    "cost_equipment",
+    "cost_other",
+    "cost_total",
+  ].some((k) => typeof li[k] === "number" && (li[k] as number) !== 0);
+}
+
+/**
+ * Archive ("minimize") a project, or bring it back.
+ *
+ * Nothing is deleted — the project and everything under it stay exactly as
+ * they are, it just leaves the main list. Needs migration 0039; until that is
+ * run the button is hidden, and if it is somehow called anyway the error is
+ * swallowed rather than shown, because failing to tidy a list is not worth an
+ * error screen.
+ */
+export async function setProjectArchived(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const archived = String(formData.get("archived") ?? "") === "true";
+  if (!id) redirect("/projects");
+
+  const supabase = await createClient();
+  await supabase
+    .from("projects")
+    .update({ archived_at: archived ? new Date().toISOString() : null })
+    .eq("id", id);
+
+  revalidatePath("/projects");
+  redirect("/projects");
+}
+
 // ── Stage progress (powers the project tabs in the left rail) ───────────────
 
 export type StageState = "done" | "partial" | "todo";

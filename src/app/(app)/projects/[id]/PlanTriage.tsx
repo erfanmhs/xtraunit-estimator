@@ -195,32 +195,6 @@ export default function PlanTriage({
             </p>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setKept(new Set())}
-            disabled={saving || kept.size === 0}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:border-brand hover:text-brand-soft disabled:opacity-40"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={saving}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:border-brand hover:text-brand-soft disabled:opacity-40"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || rendering || kept.size === 0}
-            className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? "Saving…" : `Save ${kept.size} page${kept.size === 1 ? "" : "s"}`}
-          </button>
-        </div>
       </div>
 
       {error ? (
@@ -261,6 +235,49 @@ export default function PlanTriage({
             </div>
           );
         })}
+      </div>
+
+      {/*
+        The actions sit AFTER the sheets, because that is where the job ends.
+        They used to be at the top, so picking sheets meant scrolling all the
+        way down to choose and all the way back up to save. On a phone, with a
+        47-page set, that is a long way for no reason.
+
+        Sticky to the bottom of the viewport so Save is always in thumb reach
+        without scrolling at all, and the count is always visible.
+      */}
+      <div className="sticky bottom-0 -mx-6 -mb-6 mt-1 flex flex-wrap items-center gap-2 border-t border-border bg-surface/95 px-6 py-3 backdrop-blur pb-safe">
+        <span className="text-sm text-muted" aria-live="polite">
+          {kept.size === 0
+            ? "No sheets picked yet"
+            : `${kept.size} of ${total} selected`}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setKept(new Set())}
+            disabled={saving || kept.size === 0}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:border-brand hover:text-brand-soft disabled:opacity-40"
+          >
+            Deselect all
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:border-brand hover:text-brand-soft disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving || rendering || kept.size === 0}
+            className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Saving…" : `Save ${kept.size} page${kept.size === 1 ? "" : "s"}`}
+          </button>
+        </div>
       </div>
     </section>
   );

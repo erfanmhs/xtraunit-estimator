@@ -1,43 +1,144 @@
 @import "tailwindcss";
 
 /*
-  XtraUnit brand theme (dark).
-  All brand colors and fonts are defined ONCE here. Change a value in this file
-  and it updates everywhere in the app. Hex codes come from the official 2025
-  logo (garnet red #A01C2D) and brand guide.
+  ══ XtraUnit Estimator theme ═════════════════════════════════════════════════
+
+  Cool slate: neutral greys with a faint blue cast, chosen for long sessions.
+  The company's brand colour is an ACCENT ONLY — the Generate action, the active
+  stage, a project headline. Everything else is neutral. A different company
+  changes one pair of values (--accent / --accent-strong) and the whole app is
+  theirs.
+
+  Every colour in the app comes from a token below. Nothing hard-codes a hex.
+
+  LIGHT / DARK
+  Dark is the default and stays the default whatever the operating system is
+  set to, so nobody's app changes under them. Light is opt-in: put
+  `data-theme="light"` on <html>. The settings toggle just writes that
+  attribute. If we later want to follow the OS, that's one media query here and
+  no component changes.
 */
 
 :root {
-  /* --- Brand palette (fixed brand colors) --- */
-  --xu-red: #a01c2d; /* signature garnet red — matches the logo exactly */
-  --xu-red-strong: #7e1623; /* darker red for pressed/active states */
-  --xu-red-soft: #c9485a; /* lighter red for hover/focus on dark */
-  --xu-charcoal: #48484a; /* secondary brand gray */
+  /* --- The brand mark itself. Fixed. Used for the logo, never for chrome. --- */
+  --xu-red: #a01c2d; /* signature garnet red — matches the 2025 logo exactly */
+  --xu-charcoal: #48484a;
   --xu-black: #000000;
   --xu-white: #ffffff;
 
-  /* --- Dark theme surfaces (how the brand is applied in the app) --- */
-  --background: #0a0a0b; /* page background (near-black) */
-  --surface: #141416; /* cards, panels */
-  --border: #2a2a2e; /* hairline borders */
-  --foreground: #f4f4f5; /* primary text */
-  --muted: #a1a1aa; /* secondary / muted text */
-  --accent: var(--xu-red); /* interactive accent */
+  /* --- Cool slate, dark (default) --- */
+  --background: #0b0e14; /* page */
+  --surface: #151a23; /* cards, panels — reads as a distinct plane */
+  --surface-2: #1b2230; /* rows nested inside a card */
+  --border: #262f3e; /* hairline */
+  --border-strong: #33405433; /* a section edge that needs to be seen */
+  --foreground: #e6e9ef;
+  --muted: #8a94a6;
+
+  /* Accent. Lifted off the logo red so it holds up on a near-black ground —
+     #a01c2d on #0b0e14 is too dark to read as an action. */
+  --accent: #e23d4c;
+  --accent-strong: #b8232f; /* pressed / active */
+  --accent-soft: #f07480; /* hover text, links on dark */
+  --accent-on: #ffffff; /* text ON an accent fill */
+
+  /* Text fields. Recessed on dark, plain white on light — a field should read
+     as somewhere you type, not as another panel. */
+  --input: rgba(0, 0, 0, 0.26);
+
+  /* Glass. Kept as explicit rgba because lightningcss drops color-mix().
+     Every tint here is LIGHTER than --background, so a surface lifts off the
+     page instead of sinking into it. */
+  --glass-bg: rgba(32, 41, 56, 0.58);
+  --glass-border: rgba(148, 163, 184, 0.18);
+  --glass-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --glass-strong-bg: rgba(26, 33, 45, 0.97);
+  --glass-strong-border: rgba(148, 163, 184, 0.22);
+
+  /* Page sections: the same glass, one step more present. */
+  --panel-bg: rgba(32, 41, 56, 0.66);
+  --panel-border: rgba(148, 163, 184, 0.22);
+  --panel-sheen: rgba(255, 255, 255, 0.08);
+  --panel-shadow: 0 6px 22px -8px rgba(0, 0, 0, 0.6);
+  --accent-wash: rgba(226, 61, 76, 0.18);
+  --accent-wash-border: rgba(226, 61, 76, 0.42);
+  --accent-grip: rgba(226, 61, 76, 0.55);
+
+  /* Ambient backdrop pools — depth and glow for the glass. No brand colour
+     here at all: the accent has to stay rare to mean anything. */
+  --ambient-1: rgba(58, 94, 148, 0.40); /* steel blue, upper left */
+  --ambient-2: rgba(38, 64, 104, 0.34); /* deeper slate, lower right */
+  --ambient-3: rgba(84, 118, 162, 0.24); /* cool highlight, upper right */
+}
+
+/* --- Cool slate, light (opt in with data-theme="light" on <html>) --- */
+:root[data-theme="light"] {
+  --background: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f1f3f7;
+  --border: #e1e5ec;
+  --border-strong: #cbd3e0;
+  --foreground: #111827;
+  --muted: #6b7280;
+
+  /* On white the logo red is already strong; deepen slightly for contrast. */
+  --accent: #c2192b;
+  --accent-strong: #96121f;
+  --accent-soft: #a01c2d;
+  --accent-on: #ffffff;
+
+  --input: #ffffff;
+
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(17, 24, 39, 0.11);
+  --glass-shadow: 0 8px 30px rgba(15, 23, 42, 0.1);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --glass-strong-bg: rgba(255, 255, 255, 0.97);
+  --glass-strong-border: rgba(17, 24, 39, 0.14);
+
+  --panel-bg: rgba(255, 255, 255, 0.78);
+  --panel-border: rgba(17, 24, 39, 0.13);
+  --panel-sheen: rgba(255, 255, 255, 0.9);
+  --panel-shadow: 0 6px 20px -10px rgba(15, 23, 42, 0.22);
+  --accent-wash: rgba(194, 25, 43, 0.09);
+  --accent-wash-border: rgba(194, 25, 43, 0.3);
+  --accent-grip: rgba(194, 25, 43, 0.45);
+
+  --ambient-1: rgba(148, 176, 216, 0.36);
+  --ambient-2: rgba(170, 188, 214, 0.30);
+  --ambient-3: rgba(198, 214, 236, 0.32);
+}
+
+/* Explicit dark, so the toggle wins in both directions. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 /*
   Map the variables above to Tailwind utility classes so you can write things
   like `bg-brand`, `text-foreground`, `border-border`, `font-heading`, etc.
+  `inline` means the utility emits var(--…), so a theme swap needs no rebuild.
+
+  `brand-*` are kept as aliases of the accent: dozens of components already say
+  `bg-brand`, and they should all follow whatever the accent is.
 */
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
-  --color-brand: var(--xu-red);
-  --color-brand-strong: var(--xu-red-strong);
-  --color-brand-soft: var(--xu-red-soft);
+  --color-brand: var(--accent);
+  --color-brand-strong: var(--accent-strong);
+  --color-brand-soft: var(--accent-soft);
+  --color-brand-on: var(--accent-on);
   --color-charcoal: var(--xu-charcoal);
 
   --font-sans: var(--font-dm-sans); /* DM Sans — body & UI */
@@ -74,31 +175,83 @@ body {
   modals); `.glass-brand` for a garnet-tinted accent surface.
 */
 .glass {
-  background: rgba(20, 20, 22, 0.55);
+  background: var(--glass-bg);
   backdrop-filter: blur(18px) saturate(150%);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--glass-border);
   box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    var(--glass-shadow),
+    var(--glass-inset);
 }
+/* Dense glass, for chrome that has page content sliding underneath it —
+   sticky bars, toolbars, modals. Nearly opaque on purpose: at lower alpha the
+   text passing behind it shows through and both become unreadable. Keeps the
+   blur and the lit edge, so it still reads as glass. */
 .glass-strong {
-  background: rgba(20, 20, 22, 0.78);
+  background: var(--glass-strong-bg);
   backdrop-filter: blur(26px) saturate(165%);
   -webkit-backdrop-filter: blur(26px) saturate(165%);
-  border: 1px solid rgba(255, 255, 255, 0.11);
+  border: 1px solid var(--glass-strong-border);
   box-shadow:
-    0 10px 40px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    var(--glass-shadow),
+    var(--glass-inset);
 }
 .glass-brand {
-  background: rgba(160, 28, 45, 0.24);
+  background: var(--accent-wash);
   backdrop-filter: blur(18px) saturate(170%);
   -webkit-backdrop-filter: blur(18px) saturate(170%);
-  border: 1px solid rgba(201, 72, 90, 0.4);
+  border: 1px solid var(--accent-wash-border);
   box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    var(--glass-shadow),
+    var(--glass-inset);
+}
+
+/*
+  `.panel` — a frosted section that actually reads as a separate plane. Use it
+  for the stacked sections on a page (Plans, Scope, Pricing, Estimate,
+  Proposal).
+
+  Still glass: same blur, same translucency, same lit edge. What changed is the
+  direction. The old surfaces were DARKER than the page behind them, so a panel
+  sank into the background instead of lifting off it, and stacked sections ran
+  together — the contrast problem in the 2026-09-08 round. Real frosted glass
+  is lighter than what is behind it, because it scatters light forward. These
+  tints sit above the page, carry a visible edge and a soft drop shadow, and
+  the sections separate without losing the look.
+*/
+.panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--panel-border);
+  box-shadow:
+    var(--panel-shadow),
+    inset 0 1px 0 var(--panel-sheen);
+}
+/* Rows nested inside a .panel: one more step up, no extra border. */
+.panel-row {
+  background: var(--surface-2);
+}
+
+/*
+  The backdrop the whole app sits on.
+
+  Glass needs something behind it — a panel over a flat fill has nothing to
+  refract and stops looking like glass. This provides that depth: three soft
+  off-centre pools of cool steel blue, which is where the glow comes from.
+
+  It replaces a full-screen garnet wash at 45% alpha, which tinted every
+  surface in the app red and was the reason nothing else could use the accent.
+  There is no brand colour in here now — the accent stays rare so it still
+  means something when it appears.
+
+  Off-centre on purpose: a centred radial reads as a spotlight, not daylight.
+*/
+.app-ambient {
+  background-image:
+    radial-gradient(62% 48% at 16% 4%, var(--ambient-1) 0%, transparent 70%),
+    radial-gradient(56% 50% at 90% 82%, var(--ambient-2) 0%, transparent 72%),
+    radial-gradient(44% 38% at 80% 10%, var(--ambient-3) 0%, transparent 70%);
 }
 
 /* ── Touch devices ───────────────────────────────────────────────────────────
@@ -166,7 +319,7 @@ body {
 }
 .resize-handle:hover,
 .resize-handle[data-active="true"] {
-  background: rgba(160, 28, 45, 0.55);
+  background: var(--accent-grip);
 }
 
 /* ── Proposal printing ──────────────────────────────────────────────────────

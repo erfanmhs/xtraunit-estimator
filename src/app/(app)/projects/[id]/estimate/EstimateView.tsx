@@ -247,7 +247,7 @@ export default function EstimateView({
         <h2 className="mb-2 font-heading text-sm uppercase tracking-wider text-brand-soft">
           Direct cost by division
         </h2>
-        <div className="divide-y divide-white/5">
+        <div className="divide-y divide-border">
           {divisions.map((d) => (
             <div key={d.key} className="flex items-center justify-between py-2 text-sm">
               <span className="text-foreground">{d.key}</span>
@@ -266,7 +266,7 @@ export default function EstimateView({
         </div>
 
         {/* Cost mix — labor vs material vs subs at a glance */}
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-white/10 pt-3 text-xs text-muted">
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted">
           {Object.entries(mix)
             .filter(([, v]) => v > 0)
             .map(([label, v]) => (
@@ -286,7 +286,7 @@ export default function EstimateView({
         <h2 className="mb-2 font-heading text-sm uppercase tracking-wider text-brand-soft">
           Markups
         </h2>
-        <div className="divide-y divide-white/5">
+        <div className="divide-y divide-border">
           {MARKUP_ROWS.map(([k, label], i) => (
             <div key={k} className="flex items-center gap-3 py-2 text-sm">
               <span className="w-28 text-foreground">{label}</span>
@@ -299,7 +299,7 @@ export default function EstimateView({
                     setPcts((p) => ({ ...p, [k]: e.target.value }))
                   }
                   onBlur={persistIfChanged}
-                  className="w-20 rounded-md border border-border bg-black/20 px-2 py-1 text-right text-sm text-foreground outline-none focus:border-brand"
+                  className="w-20 rounded-md border border-border bg-input px-2 py-1 text-right text-sm text-foreground outline-none focus:border-brand"
                 />
                 <span className="text-muted">%</span>
               </label>
@@ -332,7 +332,7 @@ export default function EstimateView({
               onChange={(e) => setSf(e.target.value)}
               onBlur={persistIfChanged}
               placeholder="e.g. 12500"
-              className="w-28 rounded-md border border-border bg-black/20 px-2 py-1 text-right text-sm text-foreground outline-none focus:border-brand"
+              className="w-28 rounded-md border border-border bg-input px-2 py-1 text-right text-sm text-foreground outline-none focus:border-brand"
             />
             sf
           </label>

@@ -14,6 +14,7 @@ import {
   layerKeyOf,
   pointInPoly,
   polyAreaSqFt,
+  polyCentroid,
   segFeet,
   volumeCuFt,
   wallAreaSqFt,
@@ -161,6 +162,89 @@ describe("volumeCuFt", () => {
     ]; // 27 ft
     const cf = volumeCuFt(run, S, S, "linear", 1, 1); // 27 cf
     expect(cf / CF_PER_CY).toBeCloseTo(1, 10);
+  });
+});
+
+describe("polyCentroid", () => {
+  it("puts a square's centre in the middle", () => {
+    const c = polyCentroid([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ]);
+    expect(c.x).toBeCloseTo(50, 10);
+    expect(c.y).toBeCloseTo(50, 10);
+  });
+
+  it("is unaffected by which way the polygon was drawn", () => {
+    const cw = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 60 },
+      { x: 0, y: 60 },
+    ];
+    const ccw = [...cw].reverse();
+    expect(polyCentroid(ccw)).toEqual(polyCentroid(cw));
+  });
+
+  it("stays inside an L-shaped room, where the vertex average does not", () => {
+    // An L: 100x100 with the top-right 60x60 removed.
+    const L = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 40 },
+      { x: 40, y: 40 },
+      { x: 40, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    const c = polyCentroid(L);
+    expect(pointInPoly(c, L)).toBe(true);
+
+    // The naive average of the vertices lands in the missing corner.
+    const naive = {
+      x: L.reduce((s, p) => s + p.x, 0) / L.length,
+      y: L.reduce((s, p) => s + p.y, 0) / L.length,
+    };
+    expect(pointInPoly(naive, L)).toBe(false);
+  });
+
+  it("ignores extra points along a straight edge", () => {
+    const plain = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    // Same square, but the bottom edge was clicked through three times.
+    const dense = [
+      { x: 0, y: 0 },
+      { x: 25, y: 0 },
+      { x: 50, y: 0 },
+      { x: 75, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    const a = polyCentroid(plain);
+    const b = polyCentroid(dense);
+    expect(b.x).toBeCloseTo(a.x, 10);
+    expect(b.y).toBeCloseTo(a.y, 10);
+  });
+
+  it("falls back to the average when the shape has no area", () => {
+    // Two points, and three collinear ones — both undefined for a centroid.
+    expect(polyCentroid([{ x: 0, y: 0 }, { x: 10, y: 20 }])).toEqual({ x: 5, y: 10 });
+    const line = polyCentroid([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 20, y: 0 },
+    ]);
+    expect(line).toEqual({ x: 10, y: 0 });
+  });
+
+  it("handles a single point", () => {
+    expect(polyCentroid([{ x: 7, y: 9 }])).toEqual({ x: 7, y: 9 });
   });
 });
 

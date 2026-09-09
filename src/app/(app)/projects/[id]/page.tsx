@@ -2,8 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import PageHeader from "@/components/PageHeader";
-import OverflowMenu from "@/components/OverflowMenu";
-import DeleteProjectItem from "./DeleteProjectItem";
+import ProjectMenu from "./ProjectMenu";
 import PlanManager from "./PlanManager";
 import type { PlanFile, Project } from "@/types";
 
@@ -44,9 +43,11 @@ export default async function ProjectDetailPage({
             .join(" · ") || null
         }
         menu={
-          <OverflowMenu>
-            <DeleteProjectItem id={project.id} name={project.name} />
-          </OverflowMenu>
+          <ProjectMenu
+            project={project}
+            canArchive={"archived_at" in data}
+            archived={!!(data as { archived_at?: string | null }).archived_at}
+          />
         }
       />
 
@@ -64,7 +65,7 @@ export default async function ProjectDetailPage({
         {/* Phase 7 — live */}
         <Link
           href={`/projects/${project.id}/scope`}
-          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="panel flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:border-brand/50"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Scope of Work</h2>
@@ -72,13 +73,13 @@ export default async function ProjectDetailPage({
               AI reads the plans + your takeoff and drafts the scope by CSI division.
             </p>
           </div>
-          <span className="text-foreground">→</span>
+          <span aria-hidden="true" className="text-brand">→</span>
         </Link>
 
         {/* Phase 9 — live */}
         <Link
           href={`/projects/${project.id}/pricing`}
-          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="panel flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:border-brand/50"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Pricing</h2>
@@ -87,13 +88,13 @@ export default async function ProjectDetailPage({
               other, with AI suggestions you confirm.
             </p>
           </div>
-          <span className="text-foreground">→</span>
+          <span aria-hidden="true" className="text-brand">→</span>
         </Link>
 
         {/* Phase 10 — live */}
         <Link
           href={`/projects/${project.id}/estimate`}
-          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="panel flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:border-brand/50"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Estimate</h2>
@@ -102,13 +103,13 @@ export default async function ProjectDetailPage({
               cost — the bid number, exportable to Excel.
             </p>
           </div>
-          <span className="text-foreground">→</span>
+          <span aria-hidden="true" className="text-brand">→</span>
         </Link>
 
         {/* Phase 11 — live */}
         <Link
           href={`/projects/${project.id}/proposal`}
-          className="glass-brand flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:bg-brand/30"
+          className="panel flex items-center justify-between gap-4 rounded-xl p-5 transition-colors hover:border-brand/50"
         >
           <div>
             <h2 className="font-heading text-lg text-foreground">Proposal</h2>
@@ -117,7 +118,7 @@ export default async function ProjectDetailPage({
               assumptions &amp; exclusions. Print or save as PDF.
             </p>
           </div>
-          <span className="text-foreground">→</span>
+          <span aria-hidden="true" className="text-brand">→</span>
         </Link>
         </div>
       </div>

@@ -29,6 +29,7 @@ import {
   layerKeyOf,
   pointInPoly,
   polyAreaSqFt,
+  polyCentroid,
   segFeet,
   type Pt,
 } from "@/lib/takeoff/geometry";
@@ -260,27 +261,31 @@ function drawMarkupOnCanvas(
     }
     const text = labelText(m);
     if (text) {
-      const centered =
-        m.type === "area" ||
-        m.type === "count" ||
-        (m.type === "volume" && m.vol_mode === "area");
+      // Areas carry their value in the middle of the shape, matching the
+      // screen; everything else hangs its label off the anchor point.
+      const inside =
+        (m.type === "area" || (m.type === "volume" && m.vol_mode === "area")) &&
+        g.length >= 3;
+      const centered = inside || m.type === "count";
       const anchor = centered
-        ? {
-            x: g.reduce((s, p) => s + p.x, 0) / g.length,
-            y: g.reduce((s, p) => s + p.y, 0) / g.length,
-          }
+        ? polyCentroid(g)
         : g.length >= 2
           ? { x: (g[0].x + g[1].x) / 2, y: (g[0].y + g[1].y) / 2 }
           : g[0];
       const a = P(anchor);
       const fs = 14 * k;
       ctx.font = `700 ${fs}px sans-serif`;
-      ctx.textBaseline = "alphabetic";
+      ctx.textAlign = inside ? "center" : "left";
+      ctx.textBaseline = inside ? "middle" : "alphabetic";
+      const tx = inside ? a.x : a.x + 6 * k;
+      const ty = inside ? a.y : a.y - 6 * k;
       ctx.lineWidth = 3.5 * k;
       ctx.strokeStyle = "#000";
-      ctx.strokeText(text, a.x + 6 * k, a.y - 6 * k);
+      ctx.strokeText(text, tx, ty);
       ctx.fillStyle = "#fff";
-      ctx.fillText(text, a.x + 6 * k, a.y - 6 * k);
+      ctx.fillText(text, tx, ty);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
     }
   }
 }
@@ -443,7 +448,15 @@ export default function PlanViewer({
   // fx/fy: cursor as a fraction of the page (scale-independent). vx/vy: cursor
   // position within the viewport. Used to keep that page point under the cursor.
   const focusRef = useRef<{ fx: number; fy: number; vx: number; vy: number } | null>(null);
-  const dragRef = useRef<{ id: string; index: number; pointerId: number } | null>(null);
+  // `grab` is the offset from the pointer's aim point to the vertex at the
+  // moment it was grabbed. Keeping it means the handle never jumps to the
+  // finger on the first move — it travels with it from where it was picked up.
+  const dragRef = useRef<{
+    id: string;
+    index: number;
+    pointerId: number;
+    grab: Pt;
+  } | null>(null);
   const finalizingRef = useRef(false);
   const activeCountRef = useRef<{ id: string; geometry: Pt[] } | null>(null);
   const pendingCenterRef = useRef(true); // center the page on load / page change
@@ -625,9 +638,31 @@ export default function PlanViewer({
     if (fingersRef.current.size > 1) {
       multiUntilRef.current = Number.MAX_SAFE_INTEGER; // until every finger lifts
       pinchedRef.current = true;
-      cancelTouchTap();
+      cancelTouchEdits();
       selTapRef.current = null;
     }
+  }
+  /**
+   * Two fingers mean navigate, and nothing else.
+   *
+   * Whatever the first finger had started — aiming a point, dragging a handle,
+   * moving a shape, dragging a crop box — is abandoned the moment a second
+   * finger lands, and any half-moved geometry is put back to what is saved. A
+   * pinch can never leave a mark on the drawing.
+   */
+  function cancelTouchEdits() {
+    cancelTouchTap();
+    const editingId = dragRef.current?.id ?? moveRef.current?.id ?? null;
+    if (editingId) {
+      const m = measurementsRef.current.find((x) => x.id === editingId);
+      setEditGeom(m ? m.geometry.map((q) => ({ ...q })) : null);
+    }
+    dragRef.current = null;
+    dragStartRef.current = null;
+    moveRef.current = null;
+    cropDragRef.current = false;
+    setCropDraft(null);
+    setHover(null);
   }
   function fingerUp(id: number) {
     fingersRef.current.delete(id);
@@ -2115,7 +2150,16 @@ export default function PlanViewer({
           selTapRef.current = null;
           setSelectedId(m.id);
           setActiveVertex(v);
-          dragRef.current = { id: m.id, index: v.index, pointerId };
+          {
+            const aim = clientToPoint(cx, cy - aimLiftRef.current);
+            const vp = m.geometry[v.index];
+            dragRef.current = {
+              id: m.id,
+              index: v.index,
+              pointerId,
+              grab: { x: vp.x - aim.x, y: vp.y - aim.y },
+            };
+          }
           dragStartRef.current = { x: cx, y: cy, moved: false, hold: true };
           setEditGeom(m.geometry.map((q) => ({ ...q })));
           setGrabPulse(true);
@@ -2195,20 +2239,23 @@ export default function PlanViewer({
         return;
       }
       // The page moved under the still finger: re-aim at the same screen spot.
-      const pt = clientToPoint(s.x, s.y);
+      const ay = s.y - aimLiftRef.current;
+      const pt = clientToPoint(s.x, ay);
       if (tapRef.current) {
-        recordAim(s.x, s.y);
+        recordAim(s.x, ay);
         showLoupeAt(s.x, s.y, pt);
         if (draft.length) updateRubber(pt);
       } else if (dragRef.current) {
         const idx = dragRef.current.index;
+        const grab = dragRef.current.grab;
+        const vp = { x: pt.x + grab.x, y: pt.y + grab.y };
         setEditGeom((g) => {
           if (!g) return g;
           const ng = g.map((q) => ({ ...q }));
-          ng[idx] = pt;
+          ng[idx] = vp;
           return ng;
         });
-        showLoupeAt(s.x, s.y, pt);
+        showLoupeAt(s.x, s.y, vp);
       }
       s.raf = requestAnimationFrame(tick);
     };
@@ -2217,6 +2264,27 @@ export default function PlanViewer({
   function clientToPoint(x: number, y: number): Pt {
     const rect = svgRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
     return { x: (x - rect.left) / scale, y: (y - rect.top) / scale };
+  }
+
+  // ── Where a finger is actually aiming ─────────────────────────────────────
+  // A fingertip covers roughly a 12 mm circle of glass, so a point placed at
+  // the contact patch is under the finger that placed it — you cannot see the
+  // thing you are trying to hit. The aim point is therefore lifted a fixed
+  // distance ABOVE the contact point: the loupe's crosshair, the rubber band
+  // and the placed point all use the lifted spot, and the target stays in
+  // clear view the whole time. This is what Bluebeam and the iOS text
+  // magnifier do, and it is the difference between guessing and aiming.
+  //
+  // Screen pixels, so it stays the same physical distance at every zoom.
+  // Touch only — a stylus and a mouse already point exactly where you can see.
+  const AIM_LIFT = 34;
+  const aimLiftRef = useRef(0);
+  function liftOf(e: React.PointerEvent) {
+    return e.pointerType === "touch" ? AIM_LIFT : 0;
+  }
+  /** The page point a pointer is aiming at, contact patch accounted for. */
+  function evtToAim(e: React.PointerEvent): Pt {
+    return clientToPoint(e.clientX, e.clientY - liftOf(e));
   }
   function recordAim(x: number, y: number) {
     const s = aimSamplesRef.current;
@@ -2263,8 +2331,10 @@ export default function PlanViewer({
     ctx.lineTo(SIZE, SIZE / 2);
     ctx.stroke();
   }
+  // The loupe window stays over the finger; its CONTENT and crosshair centre
+  // on the lifted aim point, which is what the user is actually pointing at.
   function showLoupe(e: React.PointerEvent) {
-    showLoupeAt(e.clientX, e.clientY, evtToPoint(e));
+    showLoupeAt(e.clientX, e.clientY, evtToAim(e));
   }
   function showLoupeAt(clientX: number, clientY: number, pt: Pt) {
     const host = viewportRef.current?.parentElement; // the center column (relative)
@@ -2304,16 +2374,42 @@ export default function PlanViewer({
   }
   function updateRubber(pt: Pt) {
     const g = rubberRef.current;
-    if (!g || draft.length === 0) return;
+    if (!g) return;
     g.style.display = "";
     const q = (sel: string) => g.querySelector<SVGElement>(`[data-aim="${sel}"]`);
-    const last = px(draft[draft.length - 1]);
-    const first = px(draft[0]);
     const a = px(pt);
     const fill = tool === "area" || (tool === "volume" && volMode === "area");
     const col = tool === "calibrate" ? "#22d3ee" : color;
+    // The target ring marks the lifted aim point on the sheet itself, so the
+    // landing spot is readable without looking up at the loupe. It shows from
+    // the very first point, before there is any rubber band to draw.
+    const dot = q("dot");
+    if (dot) {
+      dot.setAttribute("cx", String(a.x));
+      dot.setAttribute("cy", String(a.y));
+      dot.setAttribute("stroke", col);
+    }
+    const cross = q("cross");
+    if (cross) {
+      cross.setAttribute(
+        "d",
+        `M${a.x - 11} ${a.y}H${a.x - 4}M${a.x + 4} ${a.y}H${a.x + 11}` +
+          `M${a.x} ${a.y - 11}V${a.y - 4}M${a.x} ${a.y + 4}V${a.y + 11}`,
+      );
+      cross.setAttribute("stroke", col);
+    }
+    // Everything below needs at least one placed point.
+    const started = draft.length > 0;
+    for (const k of ["seg", "close", "fill", "label"]) {
+      const el = q(k);
+      if (el && !started) el.style.display = "none";
+    }
+    if (!started) return;
+    const last = px(draft[draft.length - 1]);
+    const first = px(draft[0]);
     const seg = q("seg");
     if (seg) {
+      seg.style.display = "";
       seg.setAttribute("x1", String(last.x));
       seg.setAttribute("y1", String(last.y));
       seg.setAttribute("x2", String(a.x));
@@ -2435,20 +2531,24 @@ export default function PlanViewer({
   // ---- pointer handling on the overlay ----
   function onPointerDown(e: React.PointerEvent) {
     if (e.button !== 0 || spaceHeld) return; // middle/right + space-pan bubble to pan
+    aimLiftRef.current = liftOf(e); // edge-pan and hold-grab read this later
     const pt = evtToPoint(e);
 
     // Finger on a draw tool: nothing is placed yet. The point goes where the
     // finger LIFTS (slide to aim with the loupe); a second finger turns the
     // gesture into a pinch instead; holding still opens the menu.
     const touch = e.pointerType === "touch";
+    // A second finger is navigation, whatever the tool. Without this the
+    // finger that completes a pinch could grab a handle or start a crop on
+    // its way down, and the pinch would edit the drawing.
+    if (touch && (fingersRef.current.size > 1 || Date.now() < multiUntilRef.current))
+      return;
     if (touch && tool !== "select" && tool !== "crop" && tool !== "browse") {
-      // Another finger is already down (this one is counted too), or a
-      // multi-touch just ended: this finger is navigation, not a point.
-      if (fingersRef.current.size > 1 || Date.now() < multiUntilRef.current) return;
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
       aimSamplesRef.current = [];
-      recordAim(e.clientX, e.clientY); // a still finger sends no moves: the landing spot IS the held spot
+      recordAim(e.clientX, e.clientY - aimLiftRef.current); // a still finger sends no moves: the landing spot IS the held spot
       showLoupe(e);
+      updateRubber(evtToAim(e)); // show the target ring straight away
       startLongPress(e.clientX, e.clientY, e.pointerId);
       return;
     }
@@ -2459,14 +2559,21 @@ export default function PlanViewer({
         // maybe a tap (nudge pad), maybe a hold (vertex menu).
         const v = vertexAt(pt, true);
         if (v) {
-          dragRef.current = { id: selected.id, index: v.index, pointerId: e.pointerId };
+          const vp = selected.geometry[v.index];
+          const aim = evtToAim(e);
+          dragRef.current = {
+            id: selected.id,
+            index: v.index,
+            pointerId: e.pointerId,
+            grab: { x: vp.x - aim.x, y: vp.y - aim.y },
+          };
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false };
           setEditGeom(selected.geometry.map((q) => ({ ...q })));
           try {
             svgRef.current?.setPointerCapture(e.pointerId);
           } catch {}
           if (touch) {
-            showLoupe(e);
+            showLoupeAt(e.clientX, e.clientY, vp);
             startLongPress(e.clientX, e.clientY, e.pointerId);
           }
           return;
@@ -2475,7 +2582,15 @@ export default function PlanViewer({
         const mid = midpointAt(pt);
         if (mid) {
           const ng = [...selected.geometry.slice(0, mid.at), mid.p, ...selected.geometry.slice(mid.at)].map((q) => ({ ...q }));
-          dragRef.current = { id: selected.id, index: mid.at, pointerId: e.pointerId };
+          {
+            const aim = evtToAim(e);
+            dragRef.current = {
+              id: selected.id,
+              index: mid.at,
+              pointerId: e.pointerId,
+              grab: { x: mid.p.x - aim.x, y: mid.p.y - aim.y },
+            };
+          }
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false, inserted: true };
           setEditGeom(ng);
           setActiveVertex({ id: selected.id, index: mid.at });
@@ -2536,9 +2651,9 @@ export default function PlanViewer({
       if (Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10)
         cancelLongPress();
       // No React state here — direct DOM updates keep this at frame rate.
-      recordAim(e.clientX, e.clientY);
+      recordAim(e.clientX, e.clientY - liftOf(e));
       showLoupe(e);
-      if (draft.length) updateRubber(evtToPoint(e));
+      updateRubber(evtToAim(e));
       edgePanUpdate(e.clientX, e.clientY);
       return;
     }
@@ -2557,7 +2672,11 @@ export default function PlanViewer({
         ds.moved = true;
         cancelLongPress();
       }
-      const pt = evtToPoint(e);
+      // The handle keeps the offset it was grabbed with, so it never snaps to
+      // the finger — it travels with it from wherever it was picked up.
+      const aim = evtToAim(e);
+      const grab = dragRef.current.grab;
+      const pt = { x: aim.x + grab.x, y: aim.y + grab.y };
       // Capture the index NOW. The updater below runs later, during React's
       // next render — by then a fast lift may already have cleared dragRef,
       // and reading it there crashed the whole viewer ("null is not an
@@ -2570,7 +2689,8 @@ export default function PlanViewer({
         return ng;
       });
       if (touch) {
-        showLoupe(e);
+        // The loupe shows the handle itself, not the finger.
+        showLoupeAt(e.clientX, e.clientY, pt);
         edgePanUpdate(e.clientX, e.clientY);
       }
       return;
@@ -2616,7 +2736,7 @@ export default function PlanViewer({
     if (e.pointerType === "touch") {
       if (tapRef.current?.id === e.pointerId) {
         const fired = longPressFiredRef.current;
-        const held = stableAimPoint(e.clientX, e.clientY);
+        const held = stableAimPoint(e.clientX, e.clientY - liftOf(e));
         const pt = clientToPoint(held.x, held.y);
         cancelTouchTap();
         // A long-press opened the menu, or a pinch happened, or a second
@@ -3371,25 +3491,47 @@ export default function PlanViewer({
   // edited. Greedy collision avoidance nudges overlapping labels down.
   const LABEL_FONT = 14;
   const labelLayout: Record<string, { x: number; y: number; text: string }> = {};
+  // Areas additionally get their own value written across the middle of the
+  // shape — a room's square footage belongs inside the room. These are laid
+  // out first so the layer totals dodge them rather than landing on top.
+  const areaLabels: { id: string; x: number; y: number; text: string }[] = [];
   {
     const placed: { x: number; y: number; w: number; h: number }[] = [];
     const lineH = LABEL_FONT + 4;
+    const geomOf = (m: Measurement) =>
+      m.id === selectedId && editGeom ? editGeom : m.geometry;
+    const isCentered = (m: Measurement) =>
+      m.type === "area" ||
+      m.type === "count" ||
+      (m.type === "volume" && m.vol_mode === "area");
+    // The subset that gets its own label drawn inside the shape. Counts are
+    // centred too, but they're scattered tally marks with no interior to
+    // write in, so they keep the layer label instead.
+    const hasOwnAreaLabel = (m: Measurement) =>
+      (m.type === "area" || (m.type === "volume" && m.vol_mode === "area")) &&
+      geomOf(m).length >= 3;
     const anchorOf = (m: Measurement): Pt | null => {
-      const geom = m.id === selectedId && editGeom ? editGeom : m.geometry;
+      const geom = geomOf(m);
       if (geom.length === 0) return null;
-      const centered =
-        m.type === "area" ||
-        m.type === "count" ||
-        (m.type === "volume" && m.vol_mode === "area");
-      return centered
-        ? {
-            x: geom.reduce((s, p) => s + p.x, 0) / geom.length,
-            y: geom.reduce((s, p) => s + p.y, 0) / geom.length,
-          }
+      return isCentered(m)
+        ? polyCentroid(geom)
         : geom.length >= 2
           ? { x: (geom[0].x + geom[1].x) / 2, y: (geom[0].y + geom[1].y) / 2 }
           : geom[0];
     };
+    for (const m of measurements) {
+      if (m.type !== "area" && !(m.type === "volume" && m.vol_mode === "area")) continue;
+      if (m.value == null || hiddenLayers.has(layerKeyOf(m.layer))) continue;
+      const geom = geomOf(m);
+      if (geom.length < 3) continue;
+      const text = labelText(m);
+      if (!text) continue;
+      const c = px(polyCentroid(geom));
+      areaLabels.push({ id: m.id, x: c.x, y: c.y, text });
+      // Centred text, so the reserved box straddles the anchor.
+      const w = text.length * LABEL_FONT * 0.6 + 6;
+      placed.push({ x: c.x - w / 2, y: c.y + lineH / 2, w, h: lineH });
+    }
     const place = (key: string, anchor: Pt, text: string) => {
       const base = px(anchor);
       const x = base.x + 6;
@@ -3428,8 +3570,9 @@ export default function PlanViewer({
       if (!anchor) continue;
       place(`layer:${key}`, anchor, key === "Unlabeled" ? parts.join(" · ") : `${key}: ${parts.join(" · ")}`);
     }
-    // The run being edited shows its own number too.
-    if (selected && selected.type !== "leader") {
+    // The run being edited shows its own number too — unless it's an area,
+    // which already carries its value in the middle of the shape.
+    if (selected && selected.type !== "leader" && !hasOwnAreaLabel(selected)) {
       const t = labelText(selected);
       const a = anchorOf(selected);
       if (t && a) place(selected.id, a, t);
@@ -3588,11 +3731,26 @@ export default function PlanViewer({
       {/* Sheet navigator (collapsible + resizable) */}
       {navOpen ? (
         <>
+          {/* G1 - on a phone the sheet list behaves exactly like the layers
+              panel: a bottom sheet you can dismiss by tapping the drawing
+              behind it, not a full-screen takeover with no way out but the
+              toolbar button. Same scrim, same height cap, same corners. */}
+          {phone ? (
+            <div
+              className="fixed inset-0 z-30 bg-background/60"
+              aria-hidden
+              onPointerDown={() => setNavOpen(false)}
+            />
+          ) : null}
           <aside
-            className="glass z-10 flex shrink-0 flex-col"
-            style={{ width: navW }}
+            className={
+              phone
+                ? "glass-strong pb-safe fixed inset-x-0 bottom-0 z-40 flex max-h-[70vh] flex-col overflow-hidden rounded-t-2xl"
+                : "glass z-10 flex shrink-0 flex-col"
+            }
+            style={phone ? undefined : { width: navW }}
           >
-            <div className="flex items-start justify-between gap-2 border-b border-white/10 px-3 py-3">
+            <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-3">
               <div className="min-w-0">
                 <Link
                   href={`/projects/${projectId}`}
@@ -3623,7 +3781,7 @@ export default function PlanViewer({
                 type="button"
                 onClick={() => setNavOpen(false)}
                 title="Hide sheets"
-                className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-muted transition-colors hover:border-brand hover:text-foreground"
+                className="shrink-0 rounded-md border border-border px-2 py-1 text-muted transition-colors hover:border-brand hover:text-foreground"
               >
                 «
               </button>
@@ -3666,13 +3824,13 @@ export default function PlanViewer({
                     className={`rounded-lg text-sm transition-colors ${s.crop ? "ml-3" : ""} ${
                       active
                         ? "glass-brand text-foreground"
-                        : "text-muted hover:bg-white/5 hover:text-foreground"
+                        : "text-muted hover:bg-foreground/5 hover:text-foreground"
                     }`}
                   >
                     <div className="group flex items-center gap-1 px-2 py-1.5">
                       {s.crop ? (
                         <span
-                          className="shrink-0 rounded border border-white/15 px-1 text-[9px] uppercase tracking-wider text-muted"
+                          className="shrink-0 rounded border border-border px-1 text-[9px] uppercase tracking-wider text-muted"
                           title="Cropped from this page — the original is untouched"
                         >
                           crop
@@ -3752,10 +3910,14 @@ export default function PlanViewer({
               })}
             </div>
           </aside>
-          <div
-            className="resize-handle z-10"
-            onPointerDown={(e) => startResize("left", e)}
-          />
+          {/* Drag-to-resize is a desktop affordance; a bottom sheet has no
+              edge to drag. */}
+          {phone ? null : (
+            <div
+              className="resize-handle z-10"
+              onPointerDown={(e) => startResize("left", e)}
+            />
+          )}
         </>
       ) : null}
 
@@ -3985,7 +4147,7 @@ export default function PlanViewer({
                       updateLedger({ visible: !currentLedger?.visible });
                       setMoreOpen(false);
                     }}
-                    className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                    className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10"
                   >
                     {currentLedger?.visible ? "Hide legend" : "Show legend"}
                   </button>
@@ -3997,7 +4159,7 @@ export default function PlanViewer({
                     openExport();
                   }}
                   disabled={status !== "ready"}
-                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10 disabled:opacity-40"
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10 disabled:opacity-40"
                 >
                   Export marked-up PDF…
                 </button>
@@ -4007,7 +4169,7 @@ export default function PlanViewer({
                     setPanelOpen((o) => !o);
                     setMoreOpen(false);
                   }}
-                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10"
                 >
                   {panelOpen ? "Hide measurements panel" : "Show measurements panel"}
                 </button>
@@ -4017,7 +4179,7 @@ export default function PlanViewer({
                     setNavOpen((o) => !o);
                     setMoreOpen(false);
                   }}
-                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-white/10"
+                  className="flex min-h-12 items-center rounded-lg px-3 text-left text-foreground hover:bg-foreground/10"
                 >
                   {navOpen ? "Hide sheet list" : "Show sheet list"}
                 </button>
@@ -4025,7 +4187,7 @@ export default function PlanViewer({
               <button
                 type="button"
                 onClick={() => setMoreOpen(false)}
-                className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-white/10 text-muted hover:text-foreground"
+                className="mt-1 flex min-h-11 w-full items-center justify-center rounded-lg border-t border-border text-muted hover:text-foreground"
               >
                 Close
               </button>
@@ -4103,7 +4265,7 @@ export default function PlanViewer({
                                     if (!MEASURE_TOOLS.includes(tool) && kind && MEASURE_TOOLS.includes(kind)) setTool(kind);
                                     setLayerOpen(false);
                                   }}
-                                  className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-foreground hover:bg-white/10 ${
+                                  className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-foreground hover:bg-foreground/10 ${
                                     active ? "bg-brand/15" : ""
                                   }`}
                                 >
@@ -4133,7 +4295,7 @@ export default function PlanViewer({
                                         openLayerEditor(g);
                                       }
                                     }}
-                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-white/10 hover:text-foreground"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-foreground/10 hover:text-foreground"
                                   >
                                     ✎
                                   </span>
@@ -4190,7 +4352,7 @@ export default function PlanViewer({
                         }}
                         aria-label={`Color ${c}`}
                         aria-pressed={color === c}
-                        className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-white/10"
+                        className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-foreground/10"
                       >
                         <span
                           className={`h-6 w-6 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
@@ -4367,7 +4529,7 @@ export default function PlanViewer({
             if (e.pointerType !== "touch") onPanEnd(e);
           }}
           onContextMenu={onCanvasContextMenu}
-          className="touch-surface relative min-h-0 flex-1 overflow-auto bg-black/40"
+          className="touch-surface relative min-h-0 flex-1 overflow-auto bg-background/70"
           // touch-action none: the browser hands us every finger instead of
           // scrolling/zooming the page itself — required for pinch + draw.
           style={{
@@ -4672,6 +4834,24 @@ export default function PlanViewer({
                       </g>
                     );
                   })}
+                  {/* Each area's own value, written across the middle of it */}
+                  {areaLabels.map((lbl) => (
+                    <text
+                      key={`area:${lbl.id}`}
+                      x={lbl.x}
+                      y={lbl.y}
+                      fontSize={LABEL_FONT}
+                      fontWeight={700}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#fff"
+                      stroke="#000"
+                      strokeWidth={3.5}
+                      style={{ paintOrder: "stroke", pointerEvents: "none" }}
+                    >
+                      {lbl.text}
+                    </text>
+                  ))}
                   {/* Layer totals — one label per layer (see labelLayout) */}
                   {layerLabels.map(([key, lbl]) => (
                     <text
@@ -4803,8 +4983,11 @@ export default function PlanViewer({
                       never through state. Hidden unless a finger is aiming. */}
                   <g ref={rubberRef} style={{ display: "none", pointerEvents: "none" }}>
                     <polygon data-aim="fill" points="" fillOpacity={0.15} stroke="none" style={{ display: "none" }} />
-                    <line data-aim="seg" strokeWidth={2} strokeDasharray="6 4" />
+                    <line data-aim="seg" strokeWidth={2} strokeDasharray="6 4" style={{ display: "none" }} />
                     <line data-aim="close" strokeWidth={1.5} strokeDasharray="4 4" opacity={0.6} style={{ display: "none" }} />
+                    {/* The aim target: a ring and crosshair on the lifted point */}
+                    <circle data-aim="dot" r={7} fill="none" strokeWidth={2} />
+                    <path data-aim="cross" fill="none" strokeWidth={2} />
                     <text
                       data-aim="label"
                       fontSize={LABEL_FONT}
@@ -4937,7 +5120,7 @@ export default function PlanViewer({
               autoFocus={!(selected.text ?? "").trim()}
               spellCheck
               placeholder="What is the arrow pointing at?"
-              className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
+              className="mt-1 w-full resize-none rounded-lg border border-border bg-background/60 px-2.5 py-1.5 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
             />
             <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
               {(
@@ -5237,7 +5420,7 @@ export default function PlanViewer({
                   "• Door & window schedule is on sheet A-6\n" +
                   "• Exclude the canopy — owner-furnished"
                 }
-                className="max-h-[40vh] min-h-[7rem] w-full resize-y rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
+                className="max-h-[40vh] min-h-[7rem] w-full resize-y rounded-lg border border-border bg-background/60 px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted/50 focus:border-brand focus:outline-none"
               />
             </div>
           </div>
@@ -5337,7 +5520,7 @@ export default function PlanViewer({
         <>
           {phone ? (
             <div
-              className="fixed inset-0 z-30 bg-black/30"
+              className="fixed inset-0 z-30 bg-background/60"
               aria-hidden
               onPointerDown={() => setPanelOpen(false)}
             />
@@ -5355,7 +5538,7 @@ export default function PlanViewer({
             }
             style={phone ? undefined : { width: panelW }}
           >
-            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2 py-1.5">
+            <div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5">
               {/* Next step — lives on top of the measurements panel */}
               <Link
                 href={`/projects/${projectId}/scope`}
@@ -5367,7 +5550,7 @@ export default function PlanViewer({
                 type="button"
                 onClick={() => setPanelOpen(false)}
                 title="Hide panel"
-                className="rounded-md border border-white/10 px-2 py-0.5 text-muted transition-colors hover:border-brand hover:text-foreground"
+                className="rounded-md border border-border px-2 py-0.5 text-muted transition-colors hover:border-brand hover:text-foreground"
               >
                 »
               </button>
@@ -5601,7 +5784,7 @@ export default function PlanViewer({
           </div>
         ) : (
           <>
-            <div className="border-b border-white/10 px-4 py-3">
+            <div className="border-b border-border px-4 py-3">
               <p className="text-sm font-medium text-foreground">Measurements</p>
               <p className="text-xs text-muted">
                 {measurements.length} on this sheet · click one to edit
@@ -5651,7 +5834,7 @@ export default function PlanViewer({
                       ]}
                     >
                     <div
-                      className={`rounded-md border border-white/5 ${isHidden ? "opacity-50" : ""}`}
+                      className={`rounded-md border border-border ${isHidden ? "opacity-50" : ""}`}
                     >
                       <div className="flex items-center gap-1.5 px-2 py-1.5">
                         {/* Record toggle: red = drawing adds to this layer; green = idle */}
@@ -5719,7 +5902,7 @@ export default function PlanViewer({
                       </div>
 
                       {isEditing ? (
-                        <div className="flex flex-col gap-2 border-t border-white/5 px-2 pb-2 pt-2">
+                        <div className="flex flex-col gap-2 border-t border-border px-2 pb-2 pt-2">
                           {/* Rename — applies to every run in the layer.
                               Saves by itself when you tab/click away (or
                               press Enter); no button to remember. */}
@@ -5944,7 +6127,7 @@ export default function PlanViewer({
                 className={`block w-full rounded-lg px-3 py-1.5 text-left transition-colors pointer-coarse:min-h-11 pointer-coarse:py-2.5 ${
                   it.danger
                     ? "text-brand-soft hover:bg-brand/20"
-                    : "text-foreground hover:bg-white/10"
+                    : "text-foreground hover:bg-foreground/10"
                 }`}
               >
                 {it.label}
@@ -5994,7 +6177,7 @@ export default function PlanViewer({
                 return (
                   <label
                     key={s.id}
-                    className="flex items-center gap-2 rounded px-1.5 py-1 text-sm text-foreground hover:bg-white/5"
+                    className="flex items-center gap-2 rounded px-1.5 py-1 text-sm text-foreground hover:bg-foreground/5"
                   >
                     <input
                       type="checkbox"

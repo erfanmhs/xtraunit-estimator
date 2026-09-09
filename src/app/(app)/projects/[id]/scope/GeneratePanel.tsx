@@ -125,7 +125,7 @@ function Progress({
 
       {/* Division groups, streaming in as each finishes */}
       {d && d.steps.length ? (
-        <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/20 p-2 text-xs">
+        <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border bg-input p-2 text-xs">
           {d.steps.map((s) => (
             <div key={s.key} className="flex flex-col gap-0.5">
               <div className="flex items-center gap-2">
@@ -171,7 +171,7 @@ function Progress({
             </div>
           ))}
           {d.linesSoFar > 0 ? (
-            <p className="border-t border-white/10 pt-1 text-[11px] text-muted">
+            <p className="border-t border-border pt-1 text-[11px] text-muted">
               {d.linesSoFar} lines drafted so far
               {d.findingsSoFar ? ` · ${d.findingsSoFar} findings` : ""}
             </p>
@@ -217,6 +217,10 @@ export default function GeneratePanel({
     initialTrades.length ? "trades" : "full",
   );
   const [selected, setSelected] = useState<string[]>(initialTrades);
+  // Free-text trades the user typed. Kept in `selected` like any other, so
+  // nothing downstream has to know the difference - the AI maps the words.
+  const [other, setOther] = useState("");
+  const extras = selected.filter((t) => !DIVISIONS.includes(t));
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the user cancels, so an in-flight poll() can't overwrite the
   // cancelled state with a stale "running" read.
@@ -246,6 +250,20 @@ export default function GeneratePanel({
     return stopPolling;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run?.status]);
+
+  function addExtra() {
+    const t = other.trim().slice(0, 80);
+    if (!t || selected.includes(t)) {
+      setOther("");
+      return;
+    }
+    setSelected((prev) => [...prev, t]);
+    setOther("");
+  }
+
+  function removeExtra(t: string) {
+    setSelected((prev) => prev.filter((x) => x !== t));
+  }
 
   function toggle(d: string) {
     setSelected((s) => (s.includes(d) ? s.filter((x) => x !== d) : [...s, d]));
@@ -302,10 +320,24 @@ export default function GeneratePanel({
   if (run?.status === "running")
     return <Progress run={run} onCancel={onCancel} cancelling={cancelling} />;
 
+  // C5 - the button knows where it is in the job.
+  //   nothing chosen yet          -> off
+  //   no scope yet                -> "Generate Scope of Work"
+  //   scope exists, nothing moved -> quiet; there is nothing to redo
+  //   selection changed since     -> back to full strength as "Regenerate"
+  const currentTrades = mode === "full" ? [] : selected;
+  const sameAsLastRun =
+    currentTrades.length === initialTrades.length &&
+    currentTrades.every((t) => initialTrades.includes(t));
+  // Switching to "Specific trades" before picking any is a choice in
+  // progress, not a settled scope — even though the trade list is empty in
+  // both, which is what an equality check alone would conclude.
+  const modeMatchesLastRun = (initialTrades.length > 0) === (mode === "trades");
   const canGenerate = !busy && (mode === "full" || selected.length > 0);
+  const settled = hasScope && sameAsLastRun && modeMatchesLastRun;
 
   return (
-    <div className="flex w-full max-w-md flex-col items-start gap-2">
+    <div className="flex w-full max-w-md flex-col items-start gap-3">
       {run?.status === "error" && run.error ? (
         <p className="w-full rounded-lg border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm leading-relaxed text-brand-soft">
           {run.error}
@@ -317,42 +349,159 @@ export default function GeneratePanel({
         </p>
       ) : null}
 
-      <div className="flex items-center gap-1">
-        <button type="button" onClick={() => setMode("full")} className={chip(mode === "full")}>
-          Full building
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("trades")}
-          className={chip(mode === "trades")}
-        >
-          Specific trades
-        </button>
+      {/* C3 - this is the top-level choice, and a sub-choice follows it when
+          you pick "Specific trades". It used to be two chips the same size and
+          weight as the 20 division chips underneath, so nothing said one was a
+          category and the others were its contents. */}
+      <div className="w-full">
+        <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">
+          What should the AI scope?
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <ModeCard
+            active={mode === "full"}
+            onClick={() => setMode("full")}
+            title="Full building"
+            hint="Every trade and division"
+          />
+          <ModeCard
+            active={mode === "trades"}
+            onClick={() => setMode("trades")}
+            title="Specific trades"
+            hint="Pick the divisions"
+          />
+        </div>
       </div>
 
       {mode === "trades" ? (
-        <div className="flex flex-wrap justify-start gap-1">
-          {DIVISIONS.map((d) => (
-            <button key={d} type="button" onClick={() => toggle(d)} className={chip(selected.includes(d))}>
-              {d}
+        <div className="w-full">
+          <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">
+            Which trades?
+          </p>
+          <div className="flex flex-wrap justify-start gap-1">
+            {DIVISIONS.map((d) => (
+              <button key={d} type="button" onClick={() => toggle(d)} className={chip(selected.includes(d))}>
+                {d}
+              </button>
+            ))}
+            {/* Anything typed here goes to the AI as-is and it maps the words
+                to the right CSI division. Nobody should have to know that a
+                solar array is division 48. */}
+            {extras.map((x) => (
+              <button
+                key={x}
+                type="button"
+                onClick={() => removeExtra(x)}
+                title="Remove"
+                className={`${chip(true)} whitespace-nowrap`}
+              >
+                {x} &times;
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 flex gap-1.5">
+            <input
+              value={other}
+              onChange={(e) => setOther(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addExtra();
+                }
+              }}
+              placeholder="Other trade - describe it in your own words"
+              aria-label="Other trade"
+              className="min-w-0 flex-1 rounded-md border border-border bg-input px-2 py-1 text-xs text-foreground outline-none focus:border-brand"
+            />
+            <button
+              type="button"
+              onClick={addExtra}
+              disabled={!other.trim()}
+              className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand hover:text-foreground disabled:opacity-40"
+            >
+              Add
             </button>
-          ))}
+          </div>
         </div>
       ) : null}
 
-      <button
-        type="button"
-        onClick={onGenerate}
-        disabled={!canGenerate}
-        className="glass-brand rounded-lg px-4 py-2 text-sm font-medium text-foreground hover:bg-brand/30 disabled:opacity-50"
-      >
-        {hasScope ? "Regenerate" : "Generate"}
-        {mode === "full"
-          ? " — full building"
-          : selected.length
-            ? ` — ${selected.length} trade${selected.length > 1 ? "s" : ""}`
-            : " — pick trades"}
-      </button>
+      {settled ? (
+        // Already generated and nothing has changed. Still reachable, but it
+        // stops competing with the scope itself for attention.
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={!canGenerate}
+          className="rounded-lg px-3 py-1.5 text-xs text-muted transition-colors hover:text-brand-soft disabled:opacity-40"
+        >
+          Regenerate from scratch
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={!canGenerate}
+          className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand/20 ring-1 ring-inset ring-white/15 transition-all hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+        >
+          <SparkIcon />
+          {hasScope ? "Regenerate Scope" : "Generate Scope of Work"}
+          <span className="text-xs font-normal opacity-80">
+            {mode === "full"
+              ? "full building"
+              : selected.length
+                ? `${selected.length} trade${selected.length > 1 ? "s" : ""}`
+                : "pick trades"}
+          </span>
+        </button>
+      )}
     </div>
+  );
+}
+
+/** The top-level "what am I scoping" choice - bigger than the chips below it. */
+function ModeCard({
+  active,
+  onClick,
+  title,
+  hint,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
+        active
+          ? "border-brand bg-brand/15 text-foreground"
+          : "border-border text-muted hover:border-brand/60 hover:text-foreground"
+      }`}
+    >
+      <span className="block text-sm font-semibold">{title}</span>
+      <span className="mt-0.5 block text-[11px] opacity-80">{hint}</span>
+    </button>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+      <circle cx="12" cy="12" r="3.2" />
+    </svg>
   );
 }

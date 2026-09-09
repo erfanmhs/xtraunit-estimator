@@ -258,7 +258,10 @@ export default function ProposalView({
 
       {/* Editor */}
       {editing ? (
-        <div className="print-hide mb-6 space-y-5 rounded-xl glass p-4 sm:p-5">
+        <div className="print-hide mb-6 space-y-5 rounded-xl panel p-4 sm:p-5">
+          <p className="text-[11px] uppercase tracking-wider text-muted">
+            Editing — only you see this
+          </p>
           {/* Addressing + expiry */}
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="flex flex-col gap-1">
@@ -421,6 +424,23 @@ export default function ProposalView({
           </p>
         </div>
       ) : null}
+
+      {/*
+        F1 - a clear line between the editor above and the document below.
+        They ran straight into each other, so it was not obvious where your
+        controls stopped and the client's document started - and this page
+        prints, which makes that distinction matter.
+
+        The rule carries a label, and it is print-hidden so none of it reaches
+        the paper.
+      */}
+      <div className="print-hide mb-4 flex items-center gap-3" aria-hidden="true">
+        <span className="h-px flex-1 bg-border" />
+        <span className="text-[11px] uppercase tracking-wider text-muted">
+          What the client sees
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
 
       {/* The proposal, exactly as the client sees it */}
       <ProposalDocument
