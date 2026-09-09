@@ -51,6 +51,38 @@ export function polyAreaSqFt(g: Pt[], sx: number, sy: number): number {
   return Math.abs(a) / 2;
 }
 
+/**
+ * The visual centre of a shape, for placing its label.
+ *
+ * Uses the true area-weighted centroid rather than the average of the vertices,
+ * because the vertex average drifts towards whichever side has more points — on
+ * an L-shaped room it can land outside the room entirely. Falls back to the
+ * vertex average for a degenerate polygon (all points on one line, or fewer
+ * than three of them), where the area centroid is undefined.
+ *
+ * Page units in, page units out; scale doesn't apply.
+ */
+export function polyCentroid(g: Pt[]): Pt {
+  const mean = () => ({
+    x: g.reduce((s, p) => s + p.x, 0) / g.length,
+    y: g.reduce((s, p) => s + p.y, 0) / g.length,
+  });
+  if (g.length < 3) return mean();
+  let a2 = 0; // twice the signed area
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < g.length; i++) {
+    const p = g[i];
+    const q = g[(i + 1) % g.length];
+    const cross = p.x * q.y - q.x * p.y;
+    a2 += cross;
+    cx += (p.x + q.x) * cross;
+    cy += (p.y + q.y) * cross;
+  }
+  if (a2 === 0) return mean(); // zero-area (collinear) polygon
+  return { x: cx / (3 * a2), y: cy / (3 * a2) };
+}
+
 /** Is the point inside the polygon? (ray casting) — used for hit testing. */
 export function pointInPoly(p: Pt, g: Pt[]): boolean {
   let inside = false;

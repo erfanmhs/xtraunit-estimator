@@ -29,6 +29,7 @@ import {
   layerKeyOf,
   pointInPoly,
   polyAreaSqFt,
+  polyCentroid,
   segFeet,
   type Pt,
 } from "@/lib/takeoff/geometry";
@@ -260,27 +261,31 @@ function drawMarkupOnCanvas(
     }
     const text = labelText(m);
     if (text) {
-      const centered =
-        m.type === "area" ||
-        m.type === "count" ||
-        (m.type === "volume" && m.vol_mode === "area");
+      // Areas carry their value in the middle of the shape, matching the
+      // screen; everything else hangs its label off the anchor point.
+      const inside =
+        (m.type === "area" || (m.type === "volume" && m.vol_mode === "area")) &&
+        g.length >= 3;
+      const centered = inside || m.type === "count";
       const anchor = centered
-        ? {
-            x: g.reduce((s, p) => s + p.x, 0) / g.length,
-            y: g.reduce((s, p) => s + p.y, 0) / g.length,
-          }
+        ? polyCentroid(g)
         : g.length >= 2
           ? { x: (g[0].x + g[1].x) / 2, y: (g[0].y + g[1].y) / 2 }
           : g[0];
       const a = P(anchor);
       const fs = 14 * k;
       ctx.font = `700 ${fs}px sans-serif`;
-      ctx.textBaseline = "alphabetic";
+      ctx.textAlign = inside ? "center" : "left";
+      ctx.textBaseline = inside ? "middle" : "alphabetic";
+      const tx = inside ? a.x : a.x + 6 * k;
+      const ty = inside ? a.y : a.y - 6 * k;
       ctx.lineWidth = 3.5 * k;
       ctx.strokeStyle = "#000";
-      ctx.strokeText(text, a.x + 6 * k, a.y - 6 * k);
+      ctx.strokeText(text, tx, ty);
       ctx.fillStyle = "#fff";
-      ctx.fillText(text, a.x + 6 * k, a.y - 6 * k);
+      ctx.fillText(text, tx, ty);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
     }
   }
 }
@@ -3371,25 +3376,47 @@ export default function PlanViewer({
   // edited. Greedy collision avoidance nudges overlapping labels down.
   const LABEL_FONT = 14;
   const labelLayout: Record<string, { x: number; y: number; text: string }> = {};
+  // Areas additionally get their own value written across the middle of the
+  // shape — a room's square footage belongs inside the room. These are laid
+  // out first so the layer totals dodge them rather than landing on top.
+  const areaLabels: { id: string; x: number; y: number; text: string }[] = [];
   {
     const placed: { x: number; y: number; w: number; h: number }[] = [];
     const lineH = LABEL_FONT + 4;
+    const geomOf = (m: Measurement) =>
+      m.id === selectedId && editGeom ? editGeom : m.geometry;
+    const isCentered = (m: Measurement) =>
+      m.type === "area" ||
+      m.type === "count" ||
+      (m.type === "volume" && m.vol_mode === "area");
+    // The subset that gets its own label drawn inside the shape. Counts are
+    // centred too, but they're scattered tally marks with no interior to
+    // write in, so they keep the layer label instead.
+    const hasOwnAreaLabel = (m: Measurement) =>
+      (m.type === "area" || (m.type === "volume" && m.vol_mode === "area")) &&
+      geomOf(m).length >= 3;
     const anchorOf = (m: Measurement): Pt | null => {
-      const geom = m.id === selectedId && editGeom ? editGeom : m.geometry;
+      const geom = geomOf(m);
       if (geom.length === 0) return null;
-      const centered =
-        m.type === "area" ||
-        m.type === "count" ||
-        (m.type === "volume" && m.vol_mode === "area");
-      return centered
-        ? {
-            x: geom.reduce((s, p) => s + p.x, 0) / geom.length,
-            y: geom.reduce((s, p) => s + p.y, 0) / geom.length,
-          }
+      return isCentered(m)
+        ? polyCentroid(geom)
         : geom.length >= 2
           ? { x: (geom[0].x + geom[1].x) / 2, y: (geom[0].y + geom[1].y) / 2 }
           : geom[0];
     };
+    for (const m of measurements) {
+      if (m.type !== "area" && !(m.type === "volume" && m.vol_mode === "area")) continue;
+      if (m.value == null || hiddenLayers.has(layerKeyOf(m.layer))) continue;
+      const geom = geomOf(m);
+      if (geom.length < 3) continue;
+      const text = labelText(m);
+      if (!text) continue;
+      const c = px(polyCentroid(geom));
+      areaLabels.push({ id: m.id, x: c.x, y: c.y, text });
+      // Centred text, so the reserved box straddles the anchor.
+      const w = text.length * LABEL_FONT * 0.6 + 6;
+      placed.push({ x: c.x - w / 2, y: c.y + lineH / 2, w, h: lineH });
+    }
     const place = (key: string, anchor: Pt, text: string) => {
       const base = px(anchor);
       const x = base.x + 6;
@@ -3428,8 +3455,9 @@ export default function PlanViewer({
       if (!anchor) continue;
       place(`layer:${key}`, anchor, key === "Unlabeled" ? parts.join(" · ") : `${key}: ${parts.join(" · ")}`);
     }
-    // The run being edited shows its own number too.
-    if (selected && selected.type !== "leader") {
+    // The run being edited shows its own number too — unless it's an area,
+    // which already carries its value in the middle of the shape.
+    if (selected && selected.type !== "leader" && !hasOwnAreaLabel(selected)) {
       const t = labelText(selected);
       const a = anchorOf(selected);
       if (t && a) place(selected.id, a, t);
@@ -4672,6 +4700,24 @@ export default function PlanViewer({
                       </g>
                     );
                   })}
+                  {/* Each area's own value, written across the middle of it */}
+                  {areaLabels.map((lbl) => (
+                    <text
+                      key={`area:${lbl.id}`}
+                      x={lbl.x}
+                      y={lbl.y}
+                      fontSize={LABEL_FONT}
+                      fontWeight={700}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#fff"
+                      stroke="#000"
+                      strokeWidth={3.5}
+                      style={{ paintOrder: "stroke", pointerEvents: "none" }}
+                    >
+                      {lbl.text}
+                    </text>
+                  ))}
                   {/* Layer totals — one label per layer (see labelLayout) */}
                   {layerLabels.map(([key, lbl]) => (
                     <text
