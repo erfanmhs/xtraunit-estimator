@@ -638,6 +638,21 @@ function AcceptBlock({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [agree, setAgree] = useState(false);
+  // Who is signing. Both are required before the agreement can be ticked - a
+  // signature with no way to reach the signer is not worth much on a contract.
+  const isIdentified = (n: string, e: string) =>
+    n.trim().length >= 2 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e.trim());
+  const identified = isIdentified(name, email);
+  // Editing the name or email back out again withdraws the agreement, so a
+  // tick can never outlive the identity it was given under.
+  function editName(v: string) {
+    setName(v);
+    if (!isIdentified(v, email)) setAgree(false);
+  }
+  function editEmail(v: string) {
+    setEmail(v);
+    if (!isIdentified(name, v)) setAgree(false);
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<AcceptedInfo>(null);
@@ -689,7 +704,7 @@ function AcceptBlock({
           <div className="print-hide mt-4 grid gap-2 sm:grid-cols-2">
             <input
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => editName(e.target.value)}
               placeholder="Your full name (this is your signature)"
               disabled={mode !== "public" || expired}
               aria-label="Full name"
@@ -697,7 +712,7 @@ function AcceptBlock({
             />
             <input
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => editEmail(e.target.value)}
               placeholder="Email"
               type="email"
               disabled={mode !== "public" || expired}
@@ -705,22 +720,41 @@ function AcceptBlock({
               className="rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-600 disabled:bg-neutral-50"
             />
           </div>
-          <label className="print-hide mt-2 flex items-start gap-2 text-xs text-neutral-700">
+          {/*
+            F2 - signing runs in order: name and email first, then the
+            agreement becomes available, then Accept. The checkbox used to be
+            tickable before either field was filled, so someone could agree to
+            a contract and only then be asked who they were - and the Accept
+            button would sit there disabled with nothing saying why.
+
+            `identified` gates the checkbox; the hint under it says what is
+            still needed instead of leaving the reader to work it out.
+          */}
+          <label
+            className={`print-hide mt-2 flex items-start gap-2 text-xs ${
+              identified ? "text-neutral-700" : "text-neutral-400"
+            }`}
+          >
             <input
               type="checkbox"
               checked={agree}
               onChange={(e) => setAgree(e.target.checked)}
-              disabled={mode !== "public" || expired}
+              disabled={mode !== "public" || expired || !identified}
               className="mt-0.5 accent-[#A01C2D]"
             />
             I have read the scope, pricing, timeline, and terms above and accept this proposal on behalf
             of the owner. Typing my name serves as my electronic signature.
           </label>
+          {mode === "public" && !expired && !identified ? (
+            <p className="print-hide mt-1 text-xs text-neutral-500">
+              Enter your name and email above to accept.
+            </p>
+          ) : null}
           <div className="print-hide mt-3 flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={submit}
-              disabled={mode !== "public" || expired || busy || !agree || name.trim().length < 2}
+              disabled={mode !== "public" || expired || busy || !agree || !identified}
               className="rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
               style={{ background: BRAND }}
             >
