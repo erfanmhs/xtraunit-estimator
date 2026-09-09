@@ -3731,9 +3731,24 @@ export default function PlanViewer({
       {/* Sheet navigator (collapsible + resizable) */}
       {navOpen ? (
         <>
+          {/* G1 - on a phone the sheet list behaves exactly like the layers
+              panel: a bottom sheet you can dismiss by tapping the drawing
+              behind it, not a full-screen takeover with no way out but the
+              toolbar button. Same scrim, same height cap, same corners. */}
+          {phone ? (
+            <div
+              className="fixed inset-0 z-30 bg-background/60"
+              aria-hidden
+              onPointerDown={() => setNavOpen(false)}
+            />
+          ) : null}
           <aside
-            className="glass z-10 flex shrink-0 flex-col"
-            style={{ width: navW }}
+            className={
+              phone
+                ? "glass-strong pb-safe fixed inset-x-0 bottom-0 z-40 flex max-h-[70vh] flex-col overflow-hidden rounded-t-2xl"
+                : "glass z-10 flex shrink-0 flex-col"
+            }
+            style={phone ? undefined : { width: navW }}
           >
             <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-3">
               <div className="min-w-0">
@@ -3895,10 +3910,14 @@ export default function PlanViewer({
               })}
             </div>
           </aside>
-          <div
-            className="resize-handle z-10"
-            onPointerDown={(e) => startResize("left", e)}
-          />
+          {/* Drag-to-resize is a desktop affordance; a bottom sheet has no
+              edge to drag. */}
+          {phone ? null : (
+            <div
+              className="resize-handle z-10"
+              onPointerDown={(e) => startResize("left", e)}
+            />
+          )}
         </>
       ) : null}
 
