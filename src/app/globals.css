@@ -53,7 +53,7 @@
   --glass-border: rgba(148, 163, 184, 0.18);
   --glass-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  --glass-strong-bg: rgba(26, 33, 45, 0.86);
+  --glass-strong-bg: rgba(26, 33, 45, 0.97);
   --glass-strong-border: rgba(148, 163, 184, 0.22);
 
   /* Page sections: the same glass, one step more present. */
@@ -94,7 +94,7 @@
   --glass-border: rgba(17, 24, 39, 0.11);
   --glass-shadow: 0 8px 30px rgba(15, 23, 42, 0.1);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  --glass-strong-bg: rgba(255, 255, 255, 0.92);
+  --glass-strong-bg: rgba(255, 255, 255, 0.97);
   --glass-strong-border: rgba(17, 24, 39, 0.14);
 
   --panel-bg: rgba(255, 255, 255, 0.78);
@@ -183,6 +183,10 @@ body {
     var(--glass-shadow),
     var(--glass-inset);
 }
+/* Dense glass, for chrome that has page content sliding underneath it —
+   sticky bars, toolbars, modals. Nearly opaque on purpose: at lower alpha the
+   text passing behind it shows through and both become unreadable. Keeps the
+   blur and the lit edge, so it still reads as glass. */
 .glass-strong {
   background: var(--glass-strong-bg);
   backdrop-filter: blur(26px) saturate(165%);

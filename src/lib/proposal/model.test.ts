@@ -4,7 +4,9 @@
  * against hand-worked numbers.
  */
 import { describe, expect, it } from "vitest";
+import { DEFAULT_PROFILE } from "./profile";
 import {
+  buildProposalDoc,
   cleanOptions,
   cleanTimeline,
   defaultSelection,
@@ -182,5 +184,68 @@ describe("plusDays", () => {
 
   it("handles a leap year", () => {
     expect(plusDays("2028-02-28T00:00:00Z", 1)).toBe("2028-02-29");
+  });
+});
+
+/**
+ * Excluding a line is a decision about what is in the bid, not an instruction
+ * to forget it. The line has to survive all the way to the client's Exclusions
+ * list — that section is what prevents most scope disputes, so a silent drop
+ * here would be expensive.
+ */
+describe("excluded lines reach the proposal", () => {
+  function doc(lines: LineInput[], findings: { kind: string; text: string }[] = []) {
+    return buildProposalDoc({
+      company: {
+        company_name: "XtraUnit",
+        company_address: null,
+        company_phone: null,
+        company_email: null,
+        company_license: null,
+        signer_name: null,
+        signer_title: null,
+      },
+      profile: DEFAULT_PROFILE,
+      project: {
+        name: "Test",
+        client_name: null,
+        address: null,
+        building_sf: null,
+        project_type: null,
+      },
+      lines,
+      markups: { contingency_pct: 0, insurance_pct: 0, overhead_pct: 0 },
+      findings,
+      fields: {} as never,
+    });
+  }
+
+  it("lists an excluded line under Exclusions", () => {
+    const d = doc([
+      line({ id: "a", description: "Paint", cost_total: 1000, price_mode: "total" }),
+      line({ id: "b", description: "Landscaping", status: "excluded" }),
+    ]);
+    expect(d.scope.excluded).toContain("Landscaping");
+  });
+
+  it("keeps it out of the priced scope and out of the total", () => {
+    const d = doc([
+      line({ id: "a", description: "Paint", cost_total: 1000, price_mode: "total" }),
+      line({ id: "b", description: "Landscaping", status: "excluded", cost_total: 9999, price_mode: "total" }),
+    ]);
+    const shown = d.scope.divisions.flatMap((x) => x.rows.map((r) => r.description));
+    expect(shown).toContain("Paint");
+    expect(shown).not.toContain("Landscaping");
+    expect(d.pricing.direct).toBe(1000);
+  });
+
+  it("keeps exclusion findings alongside excluded lines", () => {
+    const d = doc(
+      [line({ id: "b", description: "Landscaping", status: "excluded" })],
+      [{ kind: "exclusion", text: "Permit fees by owner" }],
+    );
+    expect(d.scope.excluded).toEqual(
+      expect.arrayContaining(["Landscaping", "Permit fees by owner"]),
+    );
   });
 });

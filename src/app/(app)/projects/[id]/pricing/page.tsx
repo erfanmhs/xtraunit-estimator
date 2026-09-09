@@ -33,9 +33,13 @@ export default async function PricingPage({
     .order("sort_order", { ascending: true });
 
   const migrationMissing = !!itemsError;
-  const lines = ((items as PricedLine[]) ?? []).filter(
-    (li) => li.status !== "excluded",
-  );
+  // Excluded lines are NOT dropped any more. They keep their quantity and
+  // their price and are shown in an Exclusions section at the bottom, where
+  // they can be restored, deleted, or carried into the proposal. Dropping
+  // them here is what made an accidental Exclude feel like a delete.
+  const all = (items as PricedLine[]) ?? [];
+  const lines = all.filter((li) => li.status !== "excluded");
+  const excluded = all.filter((li) => li.status === "excluded");
   const initialRun = migrationMissing ? null : await getPricingRun(id);
 
   // Sub quotes + how many lines each covers. Resilient pre-migration-0015.
@@ -115,7 +119,11 @@ export default async function PricingPage({
             {user ? (
               <SubQuotes projectId={id} userId={user.id} quotes={subQuotes} />
             ) : null}
-            <PricingTable projectId={id} initialItems={lines} />
+            <PricingTable
+              projectId={id}
+              initialItems={lines}
+              initialExcluded={excluded}
+            />
           </>
         )}
       </div>
