@@ -3,6 +3,7 @@ import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
 import { getProjectsOverview, type Stage } from "@/lib/projects/overview";
 import type { Project, ProjectStatus } from "@/types";
+import ProjectCard from "./ProjectCard";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   draft: "Draft",
@@ -71,6 +72,9 @@ export default async function ProjectsPage() {
     .select("*")
     .order("updated_at", { ascending: false });
   const projects = (data ?? []) as Project[];
+  // Migration 0039 adds `archived_at`. Until it is run the column simply is
+  // not in the row, and the Archive action stays hidden rather than failing.
+  const canArchive = projects.length === 0 || "archived_at" in (data?.[0] ?? {});
   const overview = await getProjectsOverview(
     supabase,
     projects.map((p) => p.id),
@@ -118,10 +122,10 @@ export default async function ProjectsPage() {
                   ? { label: "Direct cost", value: o.directCost }
                   : null;
               return (
+                <ProjectCard key={p.id} project={p} canArchive={canArchive}>
                 <Link
-                  key={p.id}
                   href={`/projects/${p.id}`}
-                  className="flex flex-col gap-3 rounded-xl panel p-5 transition-colors hover:border-brand/60"
+                  className="flex h-full flex-col gap-3 rounded-xl panel p-5 transition-colors hover:border-brand/60"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <h2 className="min-w-0 font-medium text-foreground">{p.name}</h2>
@@ -150,6 +154,7 @@ export default async function ProjectsPage() {
                     ) : null}
                   </div>
                 </Link>
+                </ProjectCard>
               );
             })}
           </div>
