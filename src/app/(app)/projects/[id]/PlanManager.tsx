@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import PlanTriage from "./PlanTriage";
 import type { PlanFile } from "@/types";
+import Caret from "@/components/Caret";
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return "";
@@ -107,7 +108,7 @@ export default function PlanManager({
         aria-expanded={open}
         className="flex w-full items-center gap-3 text-left"
       >
-        <SectionCaret open={open} />
+        <Caret open={open} size={20} />
         <h2 className="font-heading text-lg text-foreground">Plans</h2>
         <span className="ml-auto text-xs text-muted">
           {files.length === 0
@@ -205,22 +206,3 @@ export default function PlanManager({
   );
 }
 
-/** Big enough to read as "this opens" — feedback C4. */
-function SectionCaret({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={`shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`}
-    >
-      <path d="m9 6 6 6-6 6" />
-    </svg>
-  );
-}

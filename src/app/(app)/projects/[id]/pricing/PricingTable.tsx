@@ -23,6 +23,7 @@ import {
 import { updateLineItem, setLineStatus, addLineItem, deleteLineItem } from "../scope/actions";
 import { evalFormula } from "@/lib/formula";
 import SwipeRow from "@/components/SwipeRow";
+import Caret from "@/components/Caret";
 
 export type PricedLine = {
   id: string;
@@ -446,7 +447,7 @@ export default function PricingTable({
                   aria-expanded={!isCollapsed}
                 >
                   <span className="text-xs text-muted">
-                    {isCollapsed ? "▸" : "▾"}
+                    <Caret open={!isCollapsed} />
                   </span>
                   <h2 className="truncate font-heading text-sm uppercase tracking-wider text-brand-soft">
                     {g.key}
@@ -723,25 +724,6 @@ function ConfirmDialog({
   );
 }
 
-/** C4 — a caret big enough to read as "this opens". */
-function Caret({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={`shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`}
-    >
-      <path d="m9 6 6 6-6 6" />
-    </svg>
-  );
-}
 
 function Row({
   item: li,

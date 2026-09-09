@@ -14,6 +14,7 @@ import {
   deleteLineItem,
   addLineItem,
 } from "./actions";
+import Caret from "@/components/Caret";
 
 export type LineItem = {
   id: string;
@@ -218,7 +219,7 @@ export default function ScopeCanvas({
               className="flex min-w-0 items-center gap-2 text-left"
               aria-expanded={!isCollapsed}
             >
-              <span className="text-xs text-muted">{isCollapsed ? "▸" : "▾"}</span>
+              <Caret open={!isCollapsed} className="text-muted" />
               <h2 className="truncate font-heading text-sm uppercase tracking-wider text-brand-soft">
                 {g.key}
               </h2>
@@ -368,7 +369,7 @@ function Row({
             hasDetail ? "" : "invisible"
           }`}
         >
-          {open ? "▾" : "▸"}
+          <Caret open={open} size={16} />
         </button>
         <p
           onClick={excluded ? undefined : onEdit}

@@ -325,9 +325,14 @@ function chunkContentText(bundle: ScopeBundle, trades: string[]): string {
 function scopeFocusText(trades: string[]): string {
   if (!trades.length)
     return "SCOPE FOCUS: the FULL building — every trade / CSI division.";
+  // Some entries are picked from the division list and arrive as "09 Finishes".
+  // Others are typed by the user in their own words ("solar", "pool
+  // equipment", "the garage conversion") — nobody should have to know which
+  // CSI division a solar array belongs to. Anything without a leading division
+  // number is a description to be interpreted, not a code to be matched.
   return `SCOPE FOCUS: generate ONLY these trades / CSI divisions and NOTHING else: ${trades.join(
     ", ",
-  )}. Within these trades be fully comprehensive (cover everything, count schedules, propose quantities). Do NOT include line items from any other division.`;
+  )}. Any entry that does NOT start with a two-digit CSI division number is the user describing a trade in their own words — work out which CSI division(s) it belongs to and scope those, and say in the line's evidence which entry it came from. Within these trades be fully comprehensive (cover everything, count schedules, propose quantities). Do NOT include line items from any other division.`;
 }
 
 function textFromResponse(content: unknown[]): string {

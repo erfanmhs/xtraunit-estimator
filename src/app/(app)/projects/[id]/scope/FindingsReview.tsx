@@ -24,6 +24,7 @@ import {
   getApplyRun,
   type ScopeRun,
 } from "./actions";
+import Caret from "@/components/Caret";
 
 export type Finding = {
   id: string;
@@ -242,7 +243,7 @@ export default function FindingsReview({
                   className="flex min-w-0 flex-1 items-center gap-2 text-left"
                   aria-expanded={!collapsed[kind]}
                 >
-                  <span className="text-xs text-muted">{collapsed[kind] ? "▸" : "▾"}</span>
+                  <Caret open={!collapsed[kind]} className="text-muted" />
                   <h3 className="text-sm uppercase tracking-wider text-muted">
                     {FINDING_LABEL[kind] ?? kind}
                   </h3>

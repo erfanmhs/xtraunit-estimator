@@ -18,6 +18,7 @@ import {
 } from "./actions";
 import { evalFormula } from "@/lib/formula";
 import { divisionLabel } from "@/lib/csi";
+import Caret from "@/components/Caret";
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -191,7 +192,7 @@ export default function ItemsCatalog({
               aria-expanded={!isCollapsed}
             >
               <span className="text-xs text-muted">
-                {isCollapsed ? "▸" : "▾"}
+                <Caret open={!isCollapsed} />
               </span>
               <h3 className="text-[11px] uppercase tracking-wider text-brand-soft">
                 {g.label}

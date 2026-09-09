@@ -18,6 +18,7 @@ import {
   type ProposalTerms,
   type ProjectReference,
 } from "@/lib/proposal/profile";
+import Caret from "@/components/Caret";
 
 const REF_FIELD =
   "rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
@@ -293,7 +294,7 @@ function ProposalProfileSection({
           onClick={() => setShowNotes((v) => !v)}
           className="text-xs text-brand-soft hover:underline"
         >
-          {showNotes ? "▾" : "▸"} Draft these from a few notes (AI)
+          <Caret open={showNotes} size={16} /> Draft these from a few notes (AI)
         </button>
         {showNotes ? (
           <div className="mt-3 space-y-2">

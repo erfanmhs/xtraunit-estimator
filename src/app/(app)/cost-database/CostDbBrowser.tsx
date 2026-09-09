@@ -10,6 +10,7 @@ import { useMemo, useState, useTransition } from "react";
 import { updateCostEntry, deleteCostEntry, type CostEntryPatch } from "./actions";
 import { evalFormula } from "@/lib/formula";
 import { divisionLabel } from "@/lib/csi";
+import Caret from "@/components/Caret";
 
 export type CostEntry = {
   id: string;
@@ -182,7 +183,7 @@ export default function CostDbBrowser({
                 aria-expanded={!isCollapsed}
               >
                 <span className="text-xs text-muted">
-                  {isCollapsed ? "▸" : "▾"}
+                  <Caret open={!isCollapsed} />
                 </span>
                 <h2 className="font-heading text-sm uppercase tracking-wider text-brand-soft">
                   {g.label}
