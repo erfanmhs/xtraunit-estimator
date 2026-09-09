@@ -15,14 +15,7 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-- [ ] **0039_project_archive_and_order.sql** — adds `archived_at` and
-      `sort_order` to `projects`, for archiving ("minimize") a project and for
-      dragging the project list into your own order. Additive only; it also
-      seeds the current newest-first order so your first drag starts from the
-      list you already see. Nothing is deleted and no policy changes.
-
-      Until you run it the app still works: archiving and reordering are hidden,
-      and everything else behaves exactly as it does now.
+_Nothing pending. Everything through 0039 has been run._
 
 ---
 
@@ -70,3 +63,4 @@ one once in Supabase, then it moves to **Already run**.
       evaluate the user once per query; verified, 0 left per-row)
 - [x] 0038_foreign_key_indexes.sql — run 2026-09-07 (all 12 indexes present;
       verified)
+- [x] 0039_project_archive_and_order.sql — run 2026-09-08 (archived_at + sort_order verified present 2026-09-08)
