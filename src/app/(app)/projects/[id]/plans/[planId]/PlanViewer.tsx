@@ -448,7 +448,15 @@ export default function PlanViewer({
   // fx/fy: cursor as a fraction of the page (scale-independent). vx/vy: cursor
   // position within the viewport. Used to keep that page point under the cursor.
   const focusRef = useRef<{ fx: number; fy: number; vx: number; vy: number } | null>(null);
-  const dragRef = useRef<{ id: string; index: number; pointerId: number } | null>(null);
+  // `grab` is the offset from the pointer's aim point to the vertex at the
+  // moment it was grabbed. Keeping it means the handle never jumps to the
+  // finger on the first move — it travels with it from where it was picked up.
+  const dragRef = useRef<{
+    id: string;
+    index: number;
+    pointerId: number;
+    grab: Pt;
+  } | null>(null);
   const finalizingRef = useRef(false);
   const activeCountRef = useRef<{ id: string; geometry: Pt[] } | null>(null);
   const pendingCenterRef = useRef(true); // center the page on load / page change
@@ -630,9 +638,31 @@ export default function PlanViewer({
     if (fingersRef.current.size > 1) {
       multiUntilRef.current = Number.MAX_SAFE_INTEGER; // until every finger lifts
       pinchedRef.current = true;
-      cancelTouchTap();
+      cancelTouchEdits();
       selTapRef.current = null;
     }
+  }
+  /**
+   * Two fingers mean navigate, and nothing else.
+   *
+   * Whatever the first finger had started — aiming a point, dragging a handle,
+   * moving a shape, dragging a crop box — is abandoned the moment a second
+   * finger lands, and any half-moved geometry is put back to what is saved. A
+   * pinch can never leave a mark on the drawing.
+   */
+  function cancelTouchEdits() {
+    cancelTouchTap();
+    const editingId = dragRef.current?.id ?? moveRef.current?.id ?? null;
+    if (editingId) {
+      const m = measurementsRef.current.find((x) => x.id === editingId);
+      setEditGeom(m ? m.geometry.map((q) => ({ ...q })) : null);
+    }
+    dragRef.current = null;
+    dragStartRef.current = null;
+    moveRef.current = null;
+    cropDragRef.current = false;
+    setCropDraft(null);
+    setHover(null);
   }
   function fingerUp(id: number) {
     fingersRef.current.delete(id);
@@ -2120,7 +2150,16 @@ export default function PlanViewer({
           selTapRef.current = null;
           setSelectedId(m.id);
           setActiveVertex(v);
-          dragRef.current = { id: m.id, index: v.index, pointerId };
+          {
+            const aim = clientToPoint(cx, cy - aimLiftRef.current);
+            const vp = m.geometry[v.index];
+            dragRef.current = {
+              id: m.id,
+              index: v.index,
+              pointerId,
+              grab: { x: vp.x - aim.x, y: vp.y - aim.y },
+            };
+          }
           dragStartRef.current = { x: cx, y: cy, moved: false, hold: true };
           setEditGeom(m.geometry.map((q) => ({ ...q })));
           setGrabPulse(true);
@@ -2200,20 +2239,23 @@ export default function PlanViewer({
         return;
       }
       // The page moved under the still finger: re-aim at the same screen spot.
-      const pt = clientToPoint(s.x, s.y);
+      const ay = s.y - aimLiftRef.current;
+      const pt = clientToPoint(s.x, ay);
       if (tapRef.current) {
-        recordAim(s.x, s.y);
+        recordAim(s.x, ay);
         showLoupeAt(s.x, s.y, pt);
         if (draft.length) updateRubber(pt);
       } else if (dragRef.current) {
         const idx = dragRef.current.index;
+        const grab = dragRef.current.grab;
+        const vp = { x: pt.x + grab.x, y: pt.y + grab.y };
         setEditGeom((g) => {
           if (!g) return g;
           const ng = g.map((q) => ({ ...q }));
-          ng[idx] = pt;
+          ng[idx] = vp;
           return ng;
         });
-        showLoupeAt(s.x, s.y, pt);
+        showLoupeAt(s.x, s.y, vp);
       }
       s.raf = requestAnimationFrame(tick);
     };
@@ -2222,6 +2264,27 @@ export default function PlanViewer({
   function clientToPoint(x: number, y: number): Pt {
     const rect = svgRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
     return { x: (x - rect.left) / scale, y: (y - rect.top) / scale };
+  }
+
+  // ── Where a finger is actually aiming ─────────────────────────────────────
+  // A fingertip covers roughly a 12 mm circle of glass, so a point placed at
+  // the contact patch is under the finger that placed it — you cannot see the
+  // thing you are trying to hit. The aim point is therefore lifted a fixed
+  // distance ABOVE the contact point: the loupe's crosshair, the rubber band
+  // and the placed point all use the lifted spot, and the target stays in
+  // clear view the whole time. This is what Bluebeam and the iOS text
+  // magnifier do, and it is the difference between guessing and aiming.
+  //
+  // Screen pixels, so it stays the same physical distance at every zoom.
+  // Touch only — a stylus and a mouse already point exactly where you can see.
+  const AIM_LIFT = 34;
+  const aimLiftRef = useRef(0);
+  function liftOf(e: React.PointerEvent) {
+    return e.pointerType === "touch" ? AIM_LIFT : 0;
+  }
+  /** The page point a pointer is aiming at, contact patch accounted for. */
+  function evtToAim(e: React.PointerEvent): Pt {
+    return clientToPoint(e.clientX, e.clientY - liftOf(e));
   }
   function recordAim(x: number, y: number) {
     const s = aimSamplesRef.current;
@@ -2268,8 +2331,10 @@ export default function PlanViewer({
     ctx.lineTo(SIZE, SIZE / 2);
     ctx.stroke();
   }
+  // The loupe window stays over the finger; its CONTENT and crosshair centre
+  // on the lifted aim point, which is what the user is actually pointing at.
   function showLoupe(e: React.PointerEvent) {
-    showLoupeAt(e.clientX, e.clientY, evtToPoint(e));
+    showLoupeAt(e.clientX, e.clientY, evtToAim(e));
   }
   function showLoupeAt(clientX: number, clientY: number, pt: Pt) {
     const host = viewportRef.current?.parentElement; // the center column (relative)
@@ -2309,16 +2374,42 @@ export default function PlanViewer({
   }
   function updateRubber(pt: Pt) {
     const g = rubberRef.current;
-    if (!g || draft.length === 0) return;
+    if (!g) return;
     g.style.display = "";
     const q = (sel: string) => g.querySelector<SVGElement>(`[data-aim="${sel}"]`);
-    const last = px(draft[draft.length - 1]);
-    const first = px(draft[0]);
     const a = px(pt);
     const fill = tool === "area" || (tool === "volume" && volMode === "area");
     const col = tool === "calibrate" ? "#22d3ee" : color;
+    // The target ring marks the lifted aim point on the sheet itself, so the
+    // landing spot is readable without looking up at the loupe. It shows from
+    // the very first point, before there is any rubber band to draw.
+    const dot = q("dot");
+    if (dot) {
+      dot.setAttribute("cx", String(a.x));
+      dot.setAttribute("cy", String(a.y));
+      dot.setAttribute("stroke", col);
+    }
+    const cross = q("cross");
+    if (cross) {
+      cross.setAttribute(
+        "d",
+        `M${a.x - 11} ${a.y}H${a.x - 4}M${a.x + 4} ${a.y}H${a.x + 11}` +
+          `M${a.x} ${a.y - 11}V${a.y - 4}M${a.x} ${a.y + 4}V${a.y + 11}`,
+      );
+      cross.setAttribute("stroke", col);
+    }
+    // Everything below needs at least one placed point.
+    const started = draft.length > 0;
+    for (const k of ["seg", "close", "fill", "label"]) {
+      const el = q(k);
+      if (el && !started) el.style.display = "none";
+    }
+    if (!started) return;
+    const last = px(draft[draft.length - 1]);
+    const first = px(draft[0]);
     const seg = q("seg");
     if (seg) {
+      seg.style.display = "";
       seg.setAttribute("x1", String(last.x));
       seg.setAttribute("y1", String(last.y));
       seg.setAttribute("x2", String(a.x));
@@ -2440,20 +2531,24 @@ export default function PlanViewer({
   // ---- pointer handling on the overlay ----
   function onPointerDown(e: React.PointerEvent) {
     if (e.button !== 0 || spaceHeld) return; // middle/right + space-pan bubble to pan
+    aimLiftRef.current = liftOf(e); // edge-pan and hold-grab read this later
     const pt = evtToPoint(e);
 
     // Finger on a draw tool: nothing is placed yet. The point goes where the
     // finger LIFTS (slide to aim with the loupe); a second finger turns the
     // gesture into a pinch instead; holding still opens the menu.
     const touch = e.pointerType === "touch";
+    // A second finger is navigation, whatever the tool. Without this the
+    // finger that completes a pinch could grab a handle or start a crop on
+    // its way down, and the pinch would edit the drawing.
+    if (touch && (fingersRef.current.size > 1 || Date.now() < multiUntilRef.current))
+      return;
     if (touch && tool !== "select" && tool !== "crop" && tool !== "browse") {
-      // Another finger is already down (this one is counted too), or a
-      // multi-touch just ended: this finger is navigation, not a point.
-      if (fingersRef.current.size > 1 || Date.now() < multiUntilRef.current) return;
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
       aimSamplesRef.current = [];
-      recordAim(e.clientX, e.clientY); // a still finger sends no moves: the landing spot IS the held spot
+      recordAim(e.clientX, e.clientY - aimLiftRef.current); // a still finger sends no moves: the landing spot IS the held spot
       showLoupe(e);
+      updateRubber(evtToAim(e)); // show the target ring straight away
       startLongPress(e.clientX, e.clientY, e.pointerId);
       return;
     }
@@ -2464,14 +2559,21 @@ export default function PlanViewer({
         // maybe a tap (nudge pad), maybe a hold (vertex menu).
         const v = vertexAt(pt, true);
         if (v) {
-          dragRef.current = { id: selected.id, index: v.index, pointerId: e.pointerId };
+          const vp = selected.geometry[v.index];
+          const aim = evtToAim(e);
+          dragRef.current = {
+            id: selected.id,
+            index: v.index,
+            pointerId: e.pointerId,
+            grab: { x: vp.x - aim.x, y: vp.y - aim.y },
+          };
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false };
           setEditGeom(selected.geometry.map((q) => ({ ...q })));
           try {
             svgRef.current?.setPointerCapture(e.pointerId);
           } catch {}
           if (touch) {
-            showLoupe(e);
+            showLoupeAt(e.clientX, e.clientY, vp);
             startLongPress(e.clientX, e.clientY, e.pointerId);
           }
           return;
@@ -2480,7 +2582,15 @@ export default function PlanViewer({
         const mid = midpointAt(pt);
         if (mid) {
           const ng = [...selected.geometry.slice(0, mid.at), mid.p, ...selected.geometry.slice(mid.at)].map((q) => ({ ...q }));
-          dragRef.current = { id: selected.id, index: mid.at, pointerId: e.pointerId };
+          {
+            const aim = evtToAim(e);
+            dragRef.current = {
+              id: selected.id,
+              index: mid.at,
+              pointerId: e.pointerId,
+              grab: { x: mid.p.x - aim.x, y: mid.p.y - aim.y },
+            };
+          }
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false, inserted: true };
           setEditGeom(ng);
           setActiveVertex({ id: selected.id, index: mid.at });
@@ -2541,9 +2651,9 @@ export default function PlanViewer({
       if (Math.hypot(e.clientX - tapRef.current.x, e.clientY - tapRef.current.y) > 10)
         cancelLongPress();
       // No React state here — direct DOM updates keep this at frame rate.
-      recordAim(e.clientX, e.clientY);
+      recordAim(e.clientX, e.clientY - liftOf(e));
       showLoupe(e);
-      if (draft.length) updateRubber(evtToPoint(e));
+      updateRubber(evtToAim(e));
       edgePanUpdate(e.clientX, e.clientY);
       return;
     }
@@ -2562,7 +2672,11 @@ export default function PlanViewer({
         ds.moved = true;
         cancelLongPress();
       }
-      const pt = evtToPoint(e);
+      // The handle keeps the offset it was grabbed with, so it never snaps to
+      // the finger — it travels with it from wherever it was picked up.
+      const aim = evtToAim(e);
+      const grab = dragRef.current.grab;
+      const pt = { x: aim.x + grab.x, y: aim.y + grab.y };
       // Capture the index NOW. The updater below runs later, during React's
       // next render — by then a fast lift may already have cleared dragRef,
       // and reading it there crashed the whole viewer ("null is not an
@@ -2575,7 +2689,8 @@ export default function PlanViewer({
         return ng;
       });
       if (touch) {
-        showLoupe(e);
+        // The loupe shows the handle itself, not the finger.
+        showLoupeAt(e.clientX, e.clientY, pt);
         edgePanUpdate(e.clientX, e.clientY);
       }
       return;
@@ -2621,7 +2736,7 @@ export default function PlanViewer({
     if (e.pointerType === "touch") {
       if (tapRef.current?.id === e.pointerId) {
         const fired = longPressFiredRef.current;
-        const held = stableAimPoint(e.clientX, e.clientY);
+        const held = stableAimPoint(e.clientX, e.clientY - liftOf(e));
         const pt = clientToPoint(held.x, held.y);
         cancelTouchTap();
         // A long-press opened the menu, or a pinch happened, or a second
@@ -4849,8 +4964,11 @@ export default function PlanViewer({
                       never through state. Hidden unless a finger is aiming. */}
                   <g ref={rubberRef} style={{ display: "none", pointerEvents: "none" }}>
                     <polygon data-aim="fill" points="" fillOpacity={0.15} stroke="none" style={{ display: "none" }} />
-                    <line data-aim="seg" strokeWidth={2} strokeDasharray="6 4" />
+                    <line data-aim="seg" strokeWidth={2} strokeDasharray="6 4" style={{ display: "none" }} />
                     <line data-aim="close" strokeWidth={1.5} strokeDasharray="4 4" opacity={0.6} style={{ display: "none" }} />
+                    {/* The aim target: a ring and crosshair on the lifted point */}
+                    <circle data-aim="dot" r={7} fill="none" strokeWidth={2} />
+                    <path data-aim="cross" fill="none" strokeWidth={2} />
                     <text
                       data-aim="label"
                       fontSize={LABEL_FONT}
