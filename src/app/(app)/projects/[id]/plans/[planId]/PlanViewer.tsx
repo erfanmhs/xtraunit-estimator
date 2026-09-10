@@ -445,10 +445,15 @@ export default function PlanViewer({
   projectId,
   planFile,
   sheets,
+  initialPhone = false,
+  initialCoarse = false,
 }: {
   projectId: string;
   planFile: PlanFile;
   sheets: Sheet[];
+  /** The server's guess from the request headers, so the first paint is already right. */
+  initialPhone?: boolean;
+  initialCoarse?: boolean;
 }) {
   const [supabase] = useState(() => createClient());
   const ranRef = useRef(false);
@@ -485,9 +490,12 @@ export default function PlanViewer({
   const [vpSize, setVpSize] = useState({ w: 0, h: 0 }); // viewport size (for canvas padding)
 
   // Adjustable panels + floating notes
-  const [navOpen, setNavOpen] = useState(true);
+  // The side panels start CLOSED on anything the server took for a phone or
+  // tablet; the effect below closes them on narrow windows once the
+  // JavaScript runs, but that is what painted the desktop layout first.
+  const [navOpen, setNavOpen] = useState(!initialCoarse);
   const [navW, setNavW] = useState(208);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(!initialCoarse);
   const [panelW, setPanelW] = useState(268);
   const [notesOpen, setNotesOpen] = useState(false);
   // Phone toolbar: the "More" sheet (zoom / legend / export / panels) and the
@@ -540,7 +548,10 @@ export default function PlanViewer({
   // ── Touch ──────────────────────────────────────────────────────────────────
   // `coarse` = a finger, not a mouse: bigger hit targets, a capped bitmap,
   // and the finger drawing model (place on LIFT, with a loupe to aim).
-  const [coarse, setCoarse] = useState(false);
+  // Both start from the server's guess (request headers) and are corrected
+  // by the real screen once the JavaScript runs — without the guess, a
+  // phone painted the desktop layout for as long as the bundle took to load.
+  const [coarse, setCoarse] = useState(initialCoarse);
   useEffect(() => {
     const mq = window.matchMedia("(pointer: coarse)");
     const sync = () => setCoarse(mq.matches);
@@ -550,7 +561,7 @@ export default function PlanViewer({
   }, []);
   // `phone` = a narrow screen (below Tailwind's sm): the measurements panel
   // becomes a bottom sheet over the drawing instead of a side column.
-  const [phone, setPhone] = useState(false);
+  const [phone, setPhone] = useState(initialPhone);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 639px)");
     const sync = () => setPhone(mq.matches);

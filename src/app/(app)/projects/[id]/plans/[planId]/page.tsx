@@ -1,7 +1,24 @@
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import PlanViewer from "./PlanViewer";
 import type { PlanFile } from "@/types";
+
+/**
+ * A first guess at the device from the request, so the FIRST paint is
+ * already the phone layout. The viewer decides phone/desktop from the
+ * screen with matchMedia, which only runs after the JavaScript arrives —
+ * on a phone over 5G that is seconds of the desktop layout (sheet list on
+ * the left, measurements panel on the right, no drawing) before it flips
+ * (Erfan, 2026-09-10). The screen still has the final say once it loads.
+ */
+function deviceGuess(h: Headers): { phone: boolean; coarse: boolean } {
+  const ua = h.get("user-agent") ?? "";
+  const chMobile = h.get("sec-ch-ua-mobile"); // "?1" on mobile Chrome
+  const phone = chMobile === "?1" || /iPhone|iPod|Android.*Mobile|Windows Phone|Mobi/i.test(ua);
+  const tablet = /iPad|Android(?!.*Mobile)|Tablet/i.test(ua) || (/Macintosh/.test(ua) && /Mobile/.test(ua));
+  return { phone, coarse: phone || tablet };
+}
 
 export default async function PlanViewerPage({
   params,
@@ -9,6 +26,7 @@ export default async function PlanViewerPage({
   params: Promise<{ id: string; planId: string }>;
 }) {
   const { id, planId } = await params;
+  const device = deviceGuess(await headers());
 
   const supabase = await createClient();
   const { data: pf } = await supabase
@@ -66,6 +84,8 @@ export default async function PlanViewerPage({
       projectId={id}
       planFile={pf as PlanFile}
       sheets={sheetsData ?? []}
+      initialPhone={device.phone}
+      initialCoarse={device.coarse}
     />
   );
 }
