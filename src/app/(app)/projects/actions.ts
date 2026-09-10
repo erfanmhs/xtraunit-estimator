@@ -194,8 +194,10 @@ export async function setProjectArchived(formData: FormData) {
  * `ids` is the whole visible list, top to bottom; each project gets its
  * position as `sort_order`. Row access rules mean a project that is not the
  * user's simply does not update, so a stray id is harmless. Nothing is
- * returned and nothing redirects — the list on screen is already in this
- * order, and the page revalidates so the next visit agrees with it.
+ * returned, nothing redirects and nothing revalidates: the list on screen is
+ * already in this order, the next visit reads sort_order anyway, and a
+ * revalidation here re-rendered the whole list mid-drag on a phone — which
+ * is what left a card floating over the others (2026-09-10).
  */
 export async function reorderProjects(ids: string[]): Promise<void> {
   const parsed = projectOrder.safeParse(ids);
@@ -212,7 +214,6 @@ export async function reorderProjects(ids: string[]): Promise<void> {
       supabase.from("projects").update({ sort_order: i + 1 }).eq("id", id),
     ),
   );
-  revalidatePath("/projects");
 }
 
 // ── Stage progress (powers the project tabs in the left rail) ───────────────

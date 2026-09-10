@@ -150,11 +150,48 @@ export default function ProjectGrid({
     });
   }, []);
 
+  // Leaving edit mode always lands every card back in its slot, whatever
+  // state a drag was left in — a lift the browser swallowed, a card still
+  // pinned under a finger that is gone. Belt and braces for the phone.
   const stop = useCallback(() => {
     setEditing(false);
     setDragId(null);
     drag.current = null;
+    cardEls.current.forEach((el) => {
+      el.style.transition = "transform 160ms ease-out";
+      el.style.transform = "";
+    });
   }, []);
+
+  // A drag ends on the FIRST of: pointer up on the card, the browser
+  // cancelling the pointer (a scroll or a system gesture took it), the
+  // capture being lost, or the page being hidden. Any of those without the
+  // card's own handler firing used to leave it floating over the others.
+  const endDrag = useCallback(() => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    setDragId(null);
+    const el = cardEls.current.get(d.id);
+    if (el) {
+      el.style.transition = "transform 160ms ease-out";
+      el.style.transform = "";
+    }
+    if (d.moved) save(order);
+  }, [save, order]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const end = () => endDrag();
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", end, true);
+    document.addEventListener("visibilitychange", end);
+    return () => {
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
+      document.removeEventListener("visibilitychange", end);
+    };
+  }, [editing, endDrag]);
 
   // Tap anywhere that is not a card (or Escape) leaves edit mode.
   useEffect(() => {
@@ -224,15 +261,7 @@ export default function ProjectGrid({
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     const d = drag.current;
     if (!d || d.pointerId !== e.pointerId) return;
-    drag.current = null;
-    setDragId(null);
-    const el = cardEls.current.get(d.id);
-    if (el) {
-      // Settle into the slot instead of snapping.
-      el.style.transition = "transform 160ms ease-out";
-      el.style.transform = "";
-    }
-    if (d.moved) save(order);
+    endDrag();
   }
 
   const ctx = { editing, start: () => setEditing(true) };
@@ -282,7 +311,9 @@ export default function ProjectGrid({
                 if (el) cardEls.current.set(id, el);
                 else cardEls.current.delete(id);
               }}
-              className={`${editing ? "jiggle cursor-grab select-none" : ""} ${
+              // touch-surface: no iOS link preview / callout on the hold that
+              // starts a drag.
+              className={`${editing ? "jiggle touch-surface cursor-grab select-none" : ""} ${
                 dragging ? "relative z-20 cursor-grabbing" : ""
               }`}
               style={
@@ -298,6 +329,7 @@ export default function ProjectGrid({
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerUp}
+              onLostPointerCapture={onPointerUp}
               // A card is a link, and a mouse dragging a link starts the
               // browser's own drag-and-drop, which cancels our pointer stream.
               onDragStart={(e) => {
