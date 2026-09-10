@@ -25,7 +25,26 @@ import {
   type CurrentLine,
   type FindingResponse,
 } from "./applyFindings";
+import { normalizeTrade, tradeFor, tradeSequence } from "./trades";
 import { log, timer } from "@/lib/log";
+
+// The trade-package columns arrive with migration 0041. Until it is run the
+// insert would fail on the unknown column, so the rows are retried without
+// them — the app files those lines by CSI section on the fly instead.
+const TRADE_COLS = ["trade_package", "trade_sequence", "deliverable", "includes", "excludes"];
+async function insertLines(sb: SupabaseClient, rows: Record<string, unknown>[]) {
+  const first = await sb.from("line_items").insert(rows);
+  if (!first.error || !/trade_package|trade_sequence|deliverable|includes|excludes/i.test(first.error.message))
+    return first;
+  log.warn("scope.insert.pre-0041", { note: "trade columns missing; inserting without them" });
+  return sb.from("line_items").insert(
+    rows.map((r) => {
+      const c = { ...r };
+      for (const k of TRADE_COLS) delete c[k];
+      return c;
+    }),
+  );
+}
 import {
   AiBudgetExceededError,
   aiBudgetExhausted,
@@ -319,7 +338,8 @@ export async function runScopeGeneration(
     });
 
     if (freshLines.length) {
-      await sb.from("line_items").insert(
+      await insertLines(
+        sb,
         freshLines.map((li, i) => ({
           project_id: projectId,
           owner_id: userId,
@@ -327,6 +347,11 @@ export async function runScopeGeneration(
           division_name: li.division_name,
           section_code: li.section_code,
           section_name: li.section_name,
+          trade_package: normalizeTrade(li.trade_package, li),
+          trade_sequence: tradeSequence(normalizeTrade(li.trade_package, li)),
+          deliverable: li.deliverable?.trim() || null,
+          includes: li.includes?.trim() || null,
+          excludes: li.excludes?.trim() || null,
           description: li.description,
           quantity: li.quantity,
           unit: li.unit,
@@ -545,7 +570,8 @@ export async function runApplyFindings(opts: JobRunOpts): Promise<void> {
     const validIds = new Set(lines.map((l) => l.id));
 
     if (changes.additions.length) {
-      await sb.from("line_items").insert(
+      await insertLines(
+        sb,
         changes.additions.map((li, i) => ({
           project_id: projectId,
           owner_id: userId,
@@ -553,6 +579,8 @@ export async function runApplyFindings(opts: JobRunOpts): Promise<void> {
           division_name: li.division_name,
           section_code: li.section_code,
           section_name: li.section_name,
+          trade_package: tradeFor(li),
+          trade_sequence: tradeSequence(tradeFor(li)),
           description: li.description,
           quantity: li.quantity,
           unit: li.unit,

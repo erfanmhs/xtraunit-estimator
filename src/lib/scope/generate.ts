@@ -21,6 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient } from "@/lib/anthropic";
 import type { ScopeBundle, BundleMeasurement } from "./bundle";
 import { taxonomyPromptText } from "./taxonomy";
+import { tradePromptText } from "./trades";
 import { routedDisciplines } from "./routing";
 import { assertAiBudget, recordAiUsage } from "@/lib/ai-meter";
 
@@ -41,6 +42,14 @@ export type GeneratedLineItem = {
   division_name: string;
   section_code: string | null;
   section_name: string | null;
+  /** Level-2 heading from the TRADE PACKAGES list (src/lib/scope/trades.ts). */
+  trade_package: string;
+  /** Plain-language noun the client reads: "Fixture set — 2 baths, kitchen, laundry". */
+  deliverable: string;
+  /** One sentence: what this line covers. */
+  includes: string;
+  /** One sentence: what it deliberately does not cover. "" when nothing. */
+  excludes: string;
   description: string;
   quantity: number | null;
   unit: string | null;
@@ -76,6 +85,9 @@ const RULES = `Critical rules:
 - DESCRIPTION = the subcategory's EXACT standard label, optionally followed by " — <spec/type/extent>" ONLY when the plans show a specific product, type, or location worth noting (e.g. "Windows — vinyl, per schedule", "Wood Framing — walls, floors & roof (Type V-A)"). Do NOT use action-verb sentences, narrative, or explanations in description — that material belongs in evidence_text/assumptions.
 - Use the subcategory's SECTION CODE for section_code (and its title for section_name).
 - ADD A SUBCATEGORY ONLY WHEN NEEDED: if the project has real scope that fits NONE of the listed subcategories for its division, you MAY add ONE new line at the same work-package level, in the same formal CSI-style wording (a section title + short scope). Never create a near-duplicate of a listed subcategory.
+- FILE EVERY LINE UNDER A TRADE PACKAGE. A scope is read by trade, not by filing code: trade_package is the heading a client reads and a sub bids, and it MUST be one of the TRADE PACKAGES listed later in this prompt, spelled exactly. Choose by the work a sub would actually bid, not by the division number (stucco → "Exterior Cladding & Siding" although it files under 09; cabinets → "Finish Carpentry & Cabinets" although they file under 12; rough-carpentry sheathing → "Framing").
+- deliverable = what gets delivered, as a plain-language NOUN phrase of 3–8 words a homeowner understands: "Foundation footings and stem walls", "Second-floor wall and roof framing", "Fixture set — 2 baths, kitchen, laundry". NOT a verb sentence, NOT the CSI label repeated, NOT a code. This is the headline the client reads; description stays the standard CSI label for cost-coding.
+- includes = ONE sentence saying what the line covers on this job (systems, locations, extents, who supplies what). excludes = ONE short sentence naming what this line deliberately leaves out (owner-supplied items, adjacent trades' work, allowances), or "" when there is nothing worth saying. Keep both specific to the plans, never boilerplate.
 - Within each section, order line items in construction sequence: below-grade → structure → exterior shell → interior, lower floors before upper floors.
 - Use the SAME standard subcategory label for the same work on every project — identical phrasing is required so past prices match future jobs.
 - confidence is "high", "medium", or "low" (high when measured or counted from a schedule; lower when broadly estimated).`;
@@ -94,6 +106,10 @@ const DRAFT_SCHEMA = {
           division_name: { type: "string" },
           section_code: { type: ["string", "null"] },
           section_name: { type: ["string", "null"] },
+          trade_package: { type: "string" },
+          deliverable: { type: "string" },
+          includes: { type: "string" },
+          excludes: { type: "string" },
           description: { type: "string" },
           quantity: { type: ["number", "null"] },
           unit: { type: ["string", "null"] },
@@ -109,6 +125,10 @@ const DRAFT_SCHEMA = {
           "division_name",
           "section_code",
           "section_name",
+          "trade_package",
+          "deliverable",
+          "includes",
+          "excludes",
           "description",
           "quantity",
           "unit",
@@ -444,8 +464,9 @@ export async function draftScope(
               text: [
                 scopeFocusText(trades),
                 chunkContentText(bundle, trades),
+                tradePromptText(),
                 taxonomyPromptText(trades),
-                `Using the plan content and STANDARD SUBCATEGORIES above, produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division and those subcategories. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Fold the door/window/finish schedule counts into the matching subcategory lines, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
+                `Using the plan content, TRADE PACKAGES and STANDARD SUBCATEGORIES above, produce the COMPLETE, COMPREHENSIVE scope of work as line_items organized by CSI division and those subcategories, each filed under its trade package with a plain-language deliverable and its own includes/excludes. Cover ALL trades the plans show or that this building type requires — not only the areas the user measured. Fold the door/window/finish schedule counts into the matching subcategory lines, and propose quantities (with formula + assumptions) wherever the user gave no measurement. Also return any assumptions/exclusions you relied on as findings.`,
               ]
                 .filter((s) => s.trim())
                 .join("\n\n"),
@@ -478,7 +499,7 @@ export async function findGaps(
   const draftSummary = draftLineItems
     .map(
       (li) =>
-        `${li.division_code} ${li.division_name} — ${li.description}${li.quantity != null ? ` (${li.quantity} ${li.unit ?? ""})` : ""}`,
+        `[${li.trade_package}] ${li.deliverable || li.description} — ${li.division_code} ${li.description}${li.quantity != null ? ` (${li.quantity} ${li.unit ?? ""})` : ""}`,
     )
     .join("\n");
 

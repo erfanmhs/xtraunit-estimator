@@ -12,6 +12,7 @@ import {
   abortScopeRun,
 } from "@/lib/scope/run";
 import { chunkTrades } from "@/lib/scope/generate";
+import { tradeFor, tradeSequence } from "@/lib/scope/trades";
 import {
   lineItemPatch,
   tradesInput,
@@ -211,6 +212,10 @@ export async function updateLineItem(
     quantity?: number | null;
     unit?: string | null;
     notes?: string | null;
+    trade_package?: string | null;
+    deliverable?: string | null;
+    includes?: string | null;
+    excludes?: string | null;
   },
 ): Promise<ActionResult> {
   const supabase = await createClient();
@@ -236,12 +241,19 @@ export async function updateLineItem(
   if (patch.quantity !== undefined) clean.quantity = patch.quantity;
   if (patch.unit !== undefined) clean.unit = patch.unit?.trim() || null;
   if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
+  if (patch.trade_package !== undefined) {
+    const t = patch.trade_package?.trim() || null;
+    clean.trade_package = t;
+    clean.trade_sequence = t ? tradeSequence(t) : null;
+  }
+  if (patch.deliverable !== undefined) clean.deliverable = patch.deliverable?.trim() || null;
+  if (patch.includes !== undefined) clean.includes = patch.includes?.trim() || null;
+  if (patch.excludes !== undefined) clean.excludes = patch.excludes?.trim() || null;
 
-  const { error } = await supabase
-    .from("line_items")
-    .update(clean)
-    .eq("id", lineId);
-  if (error) return { ok: false, error: "Could not save the change." };
+  let res = await supabase.from("line_items").update(clean).eq("id", lineId);
+  if (isPre0041(res.error))
+    res = await supabase.from("line_items").update(withoutTradeCols(clean)).eq("id", lineId);
+  if (res.error) return { ok: false, error: "Could not save the change." };
   return { ok: true };
 }
 
@@ -281,10 +293,26 @@ export async function deleteLineItem(lineId: string): Promise<ActionResult> {
 export type NewLineItem = {
   division_code: string | null;
   division_name: string | null;
+  /** The trade heading the line was added under (migration 0041). */
+  trade_package?: string | null;
+  deliverable?: string | null;
+  includes?: string | null;
+  excludes?: string | null;
   description: string;
   quantity: number | null;
   unit: string | null;
 };
+
+/** Trade-package columns (migration 0041) — dropped from a write when the database predates them. */
+const TRADE_COLS = ["trade_package", "trade_sequence", "deliverable", "includes", "excludes"];
+function isPre0041(error: { message: string } | null): boolean {
+  return !!error && /trade_package|trade_sequence|deliverable|includes|excludes/i.test(error.message);
+}
+function withoutTradeCols(row: Record<string, unknown>): Record<string, unknown> {
+  const c = { ...row };
+  for (const k of TRADE_COLS) delete c[k];
+  return c;
+}
 
 export async function addLineItem(
   projectId: string,
@@ -300,27 +328,32 @@ export async function addLineItem(
   if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
   const clean = parsed.data;
 
-  const { data, error } = await supabase
-    .from("line_items")
-    .insert({
-      project_id: projectId,
-      owner_id: user.id,
-      division_code: clean.division_code,
-      division_name: clean.division_name,
-      description: clean.description,
-      quantity: clean.quantity,
-      unit: clean.unit || null,
-      source_kind: "takeoff",
-      status: "confirmed",
-      confidence: "high",
-      ai_generated: false,
-      user_edited: true,
-      sort_order: 999,
-    })
-    .select("id")
-    .single();
-  if (error || !data) return { ok: false, error: "Could not add the line." };
-  return { ok: true, id: data.id };
+  const trade = clean.trade_package?.trim() || tradeFor(clean);
+  const row: Record<string, unknown> = {
+    project_id: projectId,
+    owner_id: user.id,
+    division_code: clean.division_code,
+    division_name: clean.division_name,
+    trade_package: trade,
+    trade_sequence: tradeSequence(trade),
+    deliverable: clean.deliverable?.trim() || null,
+    includes: clean.includes?.trim() || null,
+    excludes: clean.excludes?.trim() || null,
+    description: clean.description,
+    quantity: clean.quantity,
+    unit: clean.unit || null,
+    source_kind: "takeoff",
+    status: "confirmed",
+    confidence: "high",
+    ai_generated: false,
+    user_edited: true,
+    sort_order: 999,
+  };
+  let res = await supabase.from("line_items").insert(row).select("id").single();
+  if (isPre0041(res.error))
+    res = await supabase.from("line_items").insert(withoutTradeCols(row)).select("id").single();
+  if (res.error || !res.data) return { ok: false, error: "Could not add the line." };
+  return { ok: true, id: res.data.id };
 }
 
 export async function answerFinding(
