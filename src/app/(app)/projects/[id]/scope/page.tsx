@@ -6,6 +6,7 @@ import PreparePlans from "./PreparePlans";
 import ScopeCanvas, { type LineItem } from "./ScopeCanvas";
 import FindingsReview, { type Finding } from "./FindingsReview";
 import NextStep from "@/components/NextStep";
+import { groupByTrade } from "@/lib/scope/trades";
 
 export default async function ScopePage({
   params,
@@ -37,14 +38,25 @@ export default async function ScopePage({
   ) as { id: string; name: string | null; gen_trades?: string[] | null } | null;
   const genTrades = Array.isArray(project?.gen_trades) ? project.gen_trades : [];
 
-  const { data: items } = await supabase
+  // Resilient to migration 0041 (trade packages) not being run yet: the
+  // canvas files lines by CSI section when the columns are missing.
+  const baseCols =
+    "id,division_code,division_name,section_code,section_name,description,quantity,unit,source_kind,confidence,status,evidence,sort_order";
+  const tradeCols = ",trade_package,trade_sequence,deliverable,includes,excludes";
+  const wide = await supabase
     .from("line_items")
-    .select(
-      "id,division_code,division_name,section_code,section_name,description,quantity,unit,source_kind,confidence,status,evidence,sort_order",
-    )
+    .select(baseCols + tradeCols)
     .eq("project_id", id)
     .order("division_code", { ascending: true })
     .order("sort_order", { ascending: true });
+  const { data: items } = wide.error
+    ? await supabase
+        .from("line_items")
+        .select(baseCols)
+        .eq("project_id", id)
+        .order("division_code", { ascending: true })
+        .order("sort_order", { ascending: true })
+    : wide;
 
   // Findings — resilient to migrations 0010 (answer) / 0029 (status) not run.
   let findingRows: Finding[] = [];
@@ -175,7 +187,19 @@ export default async function ScopePage({
     }))
     .sort((a, b) => a.page_number - b.page_number);
 
-  const lineItems = (items as LineItem[]) ?? [];
+  // The fallback select leaves the trade columns off the row entirely.
+  const lineItems = ((items ?? []) as unknown as Partial<LineItem>[]).map(
+    (li) =>
+      ({
+        ...li,
+        trade_package: li.trade_package ?? null,
+        trade_sequence: li.trade_sequence ?? null,
+        deliverable: li.deliverable ?? null,
+        includes: li.includes ?? null,
+        excludes: li.excludes ?? null,
+      }) as LineItem,
+  );
+  const tradeCount = groupByTrade(lineItems).length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -185,8 +209,8 @@ export default async function ScopePage({
           title="Scope of Work"
           subtitle={
             <>
-              {project?.name ?? "Project"} · {lineItems.length} line items ·{" "}
-              {measurementCount ?? 0} measurements used
+              {project?.name ?? "Project"} · {tradeCount} trade{tradeCount === 1 ? "" : "s"} ·{" "}
+              {lineItems.length} work packages · {measurementCount ?? 0} measurements used
             </>
           }
           action={<NextStep href={`/projects/${id}/pricing`} label="Pricing" />}
@@ -212,7 +236,8 @@ export default async function ScopePage({
           <div className="mt-10 rounded-xl panel p-8 text-center">
             <p className="text-sm text-muted">
               No scope yet. The AI reads your plans and takeoff drivers and drafts
-              the scope by CSI division. Measure your key quantities first, then
+              the scope by trade — the way a sub bids it and a client reads it.
+              Measure your key quantities first, then
               click <span className="text-foreground">Generate scope with AI</span>.
             </p>
           </div>
