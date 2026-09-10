@@ -113,7 +113,12 @@ export const pricePatch = z.object({
 export const subQuoteInput = z.object({
   sub_name: z.string().trim().min(1, "Sub name is required.").max(200),
   trade: z.string().trim().max(100).nullable(),
-  division_codes: z.array(divisionCode).min(1, "Pick at least one division the quote covers.").max(40),
+  // A quote covers TRADES now (the trade-package layer); division codes are
+  // kept for older callers and as the record on the quote row.
+  trades: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  division_codes: z.array(divisionCode).max(40),
+  /** Spread the quote over lines whose price is already confirmed, too. */
+  cover_confirmed: z.boolean().optional(),
   quote_date: z.string().trim().max(40).nullable(),
   total: money.positive("Quote total must be a positive number."),
   notes: longText.nullable(),
