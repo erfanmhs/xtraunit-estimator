@@ -41,6 +41,14 @@ import {
   placementBlocked as gatePlacementBlocked,
 } from "@/lib/takeoff/touchGate";
 import {
+  createFingerCensus,
+  blocked as censusBlocked,
+  mayPlace as censusMayPlace,
+  tapBegan as censusTapBegan,
+  touchesChanged as censusTouchesChanged,
+  touchesEnded as censusTouchesEnded,
+} from "@/lib/takeoff/fingerCensus";
+import {
   buildLayerGroups,
   labelText,
   recomputeValue,
@@ -696,6 +704,38 @@ export default function PlanViewer({
     });
     idleUntilRef.current = Date.now() + 400;
   }
+  // The census that cannot miss a finger (src/lib/takeoff/fingerCensus.ts):
+  // native touch events at the DOCUMENT, carrying the OS's own count of
+  // fingers on the page. The pointer-event gate above stays as a second
+  // opinion; this one is the authority. The moment the count reaches two,
+  // whatever one finger had started is abandoned and the loupe + rubber band
+  // go — so a pinch can neither place a point nor leave a phantom one drawn.
+  const censusRef = useRef(createFingerCensus());
+  const cancelTouchEditsRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    cancelTouchEditsRef.current = cancelTouchEdits;
+  });
+  useEffect(() => {
+    const c = censusRef.current;
+    const onStart = (e: TouchEvent) => {
+      if (censusTouchesChanged(c, e.touches.length)) {
+        pinchedRef.current = true;
+        cancelTouchEditsRef.current();
+      }
+    };
+    const onEnd = (e: TouchEvent) => censusTouchesEnded(c, e.touches.length, Date.now());
+    const opts = { capture: true, passive: true } as const;
+    document.addEventListener("touchstart", onStart, opts);
+    document.addEventListener("touchmove", onStart, opts);
+    document.addEventListener("touchend", onEnd, opts);
+    document.addEventListener("touchcancel", onEnd, opts);
+    return () => {
+      document.removeEventListener("touchstart", onStart, opts);
+      document.removeEventListener("touchmove", onStart, opts);
+      document.removeEventListener("touchend", onEnd, opts);
+      document.removeEventListener("touchcancel", onEnd, opts);
+    };
+  }, []);
   // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "thinking" | "unsupported">("idle");
   const [voiceInterim, setVoiceInterim] = useState("");
@@ -2587,7 +2627,10 @@ export default function PlanViewer({
     // its way down, and the pinch would edit the drawing. A touch that lands
     // while the latch is set is part of the gesture that is still finishing,
     // so it starts nothing either.
-    if (touch && gestureBlocked()) return;
+    if (touch && (gestureBlocked() || censusBlocked(censusRef.current, Date.now()))) return;
+    // From here on this finger is a candidate tap; the census remembers
+    // whether it was alone when it landed.
+    if (touch) censusTapBegan(censusRef.current, Date.now());
     if (touch && tool !== "select" && tool !== "crop" && tool !== "browse") {
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
       aimSamplesRef.current = [];
@@ -2799,6 +2842,10 @@ export default function PlanViewer({
         // A long-press opened the menu, or this touch was part of a pinch, or
         // the zoom it committed has not landed yet: no point.
         if (fired || pinchedRef.current || placementBlocked()) return;
+        // The authority: was this finger alone from touch to lift, with no
+        // pinch cool-down running? If not, nothing is placed — whatever the
+        // pointer-event bookkeeping above thought it saw.
+        if (!censusMayPlace(censusRef.current, Date.now())) return;
         placePoint(pt);
         return;
       }
@@ -2810,6 +2857,7 @@ export default function PlanViewer({
         cancelLongPress();
         hideLoupe();
         if (fired || pinchedRef.current) return;
+        if (!censusMayPlace(censusRef.current, Date.now())) return;
         if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) return;
         const id = pickMeasurementAt(evtToPoint(e));
         setSelectedId(id);
