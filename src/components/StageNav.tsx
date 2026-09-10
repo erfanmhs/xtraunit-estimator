@@ -35,6 +35,14 @@ export const LogoutIcon: Icon = ({ className }) => (
   </svg>
 );
 // Stage icons
+/** The project hub (plans + the next steps) — a clipboard, not a page. */
+export const ProjectIcon: Icon = ({ className }) => (
+  <svg viewBox="0 0 24 24" {...sw} className={className} aria-hidden>
+    <rect x="5" y="4" width="14" height="17" rx="2" />
+    <path d="M9 4V3h6v1M9 4h6v2H9z" />
+    <path d="M9 11h6M9 15h4" strokeLinecap="round" />
+  </svg>
+);
 export const FileIcon: Icon = ({ className }) => (
   <svg viewBox="0 0 24 24" {...sw} className={className} aria-hidden>
     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
@@ -87,7 +95,9 @@ export function projectStages(
 ): { key: StageKey; label: string; href: string; icon: Icon }[] {
   const base = `/projects/${projectId}`;
   return [
-    { key: "plans", label: "Plans", href: base, icon: FileIcon },
+    // The first tab opens the project hub: its plans AND the next steps. It
+    // used to say "Plans", which read as "the PDFs" and hid the rest (2026-09-10).
+    { key: "plans", label: "Project", href: base, icon: ProjectIcon },
     {
       key: "takeoff",
       label: "Takeoff",
