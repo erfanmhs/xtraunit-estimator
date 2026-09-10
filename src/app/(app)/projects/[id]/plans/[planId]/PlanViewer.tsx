@@ -2810,7 +2810,15 @@ export default function PlanViewer({
       setCropDraft((d) => (d ? { a: d.a, b: constrainCrop(d.a, pt) } : d));
       return;
     }
-    if (tool === "select" || tool === "browse" || draft.length === 0) return;
+    // `hover` is the MOUSE preview (the dashed next segment that follows the
+    // cursor). A finger never sets it: a finger's preview is the imperative
+    // rubber band above, which the census clears the moment a second finger
+    // lands. Before this guard, a finger whose tap the census had cancelled
+    // kept sending moves that fell through to here, and the dashed shape
+    // followed it to wherever it last was — and stayed there after the
+    // lift, because nothing clears the mouse hover on a touch. That was the
+    // "random point" still drawn after the sixth fix (2026-09-10, 7:29 am).
+    if (touch || tool === "select" || tool === "browse" || draft.length === 0) return;
     setHover(evtToPoint(e));
   }
 
