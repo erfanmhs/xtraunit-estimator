@@ -105,8 +105,9 @@ export default function AppSidebar({ email }: { email: string | null }) {
 
   // ── Phones: a bottom tab bar (thumb-reachable) instead of the rail ────────
   // Outside a project: the three areas + Sign out. Inside one: the six stages,
-  // with Projects as the way back. The takeoff viewer hides it (it has its own
-  // bottom bar with a Back button) so the drawing gets the whole screen.
+  // with Projects as the way back. It stays on the takeoff viewer too: hiding
+  // it there (to give the drawing the whole screen) made opening the takeoff
+  // feel like leaving the app — no stages, no next step (Erfan, 2026-09-10).
   const mobileItems: { key: string; label: string; href: string; icon: Icon; active: boolean; dot?: string }[] =
     projectId
       ? [
@@ -128,7 +129,7 @@ export default function AppSidebar({ email }: { email: string | null }) {
           active: pathname === n.href || pathname.startsWith(`${n.href}/`),
         }));
 
-  const mobileBar = compact ? null : (
+  const mobileBar = (
     <nav
       aria-label="Main"
       className="glass-strong pb-safe order-last z-20 flex w-full shrink-0 items-stretch border-t border-border sm:hidden"
@@ -171,8 +172,8 @@ export default function AppSidebar({ email }: { email: string | null }) {
   return (
     <>
     {mobileBar}
-    {/* The rail: from `sm` up. Phones use the bottom bar; on the viewer they
-        get nothing but the drawing (its bottom bar has a Back button). */}
+    {/* The rail: from `sm` up. Phones use the bottom bar everywhere, the
+        viewer included. */}
     <aside className={`group relative z-20 hidden shrink-0 sm:block ${flow}`}>
       <div
         className={`glass absolute inset-y-0 left-0 flex w-14 flex-col overflow-hidden border-r border-border transition-[width] duration-200 group-hover:w-60 ${

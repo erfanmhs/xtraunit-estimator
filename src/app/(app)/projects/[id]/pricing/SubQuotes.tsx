@@ -2,11 +2,16 @@
 
 /**
  * Sub quotes — trade-partner lump sums.
- * Upload the quote (PDF or photo) → AI reads it (sub, trade, divisions, date,
- * total, inclusions/exclusions) → review → Apply spreads the total across the
- * covered lines (subcontractor bucket, 'proposed' until confirmed). Manual
- * entry works without a document. Removing a quote un-prices the lines it
- * still covers (confirmed lines are never touched).
+ * Upload the quote (PDF or photo) → AI reads it (sub, trade, date, total,
+ * inclusions/exclusions) → review → Apply spreads the total across the lines
+ * of the trade it covers (subcontractor bucket, 'proposed' until confirmed).
+ * Manual entry works without a document. Removing a quote un-prices the
+ * lines it still covers (confirmed lines are never touched).
+ *
+ * A quote covers a TRADE (the trade-package layer: Plumbing, Framing…), not
+ * a CSI division — that is how a sub bids and how the scope is organised.
+ * If the scope has no lines for that trade yet, applying the quote creates
+ * one, priced by the quote (2026-09-10).
  */
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -18,6 +23,7 @@ import {
 } from "./actions";
 import type { QuoteExtraction } from "@/lib/scope/subquote";
 import { evalFormula } from "@/lib/formula";
+import { OTHER_TRADE, TRADE_PACKAGES, tradeFor, tradeOf } from "@/lib/scope/trades";
 
 export type SubQuote = {
   id: string;
@@ -31,23 +37,7 @@ export type SubQuote = {
   covered_count: number;
 };
 
-const DIVISIONS = [
-  ["02", "Demolition"],
-  ["03", "Concrete"],
-  ["04", "Masonry"],
-  ["05", "Metals"],
-  ["06", "Wood & Plastics"],
-  ["07", "Thermal & Moisture"],
-  ["08", "Openings"],
-  ["09", "Finishes"],
-  ["10", "Specialties"],
-  ["21", "Fire Suppression"],
-  ["22", "Plumbing"],
-  ["23", "HVAC"],
-  ["26", "Electrical"],
-  ["31", "Earthwork"],
-  ["32", "Exterior Impr."],
-] as const;
+const TRADES = TRADE_PACKAGES.filter((t) => t.name !== OTHER_TRADE);
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -73,22 +63,25 @@ export default function SubQuotes({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // status message
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Form fields (filled by AI or by hand)
   const [subName, setSubName] = useState("");
-  const [trade, setTrade] = useState("");
   const [quoteDate, setQuoteDate] = useState("");
   const [total, setTotal] = useState("");
-  const [divisions, setDivisions] = useState<string[]>([]);
+  const [trades, setTrades] = useState<string[]>([]);
+  const [coverConfirmed, setCoverConfirmed] = useState(false);
+  const [divisions, setDivisions] = useState<string[]>([]); // the AI's read, kept on the record
   const [extraction, setExtraction] = useState<QuoteExtraction | null>(null);
   const [filePath, setFilePath] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
 
   function resetForm() {
     setSubName("");
-    setTrade("");
     setQuoteDate("");
     setTotal("");
+    setTrades([]);
+    setCoverConfirmed(false);
     setDivisions([]);
     setExtraction(null);
     setFilePath(null);
@@ -122,10 +115,18 @@ export default function SubQuotes({
       const x = res.extraction;
       setExtraction(x);
       setSubName(x.sub_name);
-      setTrade(x.trade);
       setQuoteDate(x.quote_date ?? "");
       setTotal(x.total ? String(x.total) : "");
-      setDivisions(x.division_codes.filter((c) => DIVISIONS.some(([d]) => d === c)));
+      const codes = x.division_codes.filter((c) => /^\d{2}$/.test(c));
+      setDivisions(codes);
+      // The AI names the trade from the catalog; if it slipped, file it by
+      // the first division it read.
+      const guess = tradeOf({ trade_package: x.trade });
+      setTrades([
+        TRADES.some((t) => t.name === guess)
+          ? guess
+          : tradeFor({ division_code: codes[0] ?? null, section_code: null }),
+      ]);
       setBusy(null);
     } catch (e) {
       setBusy(null);
@@ -136,16 +137,18 @@ export default function SubQuotes({
   async function onApply() {
     const totalVal = evalFormula(total);
     setError(null);
+    setNotice(null);
     if (!subName.trim()) return setError("Who is the quote from?");
     if (totalVal == null || totalVal <= 0)
       return setError("Enter the quote total.");
-    if (!divisions.length)
-      return setError("Pick the division(s) this quote covers.");
+    if (!trades.length) return setError("Pick the trade this quote covers.");
     setBusy("Applying the quote to the covered lines…");
     const res = await applySubQuote(projectId, {
       sub_name: subName,
-      trade: trade.trim() || null,
+      trade: trades.join(", "),
+      trades,
       division_codes: divisions,
+      cover_confirmed: coverConfirmed,
       quote_date: quoteDate.trim() || null,
       total: totalVal,
       notes: null,
@@ -155,6 +158,10 @@ export default function SubQuotes({
     });
     setBusy(null);
     if (!res.ok) return setError(res.error ?? "Could not apply the quote.");
+    if (res.created)
+      setNotice(
+        `The scope had no ${trades.join(" / ")} lines yet, so one was added under ${trades[0]} and priced by this quote. Confirm it on the table like any other price.`,
+      );
     resetForm();
     setOpen(false);
     router.refresh();
@@ -177,7 +184,7 @@ export default function SubQuotes({
             Sub quotes
           </h2>
           <p className="text-xs text-muted">
-            A trade partner&apos;s lump sum, spread over the lines it covers.
+            A trade partner&apos;s lump sum, spread over the lines of the trade it covers.
             Upload the quote and the AI reads it.
           </p>
         </div>
@@ -198,6 +205,11 @@ export default function SubQuotes({
           {error}
         </p>
       ) : null}
+      {notice ? (
+        <p className="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">
+          {notice}
+        </p>
+      ) : null}
       {busy ? (
         <p className="mt-3 animate-pulse rounded-lg border border-border px-3 py-2 text-sm text-muted">
           {busy}
@@ -215,9 +227,11 @@ export default function SubQuotes({
                   {q.trade ? <span className="text-muted"> · {q.trade}</span> : null}
                 </p>
                 <p className="text-[11px] text-muted">
-                  {(q.division_codes ?? []).map((d) => `Div ${d}`).join(", ")}
-                  {q.quote_date ? ` · ${q.quote_date}` : ""} · covers{" "}
-                  {q.covered_count} lines
+                  {!q.trade && q.division_codes?.length
+                    ? `${q.division_codes.map((d) => `Div ${d}`).join(", ")} · `
+                    : ""}
+                  {q.quote_date ? `${q.quote_date} · ` : ""}
+                  covers {q.covered_count} {q.covered_count === 1 ? "line" : "lines"}
                   {q.file_name ? ` · ${q.file_name}` : ""}
                 </p>
               </div>
@@ -279,14 +293,6 @@ export default function SubQuotes({
             />
             <input
               type="text"
-              value={trade}
-              onChange={(e) => setTrade(e.target.value)}
-              placeholder="Trade"
-              spellCheck
-              className="w-32 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
-            />
-            <input
-              type="text"
               value={quoteDate}
               onChange={(e) => setQuoteDate(e.target.value)}
               placeholder="Quote date"
@@ -304,18 +310,18 @@ export default function SubQuotes({
 
           <div className="mt-2">
             <p className="mb-1 text-[11px] uppercase tracking-wider text-muted">
-              Covers divisions
+              Covers trade
             </p>
             <div className="flex flex-wrap gap-1">
-              {DIVISIONS.map(([code, label]) => {
-                const active = divisions.includes(code);
+              {TRADES.map((t) => {
+                const active = trades.includes(t.name);
                 return (
                   <button
-                    key={code}
+                    key={t.name}
                     type="button"
                     onClick={() =>
-                      setDivisions((d) =>
-                        active ? d.filter((x) => x !== code) : [...d, code],
+                      setTrades((d) =>
+                        active ? d.filter((x) => x !== t.name) : [...d, t.name],
                       )
                     }
                     className={`rounded-md border px-2 py-1 text-xs transition-colors ${
@@ -324,11 +330,20 @@ export default function SubQuotes({
                         : "border-border text-muted hover:border-brand"
                     }`}
                   >
-                    {code} {label}
+                    {t.name}
                   </button>
                 );
               })}
             </div>
+            <label className="mt-2 flex items-center gap-2 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={coverConfirmed}
+                onChange={(e) => setCoverConfirmed(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Replace confirmed prices in this trade too
+            </label>
           </div>
 
           <div className="mt-3 flex items-center justify-end gap-2">

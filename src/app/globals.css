@@ -375,10 +375,16 @@ body {
   100% { rotate: -1.2deg; }
 }
 .jiggle {
-  /* `rotate` is its own property, so the drag's `transform` never fights it. */
-  animation: jiggle 260ms ease-in-out infinite;
+  /* A short wiggle to say "you can move these", then a steady dashed ring.
+     It used to wiggle forever, and nine glass cards (backdrop blur) animating
+     every frame is what made reordering lag on a phone (2026-09-10).
+     `rotate` is its own property, so the drag's `transform` never fights it. */
+  animation: jiggle 260ms ease-in-out 3;
   transform-origin: 50% 50%;
+  border-radius: 0.75rem;
+  box-shadow: 0 0 0 2px var(--glass-strong-border);
 }
+.jiggle > * { will-change: transform; }
 @media (prefers-reduced-motion: reduce) {
-  .jiggle { animation: none; outline: 2px dashed var(--glass-strong-border); outline-offset: 2px; }
+  .jiggle { animation: none; }
 }

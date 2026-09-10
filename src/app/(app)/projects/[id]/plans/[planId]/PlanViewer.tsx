@@ -45,7 +45,6 @@ import {
   labelText,
   recomputeValue,
 } from "@/lib/takeoff/measurements";
-import StageJump from "@/components/StageNav";
 import SwipeRow from "@/components/SwipeRow";
 import { polishSheetNotes } from "./actions";
 import {
@@ -2304,10 +2303,27 @@ export default function PlanViewer({
   //
   // Screen pixels, so it stays the same physical distance at every zoom.
   // Touch only — a stylus and a mouse already point exactly where you can see.
-  const AIM_LIFT = 34;
+  //
+  // 2026-09-10 (Erfan, on his phone): the loupe is a LENS. The point that gets
+  // selected is the one under the CENTRE of the loupe window on screen, and
+  // the loupe shows exactly that spot magnified — not a spot a little above
+  // the finger that the loupe then displays somewhere else. So the lift is
+  // simply the loupe's own offset from the finger: above it normally, below
+  // it near the top edge of the screen where the window flips so it stays on
+  // screen. One function gives both the window position and the aim point,
+  // so the two can never disagree.
+  const LOUPE_SIZE = 120;
+  const LOUPE_ABOVE = 90; // finger → lens centre (window top sits 150 px above the finger)
+  const LOUPE_BELOW = 110; // finger → lens centre when flipped (window top 50 px below)
+  const LOUPE_FLIP_AT = 170; // flip when the finger is this close to the top of the drawing
+  function loupeLift(clientY: number): number {
+    const host = viewportRef.current?.parentElement;
+    const top = host ? host.getBoundingClientRect().top : 0;
+    return clientY - top < LOUPE_FLIP_AT ? -LOUPE_BELOW : LOUPE_ABOVE;
+  }
   const aimLiftRef = useRef(0);
   function liftOf(e: React.PointerEvent) {
-    return e.pointerType === "touch" ? AIM_LIFT : 0;
+    return e.pointerType === "touch" ? loupeLift(e.clientY) : 0;
   }
   /** The page point a pointer is aiming at, contact patch accounted for. */
   function evtToAim(e: React.PointerEvent): Pt {
@@ -2371,9 +2387,10 @@ export default function PlanViewer({
     const vx = clientX - hr.left;
     const vy = clientY - hr.top;
     el.hidden = false;
-    el.style.left = `${Math.max(4, vx - 60)}px`;
-    // Above the finger; flips below it near the top edge of the screen.
-    el.style.top = `${vy < 170 ? vy + 50 : vy - 60 - 90}px`;
+    el.style.left = `${Math.max(4, vx - LOUPE_SIZE / 2)}px`;
+    // The window is centred on the aim point — the same lift liftOf() uses —
+    // so what sits under the crosshair on screen IS the point that gets placed.
+    el.style.top = `${vy - loupeLift(clientY) - LOUPE_SIZE / 2}px`;
     if (loupeRafRef.current == null)
       loupeRafRef.current = requestAnimationFrame(() => {
         loupeRafRef.current = null;
@@ -5473,18 +5490,11 @@ export default function PlanViewer({
             the drawing rather than floating over it, so the pager and the
             notes never fight for the same corner and nothing hides the sheet. */}
         <div className="glass-strong pb-safe z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
-          {/* Phones hide the app rail on the viewer — Back returns to the
-              project's Plans page; "Go to" reaches every other stage (Scope,
-              Pricing…) without leaving the takeoff first. */}
-          <div className="flex items-center gap-1.5 md:hidden">
-            <Link
-              href={`/projects/${projectId}`}
-              className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:border-brand"
-            >
-              ‹ Back
-            </Link>
-            <StageJump projectId={projectId} />
-          </div>
+          {/* Phones keep the app's stage tab bar under this one (2026-09-10:
+              hiding it made the takeoff feel like leaving the app), so there
+              is no Back / Go to here any more — the left cell is empty below
+              md and the pager stays centred. */}
+          <div className="md:hidden" />
           <p className="hidden min-w-0 truncate text-[11px] text-muted md:block">
             {status === "ready" ? (
               <>

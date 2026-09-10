@@ -10,6 +10,7 @@ import { getAnthropicClient } from "@/lib/anthropic";
 import { assertAiBudget, recordAiUsage } from "@/lib/ai-meter";
 
 import { AI_MODELS } from "@/config/ai";
+import { tradePromptText } from "./trades";
 
 const QUOTE_MODEL = AI_MODELS.quoteRead;
 
@@ -99,7 +100,7 @@ export async function readSubQuote(opts: {
 
   const prompt = `This is a subcontractor's quote/bid document ("${fileName}") received by XtraUnit, a California general contractor. Read it carefully and extract:
 - sub_name: the subcontractor company's name.
-- trade: the trade in plain language (e.g. "Plumbing", "Roofing", "Electrical").
+- trade: which TRADE PACKAGE this quote covers — one of the names in the list at the end, spelled exactly (a plumbing quote → "Plumbing"; a stucco quote → "Exterior Cladding & Siding"; a cabinet shop → "Finish Carpentry & Cabinets"). If it genuinely spans two, pick the one most of the money is in.
 - division_codes: the 2-digit CSI MasterFormat division(s) this quote covers (e.g. ["22"] for plumbing, ["23"] HVAC, ["26"] electrical, ["07"] roofing/insulation, ["03"] concrete, ["06"] framing, ["09"] finishes, ["21"] fire suppression, ["31"] earthwork, ["32"] exterior improvements).
 - quote_date: the date printed on the quote, as written (null if none).
 - total: the bottom-line quote amount in dollars (the number the sub is asking for). If multiple options/alternates exist, use the base bid and mention alternates in summary.
@@ -107,7 +108,9 @@ export async function readSubQuote(opts: {
 - inclusions: what the quote explicitly includes.
 - exclusions: what it explicitly excludes (these matter — they become the GC's risk).
 - summary: 1–2 plain sentences: who quoted what for how much, plus anything unusual (alternates, allowances, expiration date, payment terms).
-Read every number carefully. If the document is not a quote at all, say so in summary and set total to 0.`;
+Read every number carefully. If the document is not a quote at all, say so in summary and set total to 0.
+
+${tradePromptText()}`;
 
   const stream = client.beta.messages.stream({
     model: QUOTE_MODEL,

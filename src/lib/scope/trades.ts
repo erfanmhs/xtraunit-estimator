@@ -197,6 +197,40 @@ export function groupByTrade<T extends Classifiable & { trade_package?: string |
   return [...groups.values()].sort((a, b) => a.sequence - b.sequence || a.trade.localeCompare(b.trade));
 }
 
+/**
+ * The CSI division a trade files under by default — for a line created
+ * without one (a sub quote arriving before the scope has any lines for that
+ * trade). Where a trade spans divisions, the one most of its work sits in.
+ */
+const HOME_DIVISION: Record<string, { code: string; name: string }> = {
+  "General Conditions": { code: "01", name: "General Requirements" },
+  "Site Work & Demolition": { code: "02", name: "Existing Conditions" },
+  Utilities: { code: "33", name: "Utilities" },
+  "Concrete & Foundations": { code: "03", name: "Concrete" },
+  Masonry: { code: "04", name: "Masonry" },
+  "Structural Steel & Metals": { code: "05", name: "Metals" },
+  Framing: { code: "06", name: "Wood, Plastics & Composites" },
+  "Roofing & Waterproofing": { code: "07", name: "Thermal & Moisture Protection" },
+  "Windows & Doors": { code: "08", name: "Openings" },
+  "Exterior Cladding & Siding": { code: "07", name: "Thermal & Moisture Protection" },
+  Plumbing: { code: "22", name: "Plumbing" },
+  HVAC: { code: "23", name: "HVAC" },
+  Electrical: { code: "26", name: "Electrical" },
+  "Fire Protection": { code: "21", name: "Fire Suppression" },
+  "Low Voltage & Security": { code: "27", name: "Communications" },
+  "Insulation & Air Sealing": { code: "07", name: "Thermal & Moisture Protection" },
+  "Drywall, Plaster & Ceilings": { code: "09", name: "Finishes" },
+  "Finish Carpentry & Cabinets": { code: "06", name: "Wood, Plastics & Composites" },
+  "Flooring & Tile": { code: "09", name: "Finishes" },
+  "Painting & Coatings": { code: "09", name: "Finishes" },
+  "Specialties & Equipment": { code: "10", name: "Specialties" },
+  "Elevators & Conveying": { code: "14", name: "Conveying Equipment" },
+  "Exterior Improvements & Landscape": { code: "32", name: "Exterior Improvements" },
+};
+export function homeDivision(trade: string): { code: string; name: string } | null {
+  return HOME_DIVISION[canonical(trade) ?? ""] ?? null;
+}
+
 /** The catalog as the AI sees it. */
 export function tradePromptText(): string {
   const lines = TRADE_PACKAGES.filter((t) => t.name !== OTHER_TRADE).map(

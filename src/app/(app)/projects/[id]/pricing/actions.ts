@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runPricingSuggestion, abortPricingRun } from "@/lib/scope/price";
 import { readSubQuote, type QuoteExtraction } from "@/lib/scope/subquote";
+import { homeDivision, tradeFor, tradeOf, tradeSequence } from "@/lib/scope/trades";
 import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
 import { enforceAiLimit } from "@/lib/ai-usage";
 import { log } from "@/lib/log";
@@ -353,7 +354,12 @@ export async function readQuoteDoc(
 export type ApplyQuoteInput = {
   sub_name: string;
   trade: string | null;
+  /** The trade package(s) the quote covers — the way lines are matched now. */
+  trades?: string[];
+  /** Kept for the quote's record and for older callers without `trades`. */
   division_codes: string[];
+  /** Also spread the quote over lines whose price is already confirmed. */
+  cover_confirmed?: boolean;
   quote_date: string | null;
   total: number;
   notes: string | null;
@@ -371,35 +377,148 @@ export type ApplyQuoteInput = {
 export async function applySubQuote(
   projectId: string,
   input: ApplyQuoteInput,
-): Promise<{ ok: boolean; covered?: number; error?: string }> {
+): Promise<{ ok: boolean; covered?: number; created?: boolean; error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
   if (!uuid.safeParse(projectId).success) return { ok: false, error: "That project id isn't valid." };
+  if (!input.trades?.length && !input.division_codes.length)
+    return { ok: false, error: "Pick the trade this quote covers." };
   const parsedQuote = subQuoteInput.safeParse(input);
   if (!parsedQuote.success) return { ok: false, error: firstIssue(parsedQuote.error) };
   input = { ...input, ...parsedQuote.data, extracted: input.extracted };
 
-  const { data: lines, error: linesErr } = await supabase
+  // Which lines does this quote cover? By TRADE PACKAGE (the way the scope
+  // is organised now) when the caller names trades; by CSI division for an
+  // older caller. Resilient to migration 0041 not being run.
+  type Row = {
+    id: string;
+    quantity: number | null;
+    price_mode: string | null;
+    cost_labor: number | null;
+    cost_material: number | null;
+    cost_sub: number | null;
+    cost_equipment: number | null;
+    cost_other: number | null;
+    cost_total: number | null;
+    price_status: string | null;
+    status: string | null;
+    division_code: string | null;
+    section_code: string | null;
+    trade_package?: string | null;
+  };
+  const baseCols =
+    "id,quantity,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_status,status,division_code,section_code";
+  const wide = await supabase
     .from("line_items")
-    .select(
-      "id,quantity,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_status,status,division_code",
-    )
-    .eq("project_id", projectId)
-    .in("division_code", input.division_codes);
-  if (linesErr) return { ok: false, error: "Could not load the scope lines." };
+    .select(`${baseCols},trade_package`)
+    .eq("project_id", projectId);
+  const all = wide.error
+    ? await supabase.from("line_items").select(baseCols).eq("project_id", projectId)
+    : wide;
+  if (all.error) return { ok: false, error: "Could not load the scope lines." };
+  const rows = (all.data ?? []) as unknown as Row[];
 
-  const targets = (lines ?? []).filter(
+  const trades = [...new Set((input.trades ?? []).map((t) => tradeOf({ trade_package: t })))];
+  const inScope = trades.length
+    ? rows.filter((li) => trades.includes(tradeOf(li)))
+    : rows.filter((li) => input.division_codes.includes(li.division_code ?? ""));
+  const label = trades.length
+    ? trades.join(" / ")
+    : `Division ${input.division_codes.join(", ")}`;
+
+  const excludedN = inScope.filter((li) => li.status === "excluded").length;
+  const confirmedRows = inScope.filter(
+    (li) => li.status !== "excluded" && li.price_status === "confirmed",
+  );
+  const openRows = inScope.filter(
     (li) => li.status !== "excluded" && li.price_status !== "confirmed",
   );
-  if (!targets.length)
-    return {
-      ok: false,
-      error:
-        "No coverable lines in those divisions (already confirmed or excluded).",
+  let targets: Row[] = input.cover_confirmed ? [...openRows, ...confirmedRows] : openRows;
+  let created = false;
+
+  if (!targets.length) {
+    if (inScope.length) {
+      // There ARE lines for this trade; every one is spoken for. Say exactly
+      // why, and what would unblock it — the old message ("no coverable
+      // lines in those divisions") left the user guessing (2026-09-10).
+      const why: string[] = [];
+      if (confirmedRows.length)
+        why.push(`${confirmedRows.length} already ${confirmedRows.length === 1 ? "has" : "have"} a confirmed price`);
+      if (excludedN) why.push(`${excludedN} ${excludedN === 1 ? "is" : "are"} excluded`);
+      return {
+        ok: false,
+        error: `${label} has ${inScope.length} line${inScope.length === 1 ? "" : "s"} in this scope, but ${why.join(" and ")}. Tick "Replace confirmed prices" to spread the quote over the confirmed lines, restore an excluded line, or clear a price first.`,
+      };
+    }
+    // No lines at all for this trade yet (the scope was generated for other
+    // trades, or not at all). A real quote in hand is worth a line of its
+    // own: create one under the trade, priced by this quote, and carry on.
+    const trade =
+      trades[0] ??
+      tradeFor({ division_code: input.division_codes[0] ?? null, section_code: null });
+    const home = homeDivision(trade) ?? {
+      code: input.division_codes[0] ?? null,
+      name: null,
     };
+    const sub = input.sub_name.trim();
+    const x = input.extracted;
+    const newLine: Record<string, unknown> = {
+      project_id: projectId,
+      owner_id: user.id,
+      division_code: home.code,
+      division_name: home.name,
+      trade_package: trade,
+      trade_sequence: tradeSequence(trade),
+      deliverable: `${trade} — per ${sub} quote`,
+      description: `${trade} — subcontractor quote (${sub})`,
+      includes: x?.inclusions?.length ? x.inclusions.join("; ") : null,
+      excludes: x?.exclusions?.length ? x.exclusions.join("; ") : null,
+      quantity: 1,
+      unit: "ls",
+      source_kind: "note",
+      evidence: { text: `Created from ${sub}'s quote`, based_on_layers: [], formula: null, assumptions: [] },
+      status: "proposed",
+      confidence: "high",
+      ai_generated: false,
+      user_edited: true,
+      sort_order: 950,
+      price_mode: "lump",
+    };
+    let ins = await supabase.from("line_items").insert(newLine).select("id").single();
+    if (ins.error && /trade_package|trade_sequence|deliverable|includes|excludes/i.test(ins.error.message)) {
+      const stripped = { ...newLine };
+      for (const k of ["trade_package", "trade_sequence", "deliverable", "includes", "excludes"]) delete stripped[k];
+      ins = await supabase.from("line_items").insert(stripped).select("id").single();
+    }
+    if (ins.error || !ins.data)
+      return { ok: false, error: `${label} has no lines in this scope yet, and the line for this quote could not be created.` };
+    targets = [
+      {
+        id: ins.data.id,
+        quantity: 1,
+        price_mode: "lump",
+        cost_labor: null,
+        cost_material: null,
+        cost_sub: null,
+        cost_equipment: null,
+        cost_other: null,
+        cost_total: null,
+        price_status: null,
+        status: "proposed",
+        division_code: home.code,
+        section_code: null,
+      },
+    ];
+    created = true;
+  }
+
+  // The quote's record keeps the divisions it actually landed on.
+  const coveredDivisions = [
+    ...new Set(targets.map((li) => li.division_code).filter((c): c is string => !!c)),
+  ];
 
   const { data: quote, error: qErr } = await supabase
     .from("sub_quotes")
@@ -407,8 +526,8 @@ export async function applySubQuote(
       project_id: projectId,
       owner_id: user.id,
       sub_name: input.sub_name.trim(),
-      trade: input.trade,
-      division_codes: input.division_codes,
+      trade: trades.length ? trades.join(", ") : input.trade,
+      division_codes: coveredDivisions.length ? coveredDivisions : input.division_codes,
       quote_date: input.quote_date,
       total: input.total,
       notes: input.notes,
@@ -477,7 +596,7 @@ export async function applySubQuote(
     );
   }
 
-  return { ok: true, covered: targets.length };
+  return { ok: true, covered: targets.length, created };
 }
 
 /** Remove a quote: un-price the lines it still covers, delete row + file. */
