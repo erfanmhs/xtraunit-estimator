@@ -33,14 +33,23 @@ export async function loadProposal(
     .eq("id", projectId)
     .maybeSingle();
 
-  const { data: items } = await sb
+  // Resilient to migration 0041 (trade packages) not being run yet.
+  const baseCols =
+    "id,division_code,division_name,section_code,description,quantity,unit,status,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_status,sort_order";
+  const wide = await sb
     .from("line_items")
-    .select(
-      "id,division_code,division_name,description,quantity,unit,status,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_status,sort_order",
-    )
+    .select(`${baseCols},trade_package,deliverable,includes,excludes`)
     .eq("project_id", projectId)
     .order("division_code", { ascending: true })
     .order("sort_order", { ascending: true });
+  const { data: items } = wide.error
+    ? await sb
+        .from("line_items")
+        .select(baseCols)
+        .eq("project_id", projectId)
+        .order("division_code", { ascending: true })
+        .order("sort_order", { ascending: true })
+    : wide;
   const lines = (items ?? []) as unknown as LineInput[];
 
   const { data: est } = await sb

@@ -249,3 +249,78 @@ describe("excluded lines reach the proposal", () => {
     );
   });
 });
+
+describe("scope by trade (SCOPE-WBS-DESIGN)", () => {
+  function doc(lines: LineInput[], findings: { kind: string; text: string }[] = []) {
+    return buildProposalDoc({
+      company: {
+        company_name: "XtraUnit",
+        company_address: null,
+        company_phone: null,
+        company_email: null,
+        company_license: null,
+        signer_name: null,
+        signer_title: null,
+      },
+      profile: DEFAULT_PROFILE,
+      project: { name: "Test", client_name: null, address: null, building_sf: null, project_type: null },
+      lines,
+      markups: { contingency_pct: 0, insurance_pct: 0, overhead_pct: 0 },
+      findings,
+      fields: {} as never,
+    });
+  }
+
+  it("groups lines by trade package in construction order, not by CSI division", () => {
+    const d = doc([
+      line({ id: "a", division_code: "09", division_name: "Finishes", section_code: "09 90 00", description: "Painting & Coating", trade_package: "Painting & Coatings" }),
+      line({ id: "b", division_code: "03", division_name: "Concrete", section_code: "03 30 00", description: "Cast-in-Place Concrete: Foundations", trade_package: "Concrete & Foundations" }),
+      line({ id: "c", division_code: "09", division_name: "Finishes", section_code: "09 24 00", description: "Cement Plastering (Stucco)", trade_package: null }),
+    ]);
+    expect(d.scope.divisions.map((x) => x.name)).toEqual([
+      "Concrete & Foundations",
+      "Exterior Cladding & Siding", // stucco files with the cladding sub, not with Finishes
+      "Painting & Coatings",
+    ]);
+    expect(d.scope.divisions.every((x) => x.code === null)).toBe(true);
+  });
+
+  it("shows the deliverable as the headline and the includes underneath, falling back to the CSI label", () => {
+    const d = doc([
+      line({
+        id: "a",
+        description: "Plumbing Fixtures",
+        section_code: "22 40 00",
+        deliverable: "Fixture set — 2 baths, kitchen, laundry",
+        includes: "Set and connect owner-supplied fixtures.",
+        trade_package: "Plumbing",
+      }),
+      line({ id: "b", division_code: "22", description: "Water Heaters", section_code: "22 33 00" }),
+    ]);
+    const rows = d.scope.divisions.find((x) => x.name === "Plumbing")!.rows;
+    expect(rows[0]).toMatchObject({
+      description: "Fixture set — 2 baths, kitchen, laundry",
+      detail: "Set and connect owner-supplied fixtures.",
+      code: "22 40 00",
+    });
+    expect(rows[1]).toMatchObject({ description: "Water Heaters", detail: null });
+  });
+
+  it("rolls each line's own excludes into the Excluded list, labelled by trade", () => {
+    const d = doc([
+      line({ id: "a", division_code: "22", description: "Plumbing Fixtures", excludes: "Fixture supply by owner." }),
+      line({ id: "b", division_code: "22", description: "Gas Piping", excludes: "   " }),
+    ]);
+    expect(d.scope.excluded).toEqual(["Plumbing — Fixture supply by owner."]);
+  });
+
+  it("sums a trade's priced lines into its total", () => {
+    const d = doc([
+      line({ id: "a", division_code: "22", description: "A", cost_total: 100, price_mode: "total" }),
+      line({ id: "b", division_code: "22", description: "B", cost_total: 250, price_mode: "total" }),
+      line({ id: "c", division_code: "26", description: "C", cost_total: 1, price_mode: "total" }),
+    ]);
+    expect(d.scope.divisions.find((x) => x.name === "Plumbing")!.total).toBe(350);
+    expect(d.scope.divisions.find((x) => x.name === "Electrical")!.total).toBe(1);
+  });
+});
