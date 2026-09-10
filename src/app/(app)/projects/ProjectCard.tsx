@@ -14,6 +14,7 @@
 import { useState } from "react";
 import SwipeRow from "@/components/SwipeRow";
 import EditProjectDialog from "./[id]/EditProjectDialog";
+import { useReorder } from "./ProjectGrid";
 import { duplicateProject, setProjectArchived, deleteProject } from "./actions";
 import type { Project } from "@/types";
 
@@ -29,6 +30,7 @@ export default function ProjectCard({
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const reorder = useReorder();
 
   function withId() {
     const fd = new FormData();
@@ -69,6 +71,8 @@ export default function ProjectCard({
   // a list you scroll past every day.
   const sheetActions = [
     ...actions,
+    // iOS puts "Edit Home Screen" in the hold menu; same idea here.
+    { label: "Reorder projects", onClick: reorder.start },
     { label: "Duplicate", onClick: () => void run(duplicateProject, withId()) },
     {
       label: "Delete project…",
@@ -83,6 +87,10 @@ export default function ProjectCard({
       },
     },
   ];
+
+  // While the list is being rearranged the card is a drag handle, not a row
+  // with actions — a swipe would fight the drag.
+  if (reorder.editing) return <>{children}</>;
 
   return (
     <>

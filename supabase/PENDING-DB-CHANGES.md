@@ -15,7 +15,14 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-_Nothing pending. Everything through 0039 has been run._
+- [ ] **0040_projects_housekeeping_updated_at.sql** — stops a reorder or an
+      archive from bumping every project's "Updated" date. Dragging the list
+      into a new order rewrites `sort_order` on every project, and the trigger
+      from 0001 treated that as a change worth dating. Now only real edits
+      move `updated_at`. No columns added, nothing deleted, no policy changes.
+
+      Until you run it the app still works: reordering saves fine, the dates
+      are just noisier than they should be after a drag.
 
 ---
 

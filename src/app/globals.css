@@ -367,3 +367,18 @@ body {
     }
   }
 }
+
+/* ── Reorder mode on the project list (iOS home-screen jiggle) ──────────── */
+@keyframes jiggle {
+  0% { rotate: -1.2deg; }
+  50% { rotate: 1.2deg; }
+  100% { rotate: -1.2deg; }
+}
+.jiggle {
+  /* `rotate` is its own property, so the drag's `transform` never fights it. */
+  animation: jiggle 260ms ease-in-out infinite;
+  transform-origin: 50% 50%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .jiggle { animation: none; outline: 2px dashed var(--glass-strong-border); outline-offset: 2px; }
+}

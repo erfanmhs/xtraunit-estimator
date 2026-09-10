@@ -8,7 +8,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { projectInput } from "@/lib/validation";
+import { projectInput, projectOrder } from "@/lib/validation";
 
 function emptyToNull(value: FormDataEntryValue | null): string | null {
   const s = String(value ?? "").trim();
@@ -186,6 +186,33 @@ export async function setProjectArchived(formData: FormData) {
 
   revalidatePath("/projects");
   redirect("/projects");
+}
+
+/**
+ * Save the order the user dragged the list into (feedback A2/A3).
+ *
+ * `ids` is the whole visible list, top to bottom; each project gets its
+ * position as `sort_order`. Row access rules mean a project that is not the
+ * user's simply does not update, so a stray id is harmless. Nothing is
+ * returned and nothing redirects — the list on screen is already in this
+ * order, and the page revalidates so the next visit agrees with it.
+ */
+export async function reorderProjects(ids: string[]): Promise<void> {
+  const parsed = projectOrder.safeParse(ids);
+  if (!parsed.success) return;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  await Promise.all(
+    parsed.data.map((id, i) =>
+      supabase.from("projects").update({ sort_order: i + 1 }).eq("id", id),
+    ),
+  );
+  revalidatePath("/projects");
 }
 
 // ── Stage progress (powers the project tabs in the left rail) ───────────────

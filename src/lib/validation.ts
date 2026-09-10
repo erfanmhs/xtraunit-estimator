@@ -42,6 +42,9 @@ export const projectInput = z.object({
   notes: longText.nullable(),
 });
 
+// reorderProjects — the user's whole list, top to bottom.
+export const projectOrder = z.array(z.string().uuid()).min(1).max(500);
+
 // updateLineItem — a partial patch; every field optional, but bounded when present.
 export const lineItemPatch = z.object({
   description: z
