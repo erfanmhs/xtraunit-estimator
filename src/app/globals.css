@@ -330,8 +330,53 @@ body {
 .print-only {
   display: none;
 }
+/* The page canvas itself. The screen theme paints `body` from an UNLAYERED
+   rule (line ~148), and an unlayered rule beats anything inside @layer base
+   no matter the !important — so the dark ground was still printing as a
+   black frame around every page. This one rule sits at the same level and
+   later in the file, which is what it takes to win. */
+@media print {
+  html,
+  html[data-theme="dark"],
+  body {
+    /* `color-scheme` is what the PDF engine paints the page canvas from,
+       and the dark theme sets it via `:root[data-theme="dark"]` — an
+       attribute selector this must out-rank, or the frame around every
+       page prints black. */
+    color-scheme: light !important;
+    background: #fff !important;
+  }
+}
 @layer base {
   @media print {
+    /* The app shell locks the page to the screen height and scrolls the
+       content inside a box (html/body h-full, the (app) layout overflow-y-auto).
+       Print only sees ONE screen of that box, so the proposal came out as
+       "Page 1 of 1", cut off mid-scope (Erfan, 2026-09-10). On paper every
+       container must be free to grow, and nothing may clip or scroll. */
+    html,
+    body,
+    body * {
+      height: auto !important;
+      max-height: none !important;
+      min-height: 0 !important;
+      overflow: visible !important;
+    }
+    /* Paper is white. Only the app SHELL loses its paint — the page ground,
+       the colour wash and the glass panels — so the sheet's own colours (the
+       red section badges, table shading) still print. A blanket
+       `background: none` on everything took those with it. */
+    html,
+    body,
+    .app-ambient,
+    .bg-background,
+    .glass,
+    .glass-strong,
+    .panel {
+      background: #fff !important;
+      background-image: none !important;
+      backdrop-filter: none !important;
+    }
     body * {
       visibility: hidden;
     }
@@ -339,18 +384,44 @@ body {
     .proposal-sheet * {
       visibility: visible;
     }
+    /* Flow the sheet as a normal block at the top of the paper. It used to
+       be `position: absolute; inset: 0`, which pins it to one screen's box —
+       the other half of the one-page bug. */
     .proposal-sheet {
-      position: absolute;
-      inset: 0;
+      position: static;
       margin: 0;
+      width: auto;
       max-width: none;
       border-radius: 0;
-      box-shadow: none;
-      padding: 0.25in;
+      box-shadow: none !important; /* beats the shadow-2xl utility */
+      padding: 0;
+      background: #fff !important;
     }
-    /* Anchors and sticky bars have no place on paper; keep sections together. */
-    .proposal-sheet section {
+    /* Page breaks. The big numbered sections run longer than a page on a
+       real proposal, so they must be allowed to break — "keep together" on
+       those left page 1 almost empty and pushed the whole scope to page 2.
+       So must the list of trades inside the scope (160 lines). What stays
+       together is the small stuff: one trade's heading with its first lines,
+       a table, a card, a paragraph, a bullet. Headings never end a page. */
+    .proposal-sheet section,
+    .proposal-sheet section > div,
+    .proposal-sheet section > div > div {
+      break-inside: auto;
+    }
+    .proposal-sheet section > div > div > div,
+    .proposal-sheet table,
+    .proposal-sheet article,
+    .proposal-sheet li,
+    .proposal-sheet p {
       break-inside: avoid-page;
+    }
+    .proposal-sheet h2,
+    .proposal-sheet h3,
+    .proposal-sheet h4 {
+      break-after: avoid-page;
+    }
+    .proposal-sheet .sticky {
+      position: static !important;
     }
     .proposal-sheet a {
       color: inherit;
