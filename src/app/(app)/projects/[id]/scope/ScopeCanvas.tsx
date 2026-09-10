@@ -234,9 +234,10 @@ export default function ScopeCanvas({
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 aria-expanded={opened}
               >
-                <Caret open={opened} className="text-muted" />
-                <h2 className="truncate font-heading text-base text-foreground">{g.trade}</h2>
-                <span className="ml-auto shrink-0 text-[11px] text-muted tabular-nums">
+                <Caret open={opened} className="shrink-0 text-muted" />
+                {/* Wraps rather than truncates: on a phone "Concrete & Founda…" is not a heading. */}
+                <h2 className="min-w-0 font-heading text-base leading-tight text-foreground">{g.trade}</h2>
+                <span className="ml-auto shrink-0 text-right text-[11px] text-muted tabular-nums">
                   {active.length} {active.length === 1 ? "item" : "items"}
                   {confirmed ? ` · ${confirmed} confirmed` : ""}
                   {excludedCount ? ` · ${excludedCount} excluded` : ""}
