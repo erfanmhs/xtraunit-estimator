@@ -41,6 +41,14 @@ import {
   placementBlocked as gatePlacementBlocked,
 } from "@/lib/takeoff/touchGate";
 import {
+  createFingerCensus,
+  blocked as censusBlocked,
+  mayPlace as censusMayPlace,
+  tapBegan as censusTapBegan,
+  touchesChanged as censusTouchesChanged,
+  touchesEnded as censusTouchesEnded,
+} from "@/lib/takeoff/fingerCensus";
+import {
   buildLayerGroups,
   labelText,
   recomputeValue,
@@ -696,6 +704,38 @@ export default function PlanViewer({
     });
     idleUntilRef.current = Date.now() + 400;
   }
+  // The census that cannot miss a finger (src/lib/takeoff/fingerCensus.ts):
+  // native touch events at the DOCUMENT, carrying the OS's own count of
+  // fingers on the page. The pointer-event gate above stays as a second
+  // opinion; this one is the authority. The moment the count reaches two,
+  // whatever one finger had started is abandoned and the loupe + rubber band
+  // go — so a pinch can neither place a point nor leave a phantom one drawn.
+  const censusRef = useRef(createFingerCensus());
+  const cancelTouchEditsRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    cancelTouchEditsRef.current = cancelTouchEdits;
+  });
+  useEffect(() => {
+    const c = censusRef.current;
+    const onStart = (e: TouchEvent) => {
+      if (censusTouchesChanged(c, e.touches.length)) {
+        pinchedRef.current = true;
+        cancelTouchEditsRef.current();
+      }
+    };
+    const onEnd = (e: TouchEvent) => censusTouchesEnded(c, e.touches.length, Date.now());
+    const opts = { capture: true, passive: true } as const;
+    document.addEventListener("touchstart", onStart, opts);
+    document.addEventListener("touchmove", onStart, opts);
+    document.addEventListener("touchend", onEnd, opts);
+    document.addEventListener("touchcancel", onEnd, opts);
+    return () => {
+      document.removeEventListener("touchstart", onStart, opts);
+      document.removeEventListener("touchmove", onStart, opts);
+      document.removeEventListener("touchend", onEnd, opts);
+      document.removeEventListener("touchcancel", onEnd, opts);
+    };
+  }, []);
   // Dictating sheet notes (Web Speech API → the AI tidies it into notes).
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "thinking" | "unsupported">("idle");
   const [voiceInterim, setVoiceInterim] = useState("");
@@ -2587,7 +2627,10 @@ export default function PlanViewer({
     // its way down, and the pinch would edit the drawing. A touch that lands
     // while the latch is set is part of the gesture that is still finishing,
     // so it starts nothing either.
-    if (touch && gestureBlocked()) return;
+    if (touch && (gestureBlocked() || censusBlocked(censusRef.current, Date.now()))) return;
+    // From here on this finger is a candidate tap; the census remembers
+    // whether it was alone when it landed.
+    if (touch) censusTapBegan(censusRef.current, Date.now());
     if (touch && tool !== "select" && tool !== "crop" && tool !== "browse") {
       tapRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
       aimSamplesRef.current = [];
@@ -2799,6 +2842,10 @@ export default function PlanViewer({
         // A long-press opened the menu, or this touch was part of a pinch, or
         // the zoom it committed has not landed yet: no point.
         if (fired || pinchedRef.current || placementBlocked()) return;
+        // The authority: was this finger alone from touch to lift, with no
+        // pinch cool-down running? If not, nothing is placed — whatever the
+        // pointer-event bookkeeping above thought it saw.
+        if (!censusMayPlace(censusRef.current, Date.now())) return;
         placePoint(pt);
         return;
       }
@@ -2810,6 +2857,7 @@ export default function PlanViewer({
         cancelLongPress();
         hideLoupe();
         if (fired || pinchedRef.current) return;
+        if (!censusMayPlace(censusRef.current, Date.now())) return;
         if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) return;
         const id = pickMeasurementAt(evtToPoint(e));
         setSelectedId(id);
@@ -3743,16 +3791,20 @@ export default function PlanViewer({
               const m = measurements.find((x) => x.id === menu.id);
               const i = menu.index ?? 0;
               if (!m) return [];
-              const items: { label: string; danger?: boolean; onClick: () => void }[] = [
-                {
-                  label: "Nudge",
-                  onClick: () => {
-                    setTool("select");
-                    setSelectedId(m.id);
-                    setActiveVertex({ id: m.id, index: i });
-                  },
-                },
-              ];
+              // No Nudge on a phone — the pad is gone there; a handle is
+              // adjusted by dragging it with the lens.
+              const items: { label: string; danger?: boolean; onClick: () => void }[] = coarse
+                ? []
+                : [
+                    {
+                      label: "Nudge",
+                      onClick: () => {
+                        setTool("select");
+                        setSelectedId(m.id);
+                        setActiveVertex({ id: m.id, index: i });
+                      },
+                    },
+                  ];
               if (m.type !== "count" && m.type !== "leader" && m.type !== "line")
                 items.push({ label: "Split segment here", onClick: () => splitAfterVertex(m.id, i) });
               if (m.geometry.length > minPointsOf(m) || m.type === "count")
@@ -5219,8 +5271,11 @@ export default function PlanViewer({
 
         {/* Nudge pad: fine-tune the tapped vertex one step at a time. A fixed
             3×3 cross of 44 px arrows (explicit grid cells — nothing floats or
-            overlaps) plus step, Delete point and Done, tucked bottom-right. */}
-        {activeV && selected && selected.type !== "leader" && draft.length === 0 && !menu ? (
+            overlaps) plus step, Delete point and Done, tucked bottom-right.
+            Mouse only (2026-09-10, Erfan): on a phone it covered a quarter of
+            the drawing, and the corner handles + the lens are the way to
+            place and adjust. Delete point lives in the hold menu there. */}
+        {!coarse && activeV && selected && selected.type !== "leader" && draft.length === 0 && !menu ? (
           <div
             className="glass-strong absolute bottom-14 right-2 z-20 flex items-center gap-2 rounded-2xl p-1.5 text-xs"
             role="group"
@@ -5815,7 +5870,7 @@ export default function PlanViewer({
               {selected.type === "leader"
                 ? "Tip: drag the white handles to move the arrow tip or the text box."
                 : coarse
-                  ? "Tip: drag a white handle to reshape · tap a handle for the nudge pad · hold a handle for more."
+                  ? "Tip: drag a white handle to reshape (the lens shows where it lands) · hold a handle to split or delete."
                   : "Tip: drag the white handles on the sheet to reshape · click a handle for the nudge pad."}
             </p>
             <div className="flex gap-2 pt-1">
