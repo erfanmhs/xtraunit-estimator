@@ -11,13 +11,21 @@
  * pass, so nothing is ever dropped; categorizing just makes the reading
  * cheaper and more focused.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PDFDocument } from "pdf-lib";
 import { createClient } from "@/lib/supabase/client";
 import { getPdfjs } from "@/lib/pdfClient";
+import {
+  OPEN_TIMEOUT_MS,
+  PAGE_RENDER_TIMEOUT_MS,
+  explainOpenFailure,
+  sizeVerdict,
+  withTimeout,
+} from "@/lib/plans/uploadGuards";
 
-type Thumb = { page: number; url: string };
+/** `url` is null when the preview failed — the page itself is still intact and can be kept. */
+type Thumb = { page: number; url: string | null };
 
 export default function PlanTriage({
   projectId,
@@ -32,48 +40,111 @@ export default function PlanTriage({
 }) {
   const router = useRouter();
   const [supabase] = useState(() => createClient());
-  const ranRef = useRef(false);
 
   const [thumbs, setThumbs] = useState<Thumb[]>([]);
   const [total, setTotal] = useState(0);
   const [kept, setKept] = useState<Set<number>>(new Set());
-  const [phase, setPhase] = useState<"rendering" | "ready" | "saving">("rendering");
-  const [error, setError] = useState<string | null>(null);
+  // Everything here runs in the browser, so the browser's memory is the real
+  // limit — and a phone has a fraction of a laptop's. Decide up front whether
+  // this file should be opened at all, instead of letting the tab die halfway
+  // through (the 47-page set). Decided once, when the file arrives.
+  const [verdict] = useState(() => {
+    const phone =
+      typeof window !== "undefined" &&
+      (window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768);
+    return sizeVerdict(file.size, phone);
+  });
+  const [phase, setPhase] = useState<"rendering" | "ready" | "saving">(
+    verdict.kind === "refuse" ? "ready" : "rendering",
+  );
+  const [error, setError] = useState<string | null>(
+    verdict.kind === "refuse" ? verdict.message : null,
+  );
+  const notice = verdict.kind === "warn" ? verdict.message : null;
+  const [failedPages, setFailedPages] = useState<number[]>([]);
   const [progress, setProgress] = useState<string | null>(null);
 
   useEffect(() => {
-    if (ranRef.current) return;
-    ranRef.current = true;
+    if (verdict.kind === "refuse") return;
+
+    // This effect can run twice for one file (React's development double
+    // mount). Each run owns its own document and stands down the moment it
+    // is cleaned up, so the survivor is the only one that touches state.
+    let cancelled = false;
+    let doc: { destroy: () => Promise<void> } | null = null;
 
     (async () => {
       try {
-        const pdfjs = await getPdfjs();
-        const pdf = await pdfjs.getDocument({
+        // The reader itself (pdf.js + its worker) is loaded on demand. If that
+        // load stalls — a flaky connection, a worker that never starts — the
+        // clock has to cover it too, or the screen sits on "0/?" forever.
+        const pdfjs = await withTimeout(getPdfjs(), OPEN_TIMEOUT_MS, "Loading the PDF reader");
+        const task = pdfjs.getDocument({
           data: await file.arrayBuffer(),
           standardFontDataUrl: "/standard_fonts/",
-        }).promise;
+        });
+        const pdf = await withTimeout(task.promise, OPEN_TIMEOUT_MS, "Opening the PDF", () => {
+          void task.destroy();
+        });
+        doc = pdf;
+        if (cancelled) return;
         setTotal(pdf.numPages);
 
+        const failed: number[] = [];
         for (let n = 1; n <= pdf.numPages; n++) {
-          const page = await pdf.getPage(n);
-          const base = page.getViewport({ scale: 1 });
-          const scale = 180 / base.width;
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement("canvas");
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext("2d")!;
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          const url = canvas.toDataURL("image/jpeg", 0.7);
+          if (cancelled) return;
+          // One bad page (a corrupt scan, a 200 MB embedded image, a render
+          // that never returns) must not take the other 46 with it. It gets a
+          // placeholder and can still be kept; the page data itself is copied
+          // untouched at save time.
+          let url: string | null = null;
+          let page: Awaited<ReturnType<typeof pdf.getPage>> | null = null;
+          try {
+            page = await withTimeout(pdf.getPage(n), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`);
+            const base = page.getViewport({ scale: 1 });
+            const scale = 180 / base.width;
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext("2d")!;
+            const render = page.render({ canvasContext: ctx, viewport });
+            await withTimeout(render.promise, PAGE_RENDER_TIMEOUT_MS, `Page ${n}`, () => {
+              render.cancel();
+            });
+            url = canvas.toDataURL("image/jpeg", 0.7);
+            canvas.width = 0; // release the bitmap now, not at the next GC
+            canvas.height = 0;
+          } catch {
+            failed.push(n);
+          } finally {
+            // Drop this page's decoded images before moving on — pdf.js keeps
+            // them cached per page, and on a scanned set that cache IS the
+            // memory problem.
+            page?.cleanup();
+          }
+          if (cancelled) return;
           setThumbs((prev) => [...prev, { page: n, url }]);
         }
+        setFailedPages(failed);
         setPhase("ready");
       } catch (e) {
-        setError("Couldn't read this PDF: " + (e instanceof Error ? e.message : String(e)));
+        if (cancelled) return;
+        setError(explainOpenFailure(e));
         setPhase("ready");
+      } finally {
+        // The worker holds the whole parsed document; free it before the
+        // save step reads the file again, so the two never overlap in memory.
+        void doc?.destroy();
+        doc = null;
       }
     })();
-  }, [file]);
+
+    return () => {
+      cancelled = true;
+      void doc?.destroy();
+    };
+  }, [file, verdict]);
 
   function toggle(page: number) {
     setKept((prev) => {
@@ -94,7 +165,16 @@ export default function PlanTriage({
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Your session expired. Please sign in again.");
 
-      const src = await PDFDocument.load(await file.arrayBuffer());
+      let src: PDFDocument;
+      try {
+        src = await withTimeout(
+          PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true }),
+          OPEN_TIMEOUT_MS,
+          "Reading the PDF",
+        );
+      } catch (e) {
+        throw new Error(explainOpenFailure(e));
+      }
       const out = await PDFDocument.create();
       const keptPages = [...kept].sort((a, b) => a - b); // 1-based page numbers
       const copied = await out.copyPages(
@@ -205,6 +285,22 @@ export default function PlanTriage({
           {error}
         </p>
       ) : null}
+      {notice ? (
+        <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">
+          {notice}
+        </p>
+      ) : null}
+      {failedPages.length > 0 ? (
+        <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">
+          {failedPages.length === 1
+            ? `Page ${failedPages[0]} couldn't be previewed`
+            : `${failedPages.length} pages couldn't be previewed (${failedPages.slice(0, 8).join(", ")}${
+                failedPages.length > 8 ? "…" : ""
+              })`}
+          . You can still keep {failedPages.length === 1 ? "it" : "them"} — the page itself is
+          intact and will be saved as-is.
+        </p>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {thumbs.map((t) => {
@@ -221,8 +317,14 @@ export default function PlanTriage({
                     : "border-border opacity-60 hover:opacity-100"
                 }`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={t.url} alt={`Page ${t.page}`} className="w-full" />
+                {t.url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={t.url} alt={`Page ${t.page}`} className="w-full" />
+                ) : (
+                  <span className="flex aspect-[4/3] w-full items-center justify-center bg-muted/20 px-2 text-center text-[11px] text-muted">
+                    No preview
+                  </span>
+                )}
                 <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
                   {t.page}
                 </span>

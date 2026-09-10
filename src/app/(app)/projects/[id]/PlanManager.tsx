@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import PlanTriage from "./PlanTriage";
 import type { PlanFile } from "@/types";
 import Caret from "@/components/Caret";
+import { sizeVerdict } from "@/lib/plans/uploadGuards";
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return "";
@@ -45,6 +46,14 @@ export default function PlanManager({
     if (!file) return;
     if (file.type && file.type !== "application/pdf") {
       setError("Only PDF plan sets are supported.");
+      return;
+    }
+    // Too big to survive the browser at all? Say so here, before a screen
+    // opens that would only die halfway through.
+    const phone = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
+    const verdict = sizeVerdict(file.size, phone);
+    if (verdict.kind === "refuse") {
+      setError(verdict.message);
       return;
     }
     setTriageFile(file);
