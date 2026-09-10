@@ -171,8 +171,9 @@ export default function ProposalDocument({
         {/* 02 Scope of work */}
         <Section id="scope" n="02" title="Scope of work">
           <p className="text-sm text-neutral-600">
-            Itemized by CSI division. Everything listed is included in the price; anything not listed, or
-            listed under &ldquo;Excluded / by others,&rdquo; is outside this proposal.
+            Organized by trade, the way the work is bought and built. Everything listed is included in the
+            price; anything not listed, or listed under &ldquo;Excluded / by others,&rdquo; is outside this
+            proposal.
           </p>
           <div className="mt-4 space-y-4">
             {doc.scope.divisions.map((d) => (
@@ -183,10 +184,15 @@ export default function ProposalDocument({
                     {d.name}
                   </span>
                 </h3>
-                <ul className="mt-1.5 space-y-1 text-sm">
+                <ul className="mt-1.5 space-y-1.5 text-sm">
                   {d.rows.map((r) => (
                     <li key={r.id} className="flex items-baseline justify-between gap-3">
-                      <span>{r.description}</span>
+                      <span className="min-w-0">
+                        <span>{r.description}</span>
+                        {r.detail ? (
+                          <span className="block text-xs text-neutral-500">{r.detail}</span>
+                        ) : null}
+                      </span>
                       {r.quantity != null ? (
                         <span className="shrink-0 text-xs text-neutral-500 tabular-nums">
                           {r.quantity.toLocaleString()} {r.unit ?? ""}
@@ -245,8 +251,8 @@ export default function ProposalDocument({
             </div>
           </div>
 
-          {/* By division */}
-          <SubSection title="By division">
+          {/* By trade */}
+          <SubSection title="By trade">
             <table className="w-full text-sm">
               <tbody>
                 {doc.scope.divisions

@@ -56,6 +56,11 @@ export const lineItemPatch = z.object({
   quantity: z.number().finite().nullable().optional(),
   unit: z.string().trim().max(50).nullable().optional(),
   notes: z.string().trim().max(5_000).nullable().optional(),
+  // The trade-package layer (migration 0041).
+  trade_package: z.string().trim().max(120).nullable().optional(),
+  deliverable: z.string().trim().max(300).nullable().optional(),
+  includes: z.string().trim().max(2_000).nullable().optional(),
+  excludes: z.string().trim().max(2_000).nullable().optional(),
 });
 
 // startScope — the selected trades (from the Generate panel); bounded for safety.
@@ -76,6 +81,10 @@ const divisionCode = z.string().trim().regex(/^\d{2}$/, "Division codes are two 
 export const newLineItem = z.object({
   division_code: z.string().trim().max(10).nullable(),
   division_name: z.string().trim().max(200).nullable(),
+  trade_package: z.string().trim().max(120).nullable().optional(),
+  deliverable: z.string().trim().max(300).nullable().optional(),
+  includes: z.string().trim().max(2_000).nullable().optional(),
+  excludes: z.string().trim().max(2_000).nullable().optional(),
   description: z.string().trim().min(1, "Description can't be empty.").max(2_000),
   quantity: z.number().finite().nullable(),
   unit: z.string().trim().max(50).nullable(),

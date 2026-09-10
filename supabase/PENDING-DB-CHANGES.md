@@ -15,14 +15,17 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-- [ ] **0040_projects_housekeeping_updated_at.sql** — stops a reorder or an
-      archive from bumping every project's "Updated" date. Dragging the list
-      into a new order rewrites `sort_order` on every project, and the trigger
-      from 0001 treated that as a change worth dating. Now only real edits
-      move `updated_at`. No columns added, nothing deleted, no policy changes.
+- [ ] **0041_line_items_trade_packages.sql** — gives every scope line a
+      trade package (Plumbing, Framing, ...), a plain-language deliverable
+      name, and its own includes / excludes. Five new columns on
+      `line_items`, one index. Nothing renamed, nothing deleted, no policy
+      changes.
 
-      Until you run it the app still works: reordering saves fine, the dates
-      are just noisier than they should be after a drag.
+      Until you run it the app still works: existing lines are filed by their
+      CSI section on the fly, so the scope already reads by trade. What you
+      lose without it is the AI's own trade choice and the deliverable /
+      includes / excludes text on newly generated lines — those need the
+      columns to land in.
 
 ---
 
@@ -71,3 +74,4 @@ one once in Supabase, then it moves to **Already run**.
 - [x] 0038_foreign_key_indexes.sql — run 2026-09-07 (all 12 indexes present;
       verified)
 - [x] 0039_project_archive_and_order.sql — run 2026-09-08 (archived_at + sort_order verified present 2026-09-08)
+- [x] 0040_projects_housekeeping_updated_at.sql — run 2026-09-09 (projects_set_updated_at trigger verified; a sort_order change left updated_at untouched)

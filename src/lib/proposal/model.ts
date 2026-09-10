@@ -12,6 +12,8 @@
  * Shared by server (page, publish) and client (renderer) — no server imports.
  */
 import type { ProposalProfile } from "./profile";
+// Relative on purpose: this file also runs under vitest, which has no "@/" alias.
+import { groupByTrade } from "../scope/trades";
 
 // ── Editable per-project pieces ─────────────────────────────────────────────
 
@@ -60,12 +62,23 @@ export type CompanyInfo = {
 
 export type ScopeRow = {
   id: string;
+  /** What the client reads: the deliverable, or the CSI label for older lines. */
   description: string;
+  /** One sentence under the headline — what the line covers. Absent on older lines. */
+  detail?: string | null;
+  /** The CSI section, as a small cost-code reference. */
+  code?: string | null;
   quantity: number | null;
   unit: string | null;
   amount: number; // 0 when unpriced
   priced: boolean;
 };
+/**
+ * One heading in the client's scope. Since the trade-package layer
+ * (SCOPE-WBS-DESIGN) this is a TRADE — Plumbing, Framing — not a CSI
+ * division; the type keeps its name so proposals frozen before the change
+ * still render.
+ */
 export type ScopeDivision = {
   code: string | null;
   name: string;
@@ -123,6 +136,12 @@ export type LineInput = {
   id: string;
   division_code: string | null;
   division_name: string | null;
+  section_code?: string | null;
+  // The trade-package layer (migration 0041). Absent on older rows.
+  trade_package?: string | null;
+  deliverable?: string | null;
+  includes?: string | null;
+  excludes?: string | null;
   description: string;
   quantity: number | null;
   unit: string | null;
@@ -279,29 +298,28 @@ export function buildProposalDoc(input: {
   const active = lines.filter((li) => li.status !== "excluded");
   const priced = active.filter(isPriced);
 
-  // Scope by division — every active line, priced or not (an unpriced line is
-  // still scope; it just isn't in the number yet).
-  const divisions: ScopeDivision[] = [];
-  for (const li of active) {
-    const code = li.division_code ?? null;
-    const name = li.division_name ?? "Other";
-    let d = divisions.find((x) => x.code === code && x.name === name);
-    if (!d) {
-      d = { code, name, total: 0, rows: [] };
-      divisions.push(d);
+  // Scope by TRADE — every active line, priced or not (an unpriced line is
+  // still scope; it just isn't in the number yet). A line drafted before the
+  // trade layer existed is filed by its CSI section.
+  const divisions: ScopeDivision[] = groupByTrade(active).map((g) => {
+    const d: ScopeDivision = { code: null, name: g.trade, total: 0, rows: [] };
+    for (const li of g.rows) {
+      const p = isPriced(li);
+      const amount = p ? lineAmount(li) : 0;
+      d.rows.push({
+        id: li.id,
+        description: li.deliverable?.trim() || li.description,
+        detail: li.includes?.trim() || null,
+        code: li.section_code ?? null,
+        quantity: li.quantity,
+        unit: li.unit,
+        amount,
+        priced: p,
+      });
+      d.total += amount;
     }
-    const p = isPriced(li);
-    const amount = p ? lineAmount(li) : 0;
-    d.rows.push({
-      id: li.id,
-      description: li.description,
-      quantity: li.quantity,
-      unit: li.unit,
-      amount,
-      priced: p,
-    });
-    d.total += amount;
-  }
+    return d;
+  });
 
   // Cost mix across the five buckets (+ lines priced as one total).
   const buckets: CostBuckets = { labor: 0, material: 0, sub: 0, equipment: 0, other: 0, unsplit: 0 };
@@ -335,8 +353,17 @@ export function buildProposalDoc(input: {
   const total = running;
   const sf = project.building_sf;
 
+  // Excluded: whole lines the user excluded, what each active line says it
+  // leaves out ("Plumbing — fixture supply by owner"), and exclusion findings.
   const excluded = [
-    ...lines.filter((li) => li.status === "excluded").map((li) => li.description),
+    ...lines
+      .filter((li) => li.status === "excluded")
+      .map((li) => li.deliverable?.trim() || li.description),
+    ...groupByTrade(active).flatMap((g) =>
+      g.rows
+        .filter((li) => li.excludes?.trim())
+        .map((li) => `${g.trade} — ${li.excludes!.trim()}`),
+    ),
     ...findings.filter((f) => f.kind === "exclusion").map((f) => f.text),
   ];
   const assumptions = findings.filter((f) => f.kind === "assumption").map((f) => f.text);

@@ -4,6 +4,13 @@ Design work for feedback item **C1**. This is the "how should the scope of work
 actually be built" question, researched against how the industry does it and
 grounded in what our app currently produces.
 
+> **Status (2026-09-09): steps 1–4 built.** Catalog + CSI fallback in
+> `src/lib/scope/trades.ts` (tested), migration `0041_line_items_trade_packages.sql`,
+> the AI prompt/schema emit trade_package + deliverable + includes/excludes,
+> `ScopeCanvas.tsx` is the two-level accordion, and the proposal renders by
+> trade. Not yet: pricing and estimate pages still group by CSI division;
+> step 5 (scheduling) is a later round.
+
 ---
 
 ## 1. What we produce today
