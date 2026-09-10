@@ -17,6 +17,10 @@ export type Project = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  /** Migration 0039. Set = "minimized" off the main list; nothing is deleted. */
+  archived_at?: string | null;
+  /** Migration 0039. Lower sorts first; null = never arranged (new projects go to the top). */
+  sort_order?: number | null;
 };
 
 /** An uploaded plan file — one row in the `plan_files` table. */
