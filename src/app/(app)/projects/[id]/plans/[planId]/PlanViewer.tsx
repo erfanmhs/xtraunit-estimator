@@ -2198,7 +2198,8 @@ export default function PlanViewer({
     longPressRef.current = setTimeout(() => {
       const rect = svgRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const pt = { x: (cx - rect.left) / scale, y: (cy - rect.top) / scale };
+      // A hold is always a finger: hit-test at the crosshair, not the patch.
+      const pt = { x: (cx - rect.left) / scale, y: (cy - aimLiftRef.current - rect.top) / scale };
       // Drawing tools: holding still is how a finger AIMS with the loupe, so
       // a hold must not open anything mid-shape, and never on empty paper —
       // and the lift that follows still places the point (nothing "fired").
@@ -2217,20 +2218,18 @@ export default function PlanViewer({
           setSelectedId(m.id);
           setActiveVertex(v);
           {
-            const aim = clientToPoint(cx, cy - aimLiftRef.current);
-            const vp = m.geometry[v.index];
             dragRef.current = {
               id: m.id,
               index: v.index,
               pointerId,
-              grab: { x: vp.x - aim.x, y: vp.y - aim.y },
+              grab: { x: 0, y: 0 }, // the vertex rides the crosshair
             };
           }
           dragStartRef.current = { x: cx, y: cy, moved: false, hold: true };
           setEditGeom(m.geometry.map((q) => ({ ...q })));
           setGrabPulse(true);
           setTimeout(() => setGrabPulse(false), 400);
-          showLoupeAt(cx, cy, m.geometry[v.index]);
+          showLoupeAt(cx, cy, clientToPoint(cx, cy - aimLiftRef.current));
           return;
         }
       }
@@ -2616,12 +2615,17 @@ export default function PlanViewer({
   function onPointerDown(e: React.PointerEvent) {
     if (e.button !== 0 || spaceHeld) return; // middle/right + space-pan bubble to pan
     aimLiftRef.current = liftOf(e); // edge-pan and hold-grab read this later
-    const pt = evtToPoint(e);
+    const touch = e.pointerType === "touch";
+    // On a finger, EVERY hit-test and grab in here uses the aim point — the
+    // spot under the lens crosshair — never the contact patch. Handles,
+    // midpoints, shapes: what sits under the crosshair is what you touch,
+    // and what the lens magnifies is always what sits under it (Erfan,
+    // 2026-09-10: "same issue with the magnifier on the other tools").
+    const pt = touch ? evtToAim(e) : evtToPoint(e);
 
     // Finger on a draw tool: nothing is placed yet. The point goes where the
     // finger LIFTS (slide to aim with the loupe); a second finger turns the
     // gesture into a pinch instead; holding still opens the menu.
-    const touch = e.pointerType === "touch";
     // A second finger is navigation, whatever the tool. Without this the
     // finger that completes a pinch could grab a handle or start a crop on
     // its way down, and the pinch would edit the drawing. A touch that lands
@@ -2653,7 +2657,10 @@ export default function PlanViewer({
             id: selected.id,
             index: v.index,
             pointerId: e.pointerId,
-            grab: { x: vp.x - aim.x, y: vp.y - aim.y },
+            // A finger's handle snaps onto the crosshair and travels with it,
+            // so the lens always shows the handle at its centre. A mouse
+            // keeps the offset it grabbed with (the cursor IS the point).
+            grab: touch ? { x: 0, y: 0 } : { x: vp.x - aim.x, y: vp.y - aim.y },
           };
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false };
           setEditGeom(selected.geometry.map((q) => ({ ...q })));
@@ -2661,7 +2668,7 @@ export default function PlanViewer({
             svgRef.current?.setPointerCapture(e.pointerId);
           } catch {}
           if (touch) {
-            showLoupeAt(e.clientX, e.clientY, vp);
+            showLoupeAt(e.clientX, e.clientY, aim);
             startLongPress(e.clientX, e.clientY, e.pointerId);
           }
           return;
@@ -2676,7 +2683,7 @@ export default function PlanViewer({
               id: selected.id,
               index: mid.at,
               pointerId: e.pointerId,
-              grab: { x: mid.p.x - aim.x, y: mid.p.y - aim.y },
+              grab: touch ? { x: 0, y: 0 } : { x: mid.p.x - aim.x, y: mid.p.y - aim.y },
             };
           }
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false, inserted: true };
@@ -2797,7 +2804,7 @@ export default function PlanViewer({
     }
     // The whole shape being moved.
     if (moveRef.current && moveRef.current.pointerId === e.pointerId) {
-      const pt = evtToPoint(e);
+      const pt = touch ? evtToAim(e) : evtToPoint(e); // same frame the grab used
       const { start, orig } = moveRef.current;
       const dx = pt.x - start.x;
       const dy = pt.y - start.y;
@@ -2867,7 +2874,7 @@ export default function PlanViewer({
         if (fired || pinchedRef.current) return;
         if (!censusMayPlace(censusRef.current, Date.now())) return;
         if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) return;
-        const id = pickMeasurementAt(evtToPoint(e));
+        const id = pickMeasurementAt(evtToAim(e)); // a finger selects what is under the crosshair
         setSelectedId(id);
         // Double-tap on the same shape = its menu.
         const now = Date.now();
