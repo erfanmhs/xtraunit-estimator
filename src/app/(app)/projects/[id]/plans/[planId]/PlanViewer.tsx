@@ -3791,16 +3791,20 @@ export default function PlanViewer({
               const m = measurements.find((x) => x.id === menu.id);
               const i = menu.index ?? 0;
               if (!m) return [];
-              const items: { label: string; danger?: boolean; onClick: () => void }[] = [
-                {
-                  label: "Nudge",
-                  onClick: () => {
-                    setTool("select");
-                    setSelectedId(m.id);
-                    setActiveVertex({ id: m.id, index: i });
-                  },
-                },
-              ];
+              // No Nudge on a phone — the pad is gone there; a handle is
+              // adjusted by dragging it with the lens.
+              const items: { label: string; danger?: boolean; onClick: () => void }[] = coarse
+                ? []
+                : [
+                    {
+                      label: "Nudge",
+                      onClick: () => {
+                        setTool("select");
+                        setSelectedId(m.id);
+                        setActiveVertex({ id: m.id, index: i });
+                      },
+                    },
+                  ];
               if (m.type !== "count" && m.type !== "leader" && m.type !== "line")
                 items.push({ label: "Split segment here", onClick: () => splitAfterVertex(m.id, i) });
               if (m.geometry.length > minPointsOf(m) || m.type === "count")
@@ -5267,8 +5271,11 @@ export default function PlanViewer({
 
         {/* Nudge pad: fine-tune the tapped vertex one step at a time. A fixed
             3×3 cross of 44 px arrows (explicit grid cells — nothing floats or
-            overlaps) plus step, Delete point and Done, tucked bottom-right. */}
-        {activeV && selected && selected.type !== "leader" && draft.length === 0 && !menu ? (
+            overlaps) plus step, Delete point and Done, tucked bottom-right.
+            Mouse only (2026-09-10, Erfan): on a phone it covered a quarter of
+            the drawing, and the corner handles + the lens are the way to
+            place and adjust. Delete point lives in the hold menu there. */}
+        {!coarse && activeV && selected && selected.type !== "leader" && draft.length === 0 && !menu ? (
           <div
             className="glass-strong absolute bottom-14 right-2 z-20 flex items-center gap-2 rounded-2xl p-1.5 text-xs"
             role="group"
@@ -5863,7 +5870,7 @@ export default function PlanViewer({
               {selected.type === "leader"
                 ? "Tip: drag the white handles to move the arrow tip or the text box."
                 : coarse
-                  ? "Tip: drag a white handle to reshape · tap a handle for the nudge pad · hold a handle for more."
+                  ? "Tip: drag a white handle to reshape (the lens shows where it lands) · hold a handle to split or delete."
                   : "Tip: drag the white handles on the sheet to reshape · click a handle for the nudge pad."}
             </p>
             <div className="flex gap-2 pt-1">
