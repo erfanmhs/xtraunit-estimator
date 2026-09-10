@@ -61,6 +61,13 @@ const SOURCES = [
   ["market", "Market est."],
 ] as const;
 
+/** Unit rates keep their cents ("$4.25/sf"); totals round to the dollar. */
+const usd2 = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -959,6 +966,20 @@ function Row({
             className="flex-1 sm:w-[4.5rem] sm:flex-none xl:w-full"
           />
         </label>
+
+        {/* The arithmetic, spelled out. On a laptop it lives in the Total
+            field's tooltip; a phone has no hover, and "3.25 + 0.25 + 0.75 =
+            $4,301?" is a fair question when the × quantity is nowhere on the
+            screen (Erfan, 2026-09-10). */}
+        {showAmount ? (
+          <p className="col-span-3 text-[11px] text-muted sm:basis-full xl:hidden">
+            {usingTotal
+              ? "Entered total — overrides the buckets"
+              : isUnit
+                ? `${li.quantity ?? 0} ${li.unit ?? ""} × ${usd2.format(previewSum)}/${li.unit || "unit"} = ${usd.format(previewTotal ?? 0)}`
+                : `Lump sum of the buckets = ${usd.format(previewTotal ?? 0)}`}
+          </p>
+        ) : null}
 
         <select
           value={source}
