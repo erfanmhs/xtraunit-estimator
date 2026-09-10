@@ -15,17 +15,7 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-- [ ] **0041_line_items_trade_packages.sql** — gives every scope line a
-      trade package (Plumbing, Framing, ...), a plain-language deliverable
-      name, and its own includes / excludes. Five new columns on
-      `line_items`, one index. Nothing renamed, nothing deleted, no policy
-      changes.
-
-      Until you run it the app still works: existing lines are filed by their
-      CSI section on the fly, so the scope already reads by trade. What you
-      lose without it is the AI's own trade choice and the deliverable /
-      includes / excludes text on newly generated lines — those need the
-      columns to land in.
+_Nothing pending. Everything through 0041 has been run._
 
 ---
 
@@ -75,3 +65,4 @@ one once in Supabase, then it moves to **Already run**.
       verified)
 - [x] 0039_project_archive_and_order.sql — run 2026-09-08 (archived_at + sort_order verified present 2026-09-08)
 - [x] 0040_projects_housekeeping_updated_at.sql — run 2026-09-09 (projects_set_updated_at trigger verified; a sort_order change left updated_at untouched)
+- [x] 0041_line_items_trade_packages.sql — run 2026-09-09 (five trade columns + line_items_project_trade_idx verified present)
