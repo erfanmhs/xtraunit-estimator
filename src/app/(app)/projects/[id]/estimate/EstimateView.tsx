@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { saveMarkups, type Markups } from "./actions";
 import { lineTotal, type PricedLine } from "../pricing/PricingTable";
 import { evalFormula } from "@/lib/formula";
+import { groupByTrade, tradeOf } from "@/lib/scope/trades";
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -103,21 +104,18 @@ export default function EstimateView({
     });
   }
 
-  // Division subtotals from priced lines.
+  // Subtotals by TRADE from priced lines — the same headings as Scope,
+  // Pricing and the Proposal (the trade-package layer). `divisions` keeps
+  // its name so the waterfall below reads unchanged.
   const priced = lines.filter(hasPrice);
-  const divisions = useMemo(() => {
-    const out: { key: string; total: number }[] = [];
-    for (const li of priced) {
-      const key = `${li.division_code ?? "—"} · ${li.division_name ?? "Other"}`;
-      let d = out.find((x) => x.key === key);
-      if (!d) {
-        d = { key, total: 0 };
-        out.push(d);
-      }
-      d.total += lineTotal(li);
-    }
-    return out;
-  }, [priced]);
+  const divisions = useMemo(
+    () =>
+      groupByTrade(priced).map((g) => ({
+        key: g.trade,
+        total: g.rows.reduce((a, li) => a + lineTotal(li), 0),
+      })),
+    [priced],
+  );
 
   const subtotal = divisions.reduce((a, d) => a + d.total, 0);
   const unpriced = lines.length - priced.length;
@@ -159,7 +157,8 @@ export default function EstimateView({
     const rows: string[] = [];
     rows.push(
       [
-        "Division",
+        "Trade",
+        "CSI",
         "Description",
         "Qty",
         "Unit",
@@ -179,8 +178,9 @@ export default function EstimateView({
     for (const li of lines) {
       rows.push(
         [
-          `${li.division_code ?? ""} ${li.division_name ?? ""}`.trim(),
-          li.description,
+          tradeOf(li),
+          `${li.section_code ?? li.division_code ?? ""} ${li.division_name ?? ""}`.trim(),
+          li.deliverable?.trim() || li.description,
           li.quantity ?? "",
           li.unit ?? "",
           li.price_mode ?? "",
@@ -245,7 +245,7 @@ export default function EstimateView({
       {/* Division subtotals */}
       <section className="glass rounded-xl p-4">
         <h2 className="mb-2 font-heading text-sm uppercase tracking-wider text-brand-soft">
-          Direct cost by division
+          Direct cost by trade
         </h2>
         <div className="divide-y divide-border">
           {divisions.map((d) => (
