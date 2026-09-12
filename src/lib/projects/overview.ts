@@ -27,6 +27,11 @@ export type ProjectOverview = {
    *  estimate exists (null before). */
   bid: number | null;
   lines: number;
+  /** What the AI has cost on this project so far, in dollars (sum of every
+   *  finished run's estimate; null when nothing has been recorded — either
+   *  no runs yet, or runs from before migration 0032 tracked cost). */
+  aiCostUsd: number | null;
+  aiRuns: number;
 };
 
 type LineRow = {
@@ -92,10 +97,12 @@ export async function getProjectsOverview(
       confirmedCost: 0,
       bid: null,
       lines: 0,
+      aiCostUsd: null,
+      aiRuns: 0,
     };
 
   const ids = projectIds;
-  const [plans, measurements, lines, estimates, proposals] = await Promise.all([
+  const [plans, measurements, lines, estimates, proposals, runs] = await Promise.all([
     sb.from("plan_files").select("project_id").in("project_id", ids),
     sb.from("measurements").select("project_id").in("project_id", ids),
     sb
@@ -109,6 +116,9 @@ export async function getProjectsOverview(
       .select("project_id,contingency_pct,insurance_pct,overhead_pct")
       .in("project_id", ids),
     sb.from("proposals").select("project_id").in("project_id", ids),
+    // AI spend per run (cost_usd arrives with migration 0032; a missing
+    // column just leaves aiCostUsd null).
+    sb.from("scope_runs").select("project_id,cost_usd").in("project_id", ids).not("cost_usd", "is", null),
   ]);
 
   const mark = (rows: { project_id: string }[] | null, key: "plans" | "takeoff" | "proposal") => {
@@ -139,6 +149,15 @@ export async function getProjectsOverview(
       const o = out[id];
       o.stages.pricing =
         (confirmedCount[id] ?? 0) > 0 ? "done" : (proposedCount[id] ?? 0) > 0 ? "partial" : "todo";
+    }
+  }
+
+  if (!runs.error) {
+    for (const r of (runs.data ?? []) as { project_id: string; cost_usd: number | string | null }[]) {
+      const o = out[r.project_id];
+      if (!o || r.cost_usd == null) continue;
+      o.aiCostUsd = (o.aiCostUsd ?? 0) + Number(r.cost_usd);
+      o.aiRuns += 1;
     }
   }
 

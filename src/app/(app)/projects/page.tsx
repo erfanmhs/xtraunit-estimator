@@ -27,6 +27,13 @@ const usd = new Intl.NumberFormat("en-US", {
   currency: "USD",
   maximumFractionDigits: 0,
 });
+// AI spend is dollars and cents — a $1.27 run rounds to nothing otherwise.
+const usdCents = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 const STAGES: { key: keyof ReturnType<typeof stageOrder>; label: string }[] = [
   { key: "plans", label: "Plans" },
@@ -115,6 +122,7 @@ export default async function ProjectsPage() {
               {o ? <StageDots stages={o.stages} /> : null}
               <span className="text-xs text-muted/70">
                 Updated {new Date(p.updated_at).toLocaleDateString()}
+                {o?.aiCostUsd != null ? ` · AI ${usdCents.format(o.aiCostUsd)}` : ""}
               </span>
             </div>
             {money ? (
