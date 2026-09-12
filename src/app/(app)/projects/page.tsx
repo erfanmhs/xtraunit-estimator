@@ -5,6 +5,7 @@ import { getProjectsOverview, type Stage } from "@/lib/projects/overview";
 import type { Project, ProjectStatus } from "@/types";
 import ProjectCard from "./ProjectCard";
 import ProjectGrid from "./ProjectGrid";
+import Welcome from "./Welcome";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   draft: "Draft",
@@ -157,19 +158,7 @@ export default async function ProjectsPage() {
 
       <div className="p-6 sm:p-8">
         {projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border py-20 text-center">
-            <p className="font-heading text-xl text-foreground">No projects yet</p>
-            <p className="max-w-sm text-sm text-muted">
-              Create your first project to start building an estimate from plans
-              and takeoffs.
-            </p>
-            <Link
-              href="/projects/new"
-              className="mt-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-strong"
-            >
-              + New project
-            </Link>
-          </div>
+          <Welcome />
         ) : (
           <ProjectGrid
             items={active.map((p) => ({ id: p.id, node: card(p) }))}
