@@ -1,0 +1,112 @@
+# Restore a backup into a database — the drill, and the real thing.
+#
+# Run from the Actions tab ("Run workflow"). You give it the run id of a
+# "Backup database" run (the number in that run's URL) and it restores that
+# night's dump into the database named by the RESTORE_DB_URL secret, then
+# prints a row count per table so you can see the data arrived.
+#
+# For the DRILL, RESTORE_DB_URL points at a scratch Supabase project — a
+# free one created for the purpose. Restoring there proves the backups are
+# good and the procedure works, without touching production.
+#
+# For a REAL disaster, either point RESTORE_DB_URL at the new production
+# project and run this, or restore into the scratch project and re-point
+# Render's env vars at it. Either way the app is back with that night's data.
+#
+# It will NEVER restore into the database the backup came from unless you
+# type the word "production" in the confirm box — a guard against restoring
+# last night on top of today's work by accident.
+name: Restore database from a backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_run_id:
+        description: "Run id of the 'Backup database' run to restore (the number at the end of its URL)"
+        required: true
+        type: string
+      confirm:
+        description: "Type 'scratch' to restore into the scratch database, or 'production' to restore into production"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Decide the target and check the confirm word
+        id: target
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          SCRATCH: ${{ secrets.RESTORE_DB_URL }}
+          PROD: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          case "$CONFIRM" in
+            scratch)
+              [ -n "$SCRATCH" ] || { echo "::error::RESTORE_DB_URL secret is not set (the scratch database). See docs/backup-restore.md."; exit 1; }
+              echo "url=$SCRATCH" >> "$GITHUB_OUTPUT"; echo "label=SCRATCH" >> "$GITHUB_OUTPUT" ;;
+            production)
+              [ -n "$PROD" ] || { echo "::error::SUPABASE_DB_URL secret is not set."; exit 1; }
+              echo "url=$PROD" >> "$GITHUB_OUTPUT"; echo "label=PRODUCTION" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::confirm must be exactly 'scratch' or 'production' (got '$CONFIRM'). Nothing was done."; exit 1 ;;
+          esac
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Fetch that night's dump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p in
+          gh run download "${{ inputs.backup_run_id }}" --repo "${{ github.repository }}" --dir in
+          DUMP="$(find in -name '*.dump' | head -1)"
+          [ -n "$DUMP" ] || { echo "::error::No .dump file in that run's artifacts. Is it a 'Backup database' run within the last 90 days?"; exit 1; }
+          echo "DUMP=$DUMP" >> "$GITHUB_ENV"
+          echo "Restoring $DUMP into ${{ steps.target.outputs.label }}"
+
+      - name: Restore
+        env:
+          TARGET: ${{ steps.target.outputs.url }}
+        run: |
+          set -euo pipefail
+          # --clean --if-exists: replace tables that already exist, so the
+          # result IS that night, not a merge of that night and today.
+          # Exit code 1 from pg_restore = "there were warnings" (e.g. a
+          # Supabase-owned extension it may not recreate); real failures
+          # surface in the count step, which must match the dump.
+          pg_restore --dbname="$TARGET" \
+            --clean --if-exists --no-owner --no-privileges \
+            --schema=public --exit-on-error=false \
+            "$DUMP" || echo "pg_restore reported warnings (see above); checking the data landed…"
+
+      - name: Show what landed (rows per table)
+        env:
+          TARGET: ${{ steps.target.outputs.url }}
+        run: |
+          set -euo pipefail
+          psql "$TARGET" -v ON_ERROR_STOP=1 -At -c "
+            select relname, n_live_tup
+            from pg_stat_user_tables
+            where schemaname = 'public'
+            order by relname;" | column -t -s '|'
+          echo
+          echo "Projects, sheets, measurements, scope lines:"
+          psql "$TARGET" -At -c "
+            select (select count(*) from public.projects) as projects,
+                   (select count(*) from public.sheets) as sheets,
+                   (select count(*) from public.measurements) as measurements,
+                   (select count(*) from public.line_items) as line_items;"

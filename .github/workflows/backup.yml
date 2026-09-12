@@ -1,0 +1,87 @@
+# Nightly database backup.
+#
+# Supabase's free tier keeps NO backups. Every takeoff, scope line and price
+# lives in this one Postgres database, so this job dumps it every night and
+# keeps each dump on GitHub for 90 days (the longest the free tier stores an
+# artifact). It also runs on demand from the Actions tab ("Run workflow").
+#
+# One secret is needed, set once in GitHub → Settings → Secrets → Actions:
+#   SUPABASE_DB_URL — the "Session pooler" connection string from the Supabase
+#   dashboard (Connect → Session pooler), with the database password filled in.
+#   The pooler, not the direct host: GitHub's runners have no IPv6 and the
+#   direct host is IPv6-only.
+#
+# NOT covered: the uploaded plan PDFs in Supabase Storage. Those can be
+# re-uploaded from the originals; the measurements drawn on them cannot be
+# redrawn, and they are in the database. See docs/backup-restore.md.
+name: Backup database
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # 09:00 UTC = 2 am Pacific, every day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install PostgreSQL 17 client (must match the server's major version)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          pg_dump --version
+
+      - name: Check the secret is set
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL secret is not set. See docs/backup-restore.md."
+            exit 1
+          fi
+
+      - name: Dump the database
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u +%Y-%m-%d_%H%M)"
+          mkdir -p out
+          # Custom format: compressed, and pg_restore can pick tables out of it.
+          # Only the app's own schema — auth/storage/etc. belong to Supabase and
+          # are recreated by the platform, not by us.
+          pg_dump "$SUPABASE_DB_URL" \
+            --format=custom --no-owner --no-privileges \
+            --schema=public \
+            --file="out/xtraunit-db-$STAMP.dump"
+          # A plain-SQL twin of the schema, readable in a text editor when
+          # someone needs to see what a table looked like on a given night.
+          pg_dump "$SUPABASE_DB_URL" \
+            --schema-only --no-owner --no-privileges --schema=public \
+            --file="out/xtraunit-schema-$STAMP.sql"
+          ls -la out
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+
+      - name: Prove the dump is readable and say what is in it
+        run: |
+          set -euo pipefail
+          DUMP="$(ls out/*.dump)"
+          echo "Tables in the dump:"
+          pg_restore --list "$DUMP" | grep -c 'TABLE DATA' | xargs -I{} echo "  {} tables with data"
+          pg_restore --list "$DUMP" | grep 'TABLE DATA' | awk '{print "  - " $(NF-1)}' | head -60
+
+      - name: Keep it for 90 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: xtraunit-db-${{ env.STAMP }}
+          path: out/
+          retention-days: 90
+          if-no-files-found: error
