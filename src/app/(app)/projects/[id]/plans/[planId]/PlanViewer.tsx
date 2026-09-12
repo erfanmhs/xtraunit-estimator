@@ -54,7 +54,8 @@ import {
   recomputeValue,
 } from "@/lib/takeoff/measurements";
 import SwipeRow from "@/components/SwipeRow";
-import { polishSheetNotes } from "./actions";
+import { aiCountSheet, polishSheetNotes } from "./actions";
+import type { AiCountResult } from "@/lib/takeoff/aiCount";
 import {
   SelectIcon,
   PanIcon,
@@ -530,6 +531,11 @@ export default function PlanViewer({
     | { phase: "box"; box: number }
     | { phase: "finding"; box: number }
     | { phase: "review"; box: number; ghosts: { pt: Pt; score: number }[]; off: Set<number> }
+  >(null);
+  // AI count check: the model's own count of the sheet, shown beside yours;
+  // each kind can be dropped onto the sheet as its own editable count layer.
+  const [aiCount, setAiCount] = useState<
+    null | { phase: "working" } | { phase: "result"; result: AiCountResult; placed: Set<string> }
   >(null);
   const [editGeom, setEditGeom] = useState<Pt[] | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -1752,11 +1758,16 @@ export default function PlanViewer({
   // sheet again off-screen at the resolution the search needs — capped at
   // 8 M pixels, the same crop window as the display.
   async function renderForSearch(box: number): Promise<{ canvas: HTMLCanvasElement; pxPerPt: number } | null> {
-    const pdf = pdfRef.current;
-    if (!pdf || !baseDims.w || !baseDims.h) return null;
+    if (!baseDims.w || !baseDims.h) return null;
     const want = 36 / box;
     const cap = Math.sqrt(8_000_000 / (baseDims.w * baseDims.h));
-    const pxPerPt = Math.max(0.5, Math.min(want, cap));
+    return renderSheetAt(Math.max(0.5, Math.min(want, cap)));
+  }
+
+  /** The current sheet (its crop window, like the display) drawn off-screen at `pxPerPt`. */
+  async function renderSheetAt(pxPerPt: number): Promise<{ canvas: HTMLCanvasElement; pxPerPt: number } | null> {
+    const pdf = pdfRef.current;
+    if (!pdf || !baseDims.w || !baseDims.h) return null;
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({
       scale: pxPerPt,
@@ -1819,6 +1830,72 @@ export default function PlanViewer({
       .update({ geometry, value })
       .eq("id", active.id);
     if (upErr) setError("Could not save the found markers.");
+  }
+
+  // ── AI count check ────────────────────────────────────────────────────────
+  async function runAiCount() {
+    if (!currentSheet) return;
+    setError(null);
+    setAiCount({ phase: "working" });
+    try {
+      // 1568 px on the long edge is the size the model reads best.
+      const r = await renderSheetAt(1568 / Math.max(baseDims.w, baseDims.h));
+      if (!r) throw new Error("The sheet isn't ready yet.");
+      const dataUrl = r.canvas.toDataURL("image/jpeg", 0.85);
+      r.canvas.width = 0;
+      r.canvas.height = 0;
+      const res = await aiCountSheet({
+        projectId,
+        sheetId: currentSheet.id,
+        sheetName: currentSheet.name ?? currentSheet.label ?? null,
+        jpegBase64: dataUrl.slice(dataUrl.indexOf(",") + 1),
+      });
+      if (!res.ok || !res.result) throw new Error(res.error ?? "The AI count failed.");
+      setAiCount({ phase: "result", result: res.result, placed: new Set() });
+    } catch (e) {
+      setAiCount(null);
+      setError(e instanceof Error ? e.message : "The AI count failed.");
+    }
+  }
+
+  /** Drop one AI-counted kind onto the sheet as its own count layer. */
+  async function placeAiCount(kind: AiCountResult["kinds"][number]) {
+    if (!currentSheet || !aiCount || aiCount.phase !== "result") return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setError("Not signed in — nothing was placed.");
+      return;
+    }
+    const geometry: Pt[] = kind.positions.map((p) => ({ x: p.x * baseDims.w, y: p.y * baseDims.h }));
+    if (!geometry.length) return;
+    recordHistory();
+    const { data, error: insErr } = await insertMeasurements(
+      supabase,
+      { projectId, planFileId: planFile.id, sheetId: currentSheet.id, ownerId: user.id },
+      [
+        {
+          type: "count",
+          geometry,
+          value: geometry.length,
+          unit: "ea",
+          layer: `${kind.kind} (AI)`,
+          color: pickNextColor(),
+          wall_sided: null,
+          wall_height: null,
+          vol_mode: null,
+          vol_width: null,
+          vol_depth: null,
+        },
+      ],
+    );
+    if (insErr || !data.length) {
+      setError("Could not place the AI count.");
+      return;
+    }
+    setMeasurements((arr) => [...arr, ...data]);
+    setAiCount((a) => (a && a.phase === "result" ? { ...a, placed: new Set([...a.placed, kind.kind]) } : a));
   }
 
   // Nearest measurement under a point (in PDF points), or null. Shared by the
@@ -4343,6 +4420,19 @@ export default function PlanViewer({
                     Find all like this
                   </button>
                 ) : null}
+                {!autoCount && !aiCount ? (
+                  <button
+                    type="button"
+                    onClick={runAiCount}
+                    title="Ask the AI to count the doors, windows and fixtures it sees on this sheet"
+                    className="rounded-md border border-border px-3 py-1 text-foreground hover:border-brand"
+                  >
+                    AI count check
+                  </button>
+                ) : null}
+                {aiCount?.phase === "working" ? (
+                  <span className="text-xs text-muted">AI is reading the sheet… (10–30 s)</span>
+                ) : null}
                 {autoCount?.phase === "box" ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-muted">Box around your last marker:</span>
@@ -4396,6 +4486,49 @@ export default function PlanViewer({
                     </button>
                   </div>
                 ) : null}
+              </div>
+            ) : null}
+            {tool === "count" && aiCount?.phase === "result" ? (
+              <div className="basis-full rounded-lg border border-border bg-background/70 px-3 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs text-muted">
+                    AI sees: <span className="text-foreground">{aiCount.result.sheet_read}</span>
+                    {aiCount.result.kinds.length ? "" : " — nothing it could count with confidence."}
+                  </p>
+                  <button type="button" onClick={() => setAiCount(null)} className="text-xs text-muted hover:text-foreground">
+                    Close
+                  </button>
+                </div>
+                {aiCount.result.kinds.length ? (
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {aiCount.result.kinds.map((k) => {
+                      const placed = aiCount.placed.has(k.kind);
+                      const mine = measurements
+                        .filter((m) => m.type === "count" && (m.layer ?? "").toLowerCase().startsWith(k.kind.toLowerCase()))
+                        .reduce((n, m) => n + m.geometry.length, 0);
+                      return (
+                        <li key={k.kind} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                          <span className="font-medium text-foreground">{k.kind}</span>
+                          <span className="tabular-nums text-foreground">{k.count}</span>
+                          <span className="text-muted">{Math.round(k.confidence * 100)}% sure</span>
+                          {mine ? <span className="text-muted">· you have {mine}</span> : null}
+                          <span className="basis-full text-muted sm:basis-auto sm:flex-1">{k.note}</span>
+                          <button
+                            type="button"
+                            disabled={placed || !k.positions.length}
+                            onClick={() => placeAiCount(k)}
+                            className="rounded-md border border-brand/50 px-2 py-0.5 text-brand-soft hover:bg-brand/10 disabled:opacity-40"
+                          >
+                            {placed ? "Placed ✓" : "Place as markers"}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+                <p className="mt-1.5 text-[11px] text-muted">
+                  Positions are the AI&apos;s best guess — placed markers are yours to move or delete. One Undo removes a placed set.
+                </p>
               </div>
             ) : null}
             {!hasScale && tool !== "count" ? (
