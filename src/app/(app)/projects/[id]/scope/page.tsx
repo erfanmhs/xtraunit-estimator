@@ -7,6 +7,8 @@ import ScopeCanvas, { type LineItem } from "./ScopeCanvas";
 import FindingsReview, { type Finding } from "./FindingsReview";
 import NextStep from "@/components/NextStep";
 import { groupByTrade } from "@/lib/scope/trades";
+import AiBudgetNote from "@/components/AiBudgetNote";
+import { getAiSpendThisMonth } from "@/lib/ai-usage";
 
 export default async function ScopePage({
   params,
@@ -116,6 +118,10 @@ export default async function ScopePage({
     .eq("project_id", id);
 
   const initialRun = await getScopeRun(id);
+  const {
+    data: { user: me },
+  } = await supabase.auth.getUser();
+  const aiSpend = me ? await getAiSpendThisMonth(supabase, me.id) : null;
 
   // Plan files + sheet ingest state (for the "Prepare plans" step). Resilient to
   // migration 0025 (vision_pdf_path) not being run yet.
@@ -215,12 +221,15 @@ export default async function ScopePage({
           }
           action={<NextStep href={`/projects/${id}/pricing`} label="Pricing" />}
           controls={
-            <GeneratePanel
-              projectId={id}
-              initialRun={initialRun}
-              hasScope={lineItems.length > 0}
-              initialTrades={genTrades}
-            />
+            <div className="flex flex-col gap-1.5">
+              <GeneratePanel
+                projectId={id}
+                initialRun={initialRun}
+                hasScope={lineItems.length > 0}
+                initialTrades={genTrades}
+              />
+              {aiSpend ? <AiBudgetNote spend={aiSpend} /> : null}
+            </div>
           }
         />
 

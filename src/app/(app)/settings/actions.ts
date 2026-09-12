@@ -6,7 +6,7 @@
  */
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
-import { enforceAiLimit } from "@/lib/ai-usage";
+import { enforceAiLimit, settleAiUsage } from "@/lib/ai-usage";
 import { log } from "@/lib/log";
 import { recordAiUsage } from "@/lib/ai-meter";
 import { AI_MODELS } from "@/config/ai";
@@ -171,7 +171,7 @@ Return JSON with exactly these fields:
       messages: [{ role: "user", content: prompt }],
     });
     const msg = await stream.finalMessage();
-    recordAiUsage(AI_MODELS.letter, msg.usage, "profile");
+    await settleAiUsage(supabase, limit.usageId, recordAiUsage(AI_MODELS.letter, msg.usage, "profile"));
     const textBlock = msg.content.find((b) => b.type === "text");
     const text =
       textBlock && "text" in textBlock ? (textBlock.text as string) : "";

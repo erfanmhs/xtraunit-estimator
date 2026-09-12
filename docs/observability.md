@@ -61,3 +61,12 @@ log.error("scope.run.failed", { runId, err });   // err → { name, message, sta
 | `subquote.read.failed`, `proposal.narrative.failed`, `profile.draft.failed` | the server actions that were silently swallowing these before |
 
 **Reading the logs on Render:** service → Logs tab → search for an event name, e.g. `scope.run.failed`.
+
+## Uptime (added 2026-09-12)
+
+`GET /api/health` answers `{ ok, db, latencyMs, version }` — 200 when the
+app is up AND one round trip to Supabase succeeds, 503 otherwise. Render's
+health check points at it (`render.yaml`), so a deploy whose database is
+unreachable is not marked live. An outside watcher (UptimeRobot, free plan,
+5-minute checks) hits the same URL and emails erfan.mhs@gmail.com on failure.
+No secrets in the response; the route is public on purpose.

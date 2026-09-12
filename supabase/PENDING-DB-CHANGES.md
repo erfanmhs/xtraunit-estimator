@@ -15,7 +15,10 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-_Nothing pending. Everything through 0041 has been run._
+- [ ] 0042_ai_usage_cost.sql — adds a `cost_usd` column to `ai_usage` so one-shot
+  AI calls (reading a sub quote, drafting proposal text, testing the key) count
+  toward the monthly dollar budget. Without it the app still works; those calls
+  just are not counted until it runs.
 
 ---
 

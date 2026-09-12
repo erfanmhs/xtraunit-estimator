@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
-import { enforceAiLimit } from "@/lib/ai-usage";
+import { enforceAiLimit, settleAiUsage } from "@/lib/ai-usage";
 import { recordAiUsage } from "@/lib/ai-meter";
 import { log } from "@/lib/log";
 import { AI_MODELS } from "@/config/ai";
@@ -75,7 +75,7 @@ Rewrite the dictation as bullet notes, one fact per bullet, each starting with "
       max_tokens: 600,
       messages: [{ role: "user", content: prompt }],
     });
-    recordAiUsage(AI_MODELS.letter, msg.usage, "notes");
+    await settleAiUsage(supabase, limit.usageId, recordAiUsage(AI_MODELS.letter, msg.usage, "notes"));
     const text = msg.content
       .map((b) => (b.type === "text" ? b.text : ""))
       .join("")
