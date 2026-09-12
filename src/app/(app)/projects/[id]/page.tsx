@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import PageHeader from "@/components/PageHeader";
 import ProjectMenu from "./ProjectMenu";
 import PlanManager from "./PlanManager";
+import AiSpendSection from "./AiSpendSection";
+import { getAiSpend } from "@/lib/projects/aiSpend";
 import type { PlanFile, Project } from "@/types";
 
 
@@ -30,6 +32,7 @@ export default async function ProjectDetailPage({
     .eq("project_id", id)
     .order("created_at", { ascending: false });
   const files = (filesData ?? []) as PlanFile[];
+  const aiSpend = await getAiSpend(supabase, id);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -120,6 +123,16 @@ export default async function ProjectDetailPage({
           </div>
           <span aria-hidden="true" className="text-brand">→</span>
         </Link>
+
+        {/* What the AI has cost on this job — updates as each run finishes. */}
+        {aiSpend ? (
+          <AiSpendSection
+            totalUsd={aiSpend.totalUsd}
+            costedRuns={aiSpend.costedRuns}
+            uncostedRuns={aiSpend.uncostedRuns}
+            runs={aiSpend.runs}
+          />
+        ) : null}
         </div>
       </div>
     </div>
