@@ -63,7 +63,7 @@ export default function NextUp({
       case "pricing":
         return {
           title: stages.pricing === "partial" ? "Confirm the prices" : "Price the scope",
-          how: "“Suggest prices with AI” fills the lines; tap each one to check it and confirm with the ✓. Add sub quotes with “+ Add Quote”.",
+          how: "“Suggest prices with AI” fills the lines; check each one and tap “Confirm” (or “Confirm all”). Add sub quotes with “+ Add Quote”.",
           href: `${base}/pricing`,
           cta: "Go to Pricing",
         };

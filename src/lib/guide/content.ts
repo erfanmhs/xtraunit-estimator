@@ -60,7 +60,7 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
     steps: [
       { do: "Click “+ New project” (top right).", note: "Name, client, address, type — one short form." },
       { do: "Open a project card to get to its home page.", note: "Plans go in there; the six stages follow." },
-      { do: "Drag cards to reorder them; “⋯” on a card archives it.", note: "On a phone, hold a card to reorder." },
+      { do: "To move a card, tap “Reorder” above the list (or hold a card → “Reorder projects”), drag it, then tap Done.", note: "Holding a card also gives Edit, Duplicate, Archive and Delete." },
     ],
     done: "A card for the job, with 0 of 6 dots lit. Time to upload plans.",
     tip: "Start with a small job you already priced by hand. You'll know whether the numbers feel right.",
@@ -101,12 +101,12 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
     steps: [
       { do: "Set the scale first: the “Scale” box in the toolbar (e.g. 1/4″ = 1′-0″).", note: "No scale printed? Use “Calibrate”: tap both ends of a dimension you know and type its length. Every sheet needs a scale before it saves a measurement." },
       { do: "Pick a tool: “Area” for floors, roofs and slabs · “Line” or “Wall” for walls, footings, curbs · “Count” for doors, windows, fixtures · “Volume” for excavation and concrete.", note: "“Polyline” for a run of connected walls. “Select” to pick something you already drew; “Pan” to move the sheet with one finger." },
-      { do: "Tap the corners. On a phone the crosshair floats above your finger — line it up, then lift.", note: "Two fingers pan and zoom, never place a point. Hold a point for move / delete. Double-tap the last corner to close a shape." },
+      { do: "Tap the corners. On a phone the crosshair floats above your finger — line it up, then lift.", note: "Two fingers pan and zoom, never place a point. Hold a point for move / delete. When the last corner is in, tap “✓ Close shape” (or “✓ Finish” for a line)." },
       { do: "Name each measurement the way you'd say it: “Main floor area”, “Exterior walls”, “Kitchen windows”.", note: "The AI reads the names when it writes the scope. Good names → good scope." },
       { do: "Measure 5–10 drivers, not everything.", note: "Floor area · exterior wall length · roof area · window and door counts · kitchens and baths · excavation. Stop there." },
     ],
     done: "A short list of named measurements on each sheet that matters. The Takeoff dot turns green.",
-    tip: "The ledger at the side lists everything you measured; tap a row to jump to it.",
+    tip: "“« Panel” opens the list of everything measured on the sheet; “Show legend” prints the totals on the sheet itself.",
     next: { key: "scope", label: "Generate the scope" },
   },
 
@@ -133,7 +133,7 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
     steps: [
       { do: "Click “Suggest prices with AI”.", note: "Fills the unpriced lines from your cost database and past jobs. Each suggestion stays a suggestion until you confirm it." },
       { do: "Tap a line to edit the five cells. Per unit when the line has a quantity, lump sum otherwise.", note: "Cells take formulas: 2.5*1.1, (100+50)/2." },
-      { do: "Confirm each line with the ✓.", note: "Only confirmed lines count as done — watch “Confirmed” vs “Projected” at the top." },
+      { do: "Tap “Confirm” on each line you agree with — or “Confirm all” at the top of the table.", note: "Only confirmed lines count as done — watch “Confirmed” vs “Projected” at the top." },
       { do: "Have a sub's quote? “+ Add Quote” → upload the PDF or photograph it.", note: "The AI reads the total and the trades, then spreads the amount across that trade's lines." },
       { do: "Exclusions live at the bottom — lines you're not bidding, kept with their numbers.", note: "They print on the proposal as exclusions." },
     ],
