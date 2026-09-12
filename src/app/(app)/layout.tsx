@@ -1,4 +1,5 @@
 import AppSidebar from "@/components/AppSidebar";
+import GuideFab from "@/components/guide/GuideFab";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -29,6 +30,8 @@ export default async function AppLayout({
       <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {children}
       </div>
+      {/* The "?" guide, every page. */}
+      <GuideFab />
     </div>
   );
 }
