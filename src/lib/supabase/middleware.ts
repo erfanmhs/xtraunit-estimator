@@ -45,7 +45,9 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/reset-password") ||
     // The client's proposal link (/p/<token>) — no login; the data behind it
     // is gated by the unguessable token, not by a session.
-    path.startsWith("/p/");
+    path.startsWith("/p/") ||
+    // The uptime monitor's heartbeat — answers "ok" or not, carries no data.
+    path === "/api/health";
 
   // Not signed in and trying to reach a protected page → go to login.
   if (!user && !isPublicAuthRoute) {

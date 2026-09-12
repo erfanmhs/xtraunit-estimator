@@ -22,7 +22,7 @@ services:
     region: oregon
     buildCommand: npm ci && npm run build
     startCommand: npm run start
-    healthCheckPath: /login
+    healthCheckPath: /api/health # 503 when the database is unreachable, not just when the app is
     envVars:
       - key: NODE_VERSION
         value: "22"
