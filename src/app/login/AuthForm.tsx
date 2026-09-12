@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { signUp } from "./actions";
+import PasswordInput from "@/components/PasswordInput";
 
 // Hide "Create an account" entirely when sign-up is closed (invite-only).
 const SIGNUP_OPEN = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
@@ -162,10 +163,9 @@ export default function AuthForm() {
                 </button>
               ) : null}
             </div>
-            <input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
               autoComplete={
                 mode === "signup" ? "new-password" : "current-password"
               }
