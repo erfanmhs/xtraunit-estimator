@@ -99,6 +99,7 @@ import {
   loadSheetMeasurements,
 } from "@/lib/takeoff/store";
 import LayerNameField from "./LayerNameField";
+import { TYPE_NOUN, blockedLayers, layerFits, nextLayerName } from "@/lib/takeoff/layers";
 import { findSymbolCopies } from "@/lib/takeoff/templateMatchClient";
 
 export default function PlanViewer({
@@ -237,6 +238,14 @@ export default function PlanViewer({
   // never closed the picker.)
   const popoverRef = useRef<HTMLDivElement>(null);
   const layerAnchorRef = useRef<DOMRect | null>(null); // the layer chip's box when opened
+  const layerChipRef = useRef<HTMLButtonElement>(null); // the chip itself, for opening the wizard from code
+  // One kind of measurement per layer. A tool switch starts a fresh layer,
+  // "Layer N" numbered across the whole project (names are read once per
+  // plan file and every new name is added), and opens the wizard with the
+  // name selected so typing replaces it.
+  const lastMeasureToolRef = useRef<Tool | null>(null);
+  const projectLayerNamesRef = useRef<Set<string>>(new Set());
+  const [layerWizard, setLayerWizard] = useState(false); // picker opened by a tool switch: select the name
   function popover(close: () => void, body: React.ReactNode, width = "w-80", anchor?: DOMRect | null) {
     if (phone) {
       // Small popover pinned under its control (portaled so the backdrop is
@@ -1186,22 +1195,77 @@ export default function PlanViewer({
     );
   }
 
-  // Selecting a measure tool starts fresh: empty layer name, new color.
+  // Every layer name on this plan file's sheets, so "Layer N" never repeats
+  // across sheets. Read once; new names are added as they are made.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { data } = await supabase
+        .from("measurements")
+        .select("layer")
+        .eq("project_id", projectId)
+        .not("layer", "is", null);
+      if (!live) return;
+      for (const r of (data as { layer: string | null }[] | null) ?? []) if (r.layer) projectLayerNamesRef.current.add(r.layer);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [supabase, projectId]);
+
+  /** The next free automatic name, counting this sheet and every other sheet on the file. */
+  function freshLayerName(): string {
+    const used = new Set(projectLayerNamesRef.current);
+    for (const n of layerNames) used.add(n);
+    if (layer.trim()) used.add(layer.trim());
+    const name = nextLayerName(used);
+    projectLayerNamesRef.current.add(name);
+    return name;
+  }
+
+  /** Start a new layer for `t` and open the wizard with its name selected. */
+  function startNewLayer() {
+    skipLayerCommitRef.current = true; // an open picker must not commit the old text over the new name
+    setLayer(freshLayerName());
+    setColor(pickNextColor());
+    layerAnchorRef.current = layerChipRef.current?.getBoundingClientRect() ?? null;
+    setLayerWizard(true);
+    setLayerOpen(true);
+  }
+
+  /** The layer a run of `type` may be saved into: the current one if it fits, else a fresh one. */
+  function layerFor(type: string): string | null {
+    const name = layer.trim();
+    if (!name) return null;
+    if (layerFits(measurements, name, type)) return name;
+    const fresh = freshLayerName();
+    setLayer(fresh);
+    setColor(pickNextColor());
+    return fresh;
+  }
+
+  // Selecting a measure tool: a different tool than last time (or a layer
+  // that already holds another kind) starts a fresh layer and asks for its
+  // name. Re-selecting the same tool, or going through Select / Pan and
+  // back, keeps recording into the same layer.
   function selectTool(t: Tool) {
     setTool(t);
     setDraft([]);
     setHover(null);
     finishCount();
     setAiCount(null);
-    // The active layer sticks across tool switches (keep recording into the
-    // same layer); only an empty layer gets a fresh color.
-    if (MEASURE_TOOLS.includes(t) && !layer.trim()) setColor(pickNextColor());
+    if (!MEASURE_TOOLS.includes(t)) return;
+    const prev = lastMeasureToolRef.current;
+    lastMeasureToolRef.current = t;
+    const switched = prev !== null && prev !== t;
+    if (switched || !layer.trim() || !layerFits(measurements, layer.trim(), t)) startNewLayer();
   }
 
   // "Digitizer" continue: re-arm a layer group so new draws keep adding to it.
   function continueLayer(g: { layer: string; color: string; rows: Measurement[] }) {
     const first = g.rows[0];
     finishCount();
+    if (MEASURE_TOOLS.includes(first.type as Tool)) lastMeasureToolRef.current = first.type as Tool;
     setLayer(g.layer === "Unlabeled" ? "" : g.layer);
     setColor(g.color);
     if (first.type === "wall") {
@@ -1421,13 +1485,14 @@ export default function PlanViewer({
     // the user had started drawing next on a slow connection, and the saved
     // shape "vanished" until the round trip came back.)
     const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const layerName = layerFor(type);
     const optimistic: Measurement = {
       id: tempId,
       type,
       geometry,
       value,
       unit,
-      layer: layer.trim() || null,
+      layer: layerName,
       color,
       wall_sided: null,
       wall_height: null,
@@ -1459,7 +1524,7 @@ export default function PlanViewer({
         geometry,
         value,
         unit,
-        layer: layer.trim() || null,
+        layer: layerName,
         color,
         ...extra,
       })
@@ -1521,6 +1586,7 @@ export default function PlanViewer({
   }
 
   async function insertLeader(geometry: Pt[]) {
+    const layerName = layerFor("leader");
     if (!currentSheet) return;
     // Draft clears and the arrow shows right away; the note card opens once
     // the row exists (its text edits need the real id).
@@ -1534,7 +1600,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer.trim() || null,
+        layer: layerName,
         color,
         wall_sided: null,
         wall_height: null,
@@ -1567,7 +1633,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer.trim() || null,
+        layer: layerName,
         color,
         text: "",
         font_size: LEADER_FONT_DEFAULT,
@@ -1726,7 +1792,7 @@ export default function PlanViewer({
         geometry,
         value: 1,
         unit: "ea",
-        layer: layer.trim() || null,
+        layer: layerFor("count"),
         color,
       })
       .select(MEAS_COLS)
@@ -4166,9 +4232,11 @@ export default function PlanViewer({
             <div className="relative flex min-w-0 flex-1 basis-40 items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
               <button
+                ref={layerChipRef}
                 type="button"
                 onClick={(e) => {
                   layerAnchorRef.current = e.currentTarget.getBoundingClientRect();
+                  setLayerWizard(false);
                   setLayerOpen((o) => !o);
                 }}
                 aria-haspopup="listbox"
@@ -4190,20 +4258,29 @@ export default function PlanViewer({
                 ? popover(
                     () => setLayerOpen(false),
                     <div className="p-1.5 text-sm">
+                      {layerWizard ? (
+                        <p className="px-1 pb-1 text-[11px] text-foreground">
+                          New layer for {TYPE_NOUN[tool] ?? "this tool"}. Name it, or keep the number.
+                        </p>
+                      ) : null}
                       <LayerNameField
+                        key={layer}
                         initial={layer}
                         existing={layerNames}
+                        blocked={blockedLayers(measurements, tool)}
+                        toolNoun={TYPE_NOUN[tool] ?? "runs"}
+                        selectOnMount={layerWizard}
                         skipCommitRef={skipLayerCommitRef}
                         onCommit={setLayer}
                         onDone={() => setLayerOpen(false)}
                       />
-                      {layerGroups.length ? (
+                      {layerGroups.some((g) => g.rows[0]?.type === tool) ? (
                         <>
                           <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-muted">
-                            Continue a layer
+                            Continue a layer of {TYPE_NOUN[tool] ?? "this kind"}
                           </p>
                           <div className="max-h-[32vh] overflow-y-auto sm:max-h-56">
-                            {layerGroups.map((g) => {
+                            {layerGroups.filter((g) => g.rows[0]?.type === tool).map((g) => {
                               const active = layerKeyOf(layer) === g.layer;
                               return (
                                 <button
