@@ -15,6 +15,8 @@ import PlanTriage from "./PlanTriage";
 import type { PlanFile } from "@/types";
 import Caret from "@/components/Caret";
 import { sizeVerdict } from "@/lib/plans/uploadGuards";
+import CameraButton from "@/components/CameraButton";
+import { SHEET_MAX_EDGE, normalizePhoto, photoFileName, photoToPdf } from "@/lib/photo";
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return "";
@@ -40,10 +42,32 @@ export default function PlanManager({
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  function pick(fileList: FileList | null) {
+  const [preparing, setPreparing] = useState(false);
+
+  // A photo of a sheet, taken on site, becomes a one-page PDF and goes
+  // through the same triage as an uploaded set. Scale is set in the viewer
+  // with Calibrate, like any scan.
+  async function onSheetPhoto(raw: File) {
     setError(null);
+    setPreparing(true);
+    try {
+      const jpeg = await normalizePhoto(raw, SHEET_MAX_EDGE, "sheet.jpg");
+      const pdf = await photoToPdf(jpeg, photoFileName("sheet-photo", "pdf"));
+      pickFile(pdf);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't read that photo.");
+    } finally {
+      setPreparing(false);
+    }
+  }
+
+  function pick(fileList: FileList | null) {
     const file = fileList?.[0];
-    if (!file) return;
+    if (file) pickFile(file);
+  }
+
+  function pickFile(file: File) {
+    setError(null);
     if (file.type && file.type !== "application/pdf") {
       setError("Only PDF plan sets are supported.");
       return;
@@ -154,6 +178,16 @@ export default function PlanManager({
         <span className="text-sm text-foreground">＋ Upload or drop a plan PDF</span>
         <span className="text-xs text-muted">you&apos;ll pick which sheets to keep next</span>
       </label>
+
+      {/* On site with only a phone: photograph a sheet and measure it. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <CameraButton onPhoto={onSheetPhoto} disabled={preparing}>
+          {preparing ? "Preparing…" : "Photograph a sheet"}
+        </CameraButton>
+        <span className="text-xs text-muted">
+          One shot per sheet; it becomes a plan you can measure once you set its scale.
+        </span>
+      </div>
 
       {error ? (
         <p

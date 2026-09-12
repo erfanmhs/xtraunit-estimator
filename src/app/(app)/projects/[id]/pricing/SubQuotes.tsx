@@ -23,6 +23,8 @@ import {
 } from "./actions";
 import type { QuoteExtraction } from "@/lib/scope/subquote";
 import { evalFormula } from "@/lib/formula";
+import CameraButton from "@/components/CameraButton";
+import { QUOTE_MAX_EDGE, normalizePhoto, photoFileName } from "@/lib/photo";
 import { OTHER_TRADE, TRADE_PACKAGES, tradeFor, tradeOf } from "@/lib/scope/trades";
 
 export type SubQuote = {
@@ -87,6 +89,21 @@ export default function SubQuotes({
     setFilePath(null);
     setFileName(null);
     if (fileRef.current) fileRef.current.value = "";
+  }
+
+  // A camera shot: shrink and re-encode as JPEG first (12 MP HEIC would be
+  // refused by the reader and slow to send), then it is a normal upload.
+  async function onPhoto(raw: File) {
+    setError(null);
+    setBusy("Preparing the photo…");
+    try {
+      const jpeg = await normalizePhoto(raw, QUOTE_MAX_EDGE, photoFileName("quote-photo", "jpg"));
+      setBusy(null);
+      await onFilePicked(jpeg);
+    } catch (e) {
+      setBusy(null);
+      setError(e instanceof Error ? e.message : "Couldn't read that photo.");
+    }
   }
 
   async function onFilePicked(file: File) {
@@ -265,8 +282,11 @@ export default function SubQuotes({
               }}
               className="text-xs text-muted file:mr-2 file:rounded-md file:border file:border-border file:bg-transparent file:px-2 file:py-1 file:text-xs file:text-foreground"
             />
-            <span className="text-[11px] text-muted/70">
-              PDF or photo — AI fills the fields below. Or type them yourself.
+            <CameraButton onPhoto={onPhoto} disabled={!!busy}>
+              Photograph the quote
+            </CameraButton>
+            <span className="basis-full text-[11px] text-muted/70">
+              PDF, photo, or a shot from your camera — AI fills the fields below. Or type them yourself.
             </span>
           </div>
 
