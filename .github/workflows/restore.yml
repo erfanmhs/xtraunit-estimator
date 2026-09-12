@@ -93,7 +93,7 @@ jobs:
           # surface in the count step, which must match the dump.
           pg_restore --dbname="$TARGET" \
             --clean --if-exists --no-owner --no-privileges \
-            --schema=public --exit-on-error=false \
+            --schema=public \
             "$DUMP" || echo "pg_restore reported warnings (see above); checking the data landed…"
 
       - name: Show what landed (rows per table)
