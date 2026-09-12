@@ -1,4 +1,4 @@
-# AI spend protection — the four guards
+# AI spend protection — the five guards
 
 Every path that spends Anthropic money passes through these, in order. All
 defaults are env-overridable (see `.env.local.example`); none needs an
@@ -9,6 +9,7 @@ external service.
 | 1 | **Burst limit** per user | `lib/rate-limit.ts` via `enforceAiLimit()` | 10 AI starts / 10 min | A stuck retry loop or a script hammering Generate. In-memory, instant. |
 | 2 | **Daily / monthly run counts** per user | `lib/ai-usage.ts` (table `ai_usage`, migration 0027) | 60 / day, 600 / 30 days | Sustained over-use by one account. Durable in the DB. |
 | 3 | **Per-run dollar ceiling** | `lib/ai-meter.ts` | $15 per run | One Generate running away (huge plan set, prompt blow-up). Metered from the token counts on every response. |
+| 3b | **Monthly dollar budget** per user | `lib/ai-usage.ts` (`getAiSpendThisMonth`, migration 0042) | $25 / 30 days | The slow leak: many normal-sized runs adding up. Sums `scope_runs.cost_usd` (jobs) plus `ai_usage.cost_usd` (one-shot calls, settled after each). Shown under the Generate / Suggest buttons: "AI this month: $x of $25". |
 | 4 | **Sign-up limits + switch** | `app/login/actions.ts` | 5 / IP / hour, 30 total / hour; `NEXT_PUBLIC_ALLOW_SIGNUP` | Strangers creating accounts to spend the budget. |
 
 ## How the per-run ceiling behaves
@@ -51,6 +52,7 @@ Supabase's own auth rate limits apply.
 | Env | Default | Notes |
 |---|---|---|
 | `AI_JOB_BUDGET_USD` | 15 | 0 disables the per-run ceiling. |
+| `AI_MONTHLY_BUDGET_USD` | 25 | Per user, rolling 30 days; 0 disables. Refuses the next AI start once reached. |
 | `AI_BURST_LIMIT` / `AI_BURST_WINDOW_MIN` | 10 / 10 | Per user. |
 | `AI_DAILY_LIMIT` / `AI_MONTHLY_LIMIT` | 60 / 600 | Per user; 0 disables a window. |
 | `SIGNUP_LIMIT_PER_IP` / `SIGNUP_LIMIT_GLOBAL` | 5 / 30 | Per hour. |

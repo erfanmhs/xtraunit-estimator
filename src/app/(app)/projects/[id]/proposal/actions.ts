@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
-import { enforceAiLimit } from "@/lib/ai-usage";
+import { enforceAiLimit, settleAiUsage } from "@/lib/ai-usage";
 import { loadProposal } from "@/lib/proposal/load";
 import { log } from "@/lib/log";
 import { recordAiUsage } from "@/lib/ai-meter";
@@ -213,7 +213,7 @@ Return JSON: { "executive_summary": string, "project_description": string }.`;
       messages: [{ role: "user", content: prompt }],
     });
     const msg = await stream.finalMessage();
-    recordAiUsage(LETTER_MODEL, msg.usage, "proposal");
+    await settleAiUsage(supabase, limit.usageId, recordAiUsage(LETTER_MODEL, msg.usage, "proposal"));
     const textBlock = msg.content.find((b) => b.type === "text");
     const text = textBlock && "text" in textBlock ? (textBlock.text as string) : "";
     if (!text) return { ok: false, error: "The AI returned nothing — try again." };

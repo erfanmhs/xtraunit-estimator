@@ -2,6 +2,8 @@ import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
 import { getPricingRun } from "./actions";
+import AiBudgetNote from "@/components/AiBudgetNote";
+import { getAiSpendThisMonth } from "@/lib/ai-usage";
 import PricingTable, { type PricedLine } from "./PricingTable";
 import SuggestPanel from "./SuggestPanel";
 import SubQuotes, { type SubQuote } from "./SubQuotes";
@@ -55,6 +57,7 @@ export default async function PricingPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const aiSpend = user ? await getAiSpendThisMonth(supabase, user.id) : null;
   let subQuotes: SubQuote[] = [];
   const sq = await supabase
     .from("sub_quotes")
@@ -95,7 +98,10 @@ export default async function PricingPage({
           action={<NextStep href={`/projects/${id}/estimate`} label="Estimate" />}
           controls={
             !migrationMissing ? (
-              <SuggestPanel projectId={id} initialRun={initialRun} />
+              <div className="flex flex-col gap-1.5">
+                <SuggestPanel projectId={id} initialRun={initialRun} />
+                {aiSpend ? <AiBudgetNote spend={aiSpend} /> : null}
+              </div>
             ) : null
           }
         />

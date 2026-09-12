@@ -12,7 +12,8 @@ import { runPricingSuggestion, abortPricingRun } from "@/lib/scope/price";
 import { readSubQuote, type QuoteExtraction } from "@/lib/scope/subquote";
 import { homeDivision, tradeFor, tradeOf, tradeSequence } from "@/lib/scope/trades";
 import { findOrCreateItem, recomputeItemStd } from "@/lib/scope/items";
-import { enforceAiLimit } from "@/lib/ai-usage";
+import { enforceAiLimit, settleAiUsage } from "@/lib/ai-usage";
+import { runWithAiBudget } from "@/lib/ai-meter";
 import { log } from "@/lib/log";
 import { enqueueJob, requestCancel, normalizeRun, ACTIVE_STATUSES } from "@/lib/jobs/queue";
 import { uuid, pricePatch, subQuoteInput, firstIssue } from "@/lib/validation";
@@ -340,7 +341,12 @@ export async function readQuoteDoc(
 
   try {
     const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
-    const extraction = await readSubQuote({ base64, mime, fileName });
+    // Metered so the call's cost can be settled onto this month's budget.
+    const { extraction, costUsd } = await runWithAiBudget({ label: "subquote" }, async (m) => ({
+      extraction: await readSubQuote({ base64, mime, fileName }),
+      costUsd: m.spentUsd,
+    }));
+    await settleAiUsage(supabase, limit.usageId, costUsd);
     return { ok: true, extraction };
   } catch (e) {
     log.error("subquote.read.failed", { userId: user.id, fileName, mime, err: e });
