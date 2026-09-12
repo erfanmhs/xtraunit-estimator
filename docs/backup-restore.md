@@ -7,6 +7,18 @@ work, full stop. Now a GitHub Action dumps it every night at 2 am Pacific and
 keeps each dump for 90 days, and a second Action restores any of them on
 demand.
 
+## Status (2026-09-12)
+
+Set up and proven the same day: backup run #2 captured 15 tables (432 KB),
+restore run #2 rebuilt them in the scratch project `xtraunit-restore-test`
+and the counts matched production exactly (10 projects, 166 sheets, 299
+measurements, 757 scope lines, 447 findings, 34 runs, 4 users). Both
+secrets are in place. Nightly runs start tonight. UptimeRobot monitor
+"XtraUnit Estimator" watches `/api/health` every 5 minutes → email.
+
+Next drill due: December 2026. Open the scratch project in Supabase first —
+free projects pause after a week idle; click "Restore project" if it did.
+
 ## One-time setup (Erfan, about ten minutes)
 
 1. **The production connection string.** Supabase dashboard → the project →
