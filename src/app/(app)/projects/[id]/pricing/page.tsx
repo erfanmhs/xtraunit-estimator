@@ -23,14 +23,23 @@ export default async function PricingPage({
 
   // Pricing columns come from migration 0011 — show a friendly banner if it
   // hasn't been run yet instead of crashing.
-  const { data: items, error: itemsError } = await supabase
+  const baseCols =
+    "id,division_code,division_name,section_code,description,quantity,unit,status,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence,price_status,sort_order";
+  // Trade columns arrive with migration 0041; fall back without them.
+  const wide = await supabase
     .from("line_items")
-    .select(
-      "id,division_code,division_name,description,quantity,unit,status,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence,price_status,sort_order",
-    )
+    .select(`${baseCols},trade_package,deliverable`)
     .eq("project_id", id)
     .order("division_code", { ascending: true })
     .order("sort_order", { ascending: true });
+  const { data: items, error: itemsError } = wide.error
+    ? await supabase
+        .from("line_items")
+        .select(baseCols)
+        .eq("project_id", id)
+        .order("division_code", { ascending: true })
+        .order("sort_order", { ascending: true })
+    : wide;
 
   const migrationMissing = !!itemsError;
   // Excluded lines are NOT dropped any more. They keep their quantity and

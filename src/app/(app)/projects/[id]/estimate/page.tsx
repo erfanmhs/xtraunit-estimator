@@ -20,14 +20,23 @@ export default async function EstimatePage({
     .eq("id", id)
     .maybeSingle();
 
-  const { data: items, error: itemsError } = await supabase
+  const baseCols =
+    "id,division_code,division_name,section_code,description,quantity,unit,status,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence,price_status,sort_order";
+  // Trade columns arrive with migration 0041; fall back without them.
+  const wide = await supabase
     .from("line_items")
-    .select(
-      "id,division_code,division_name,description,quantity,unit,status,price_mode,cost_labor,cost_material,cost_sub,cost_equipment,cost_other,cost_total,price_source,price_note,price_confidence,price_status,sort_order",
-    )
+    .select(`${baseCols},trade_package,deliverable`)
     .eq("project_id", id)
     .order("division_code", { ascending: true })
     .order("sort_order", { ascending: true });
+  const { data: items, error: itemsError } = wide.error
+    ? await supabase
+        .from("line_items")
+        .select(baseCols)
+        .eq("project_id", id)
+        .order("division_code", { ascending: true })
+        .order("sort_order", { ascending: true })
+    : wide;
 
   // estimates row (markups). Resilient: 0013 not run → defaults + banner.
   const { data: est, error: estError } = await supabase

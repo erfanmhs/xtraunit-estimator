@@ -8,7 +8,7 @@
  *  - Descriptions are click-to-edit right here (no trip back to Scope); lines
  *    can be added or excluded here too. Edits mark the line user-owned so a
  *    scope regenerate never overwrites them.
- *  - Divisions are collapsible; a collapsed division keeps its title + total.
+ *  - Grouped by TRADE (Plumbing, Framing…), collapsible; a collapsed trade keeps its title + total.
  *  - Status per line: unpriced → "needs confirm" (amber) → confirmed (green).
  */
 import { useEffect, useMemo, useState, useTransition } from "react";
@@ -24,11 +24,16 @@ import { updateLineItem, setLineStatus, addLineItem, deleteLineItem } from "../s
 import { evalFormula } from "@/lib/formula";
 import SwipeRow from "@/components/SwipeRow";
 import Caret from "@/components/Caret";
+import { groupByTrade, homeDivision } from "@/lib/scope/trades";
 
 export type PricedLine = {
   id: string;
   division_code: string | null;
   division_name: string | null;
+  section_code?: string | null;
+  /** The trade-package layer (migration 0041). Absent on older rows. */
+  trade_package?: string | null;
+  deliverable?: string | null;
   description: string;
   quantity: number | null;
   unit: string | null;
@@ -293,7 +298,7 @@ export default function PricingTable({
   }
 
   function onAdd(
-    div: { code: string | null; name: string | null },
+    div: { code: string | null; name: string | null; trade: string },
     fields: { description: string; quantity: number | null; unit: string | null },
   ) {
     setAddingDiv(null);
@@ -302,6 +307,7 @@ export default function PricingTable({
       const res = await addLineItem(projectId, {
         division_code: div.code,
         division_name: div.name,
+        trade_package: div.trade,
         ...fields,
       });
       if (!res.ok || !res.id) {
@@ -314,6 +320,7 @@ export default function PricingTable({
           id: res.id!,
           division_code: div.code,
           division_name: div.name,
+          trade_package: div.trade,
           description: fields.description,
           quantity: fields.quantity,
           unit: fields.unit,
@@ -343,24 +350,25 @@ export default function PricingTable({
     });
   }
 
-  const groups = useMemo(() => {
-    const gs: {
-      key: string;
-      code: string | null;
-      name: string | null;
-      rows: PricedLine[];
-    }[] = [];
-    for (const li of items) {
-      const key = `${li.division_code ?? "—"} · ${li.division_name ?? "Other"}`;
-      let g = gs.find((x) => x.key === key);
-      if (!g) {
-        g = { key, code: li.division_code, name: li.division_name, rows: [] };
-        gs.push(g);
-      }
-      g.rows.push(li);
-    }
-    return gs;
-  }, [items]);
+  // Grouped by TRADE, the same way Scope and the Proposal read (the
+  // trade-package layer, docs/SCOPE-WBS-DESIGN.md). Lines from before the
+  // layer are filed by CSI section on the fly. A hand-added line takes the
+  // trade's home division so the Cost Database still has a code to key on.
+  const groups = useMemo(
+    () =>
+      groupByTrade(items).map((g) => {
+        const sibling = g.rows[0];
+        const home = homeDivision(g.trade);
+        return {
+          key: g.trade,
+          trade: g.trade,
+          code: sibling?.division_code ?? home?.code ?? null,
+          name: sibling?.division_name ?? home?.name ?? null,
+          rows: g.rows,
+        };
+      }),
+    [items],
+  );
 
   const confirmedTotal = items
     .filter((li) => li.price_status === "confirmed")
@@ -456,8 +464,8 @@ export default function PricingTable({
                   <span className="text-xs text-muted">
                     <Caret open={!isCollapsed} />
                   </span>
-                  <h2 className="truncate font-heading text-sm uppercase tracking-wider text-brand-soft">
-                    {g.key}
+                  <h2 className="min-w-0 font-heading text-base leading-tight text-foreground">
+                    {g.trade}
                   </h2>
                   <span className="shrink-0 text-[11px] text-muted">
                     {g.rows.length} lines
@@ -528,7 +536,7 @@ export default function PricingTable({
                   {addingDiv === g.key ? (
                     <AddRow
                       onCancel={() => setAddingDiv(null)}
-                      onAdd={(f) => onAdd({ code: g.code, name: g.name }, f)}
+                      onAdd={(f) => onAdd({ code: g.code, name: g.name, trade: g.trade }, f)}
                     />
                   ) : null}
                 </div>
@@ -605,9 +613,9 @@ function ExclusionsSection({
               <div key={li.id} className="py-2">
                 <p className="flex items-start gap-2 text-sm text-muted">
                   <span className="mt-0.5 shrink-0 font-mono text-[10px]">
-                    {li.division_code ?? "—"}
+                    {li.section_code ?? li.division_code ?? "—"}
                   </span>
-                  <span className="min-w-0 line-through">{li.description}</span>
+                  <span className="min-w-0 line-through">{li.deliverable?.trim() || li.description}</span>
                 </p>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6">
                 {li.quantity != null ? (
@@ -881,10 +889,15 @@ function Row({
             className="cursor-text truncate text-sm text-foreground hover:text-brand-soft"
           >
             {confirmed ? <span className="mr-1 text-green-400">✓</span> : null}
-            {li.description}
+            {li.deliverable?.trim() || li.description}
             <span className="ml-2 text-[11px] text-muted">{qtyText}</span>
           </p>
         )}
+        {li.deliverable?.trim() ? (
+          <p className="truncate text-[11px] text-muted/80">
+            {[li.section_code, li.description].filter(Boolean).join(" · ")}
+          </p>
+        ) : null}
         {proposed && note ? (
           <p className="truncate text-[11px] text-muted" title={note}>
             {note}
