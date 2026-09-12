@@ -208,6 +208,9 @@ export function peaks(
       if (v >= threshold) cands.push({ x, y, score: v });
     }
   cands.sort((a, b) => b.score - a.score);
+  // A textured sheet can clear a loose bar in tens of thousands of places;
+  // suppression is O(candidates × kept), so keep only the strongest.
+  if (cands.length > 4000) cands.length = 4000;
   const kept: { x: number; y: number; score: number }[] = [];
   const r2 = radius * radius;
   for (const c of cands) {
@@ -253,6 +256,8 @@ export function findAll(source: Gray, template: Gray, opts: MatchOptions = {}): 
   const found: Match[] = [];
   const seen: { x: number; y: number }[] = [];
   const tplRadius = Math.max(template.w, template.h) / 2; // source px
+  // Shared by every variant's refinement — computed once, not eight times.
+  const { sum, sq, W } = integrals(fineSrc);
 
   variants.forEach((v, vi) => {
     const cv = downscale(v, fc);
@@ -261,7 +266,6 @@ export function findAll(source: Gray, template: Gray, opts: MatchOptions = {}): 
     if (!ps.length) return;
     const fv = ff === fc ? cv : downscale(v, ff);
     const F = templateStats(fv);
-    const { sum, sq, W } = integrals(fineSrc);
     const n = fv.w * fv.h;
     for (const p of ps) {
       // Map the coarse top-left to fine space and search a small neighbourhood.

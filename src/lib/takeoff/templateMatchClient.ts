@@ -54,13 +54,20 @@ export function templateAround(ink: Gray, pxPerPt: number, centre: Pt, boxPt: nu
   return crop(ink, x0, y0, s, s);
 }
 
+/**
+ * Run the search in a Worker; if the Worker can't be created or its script
+ * fails to load, run it on the main thread instead (slower, never broken).
+ * The arrays are copied into the worker rather than transferred so they are
+ * still intact here for that fallback.
+ */
 function runInWorker(input: WorkerIn): Promise<Match[]> {
+  const onMain = () => findAll(input.source, input.template, input.opts);
   return new Promise((resolve, reject) => {
     let worker: Worker;
     try {
       worker = new Worker(new URL("./templateMatch.worker.ts", import.meta.url));
     } catch {
-      resolve(findAll(input.source, input.template, input.opts));
+      resolve(onMain());
       return;
     }
     worker.onmessage = (e: MessageEvent<WorkerOut>) => {
@@ -68,11 +75,11 @@ function runInWorker(input: WorkerIn): Promise<Match[]> {
       if ("error" in e.data) reject(new Error(e.data.error));
       else resolve(e.data.matches);
     };
-    worker.onerror = (e) => {
+    worker.onerror = () => {
       worker.terminate();
-      reject(new Error(e.message || "search failed"));
+      resolve(onMain());
     };
-    worker.postMessage(input, [input.source.data.buffer, input.template.data.buffer]);
+    worker.postMessage(input);
   });
 }
 

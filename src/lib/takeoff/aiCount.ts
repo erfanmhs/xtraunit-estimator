@@ -12,7 +12,7 @@ import { getAnthropicClient } from "@/lib/anthropic";
 import { assertAiBudget, recordAiUsage } from "@/lib/ai-meter";
 import { AI_MODELS } from "@/config/ai";
 
-const COUNT_MODEL = AI_MODELS.quoteRead;
+const COUNT_MODEL = AI_MODELS.count;
 
 export type AiCountKind = {
   /** Short plural label as it should read on the layer: "Doors", "Windows". */

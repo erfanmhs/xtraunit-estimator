@@ -34,6 +34,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  experimental: {
+    serverActions: {
+      // The AI count check posts a sheet JPEG through a server action; the
+      // default 1 MB cap is too tight for a dense drawing. The viewer keeps
+      // the image under ~0.9 MB itself; this is the headroom.
+      bodySizeLimit: "2mb",
+    },
+  },
 };
 
 /**

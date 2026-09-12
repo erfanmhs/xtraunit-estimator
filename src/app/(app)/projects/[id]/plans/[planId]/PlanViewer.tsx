@@ -641,6 +641,8 @@ export default function PlanViewer({
     setEditGeom(null);
     activeCountRef.current = null;
     setActiveCountId(null);
+    setAutoCount(null);
+    setAiCount(null); // a count of the OLD sheet must never be placed on the new one
     setUndoStack([]);
     setRedoStack([]);
     setActiveVertex(null);
@@ -1190,6 +1192,7 @@ export default function PlanViewer({
     setDraft([]);
     setHover(null);
     finishCount();
+    setAiCount(null);
     // The active layer sticks across tool switches (keep recording into the
     // same layer); only an empty layer gets a fresh color.
     if (MEASURE_TOOLS.includes(t) && !layer.trim()) setColor(pickNextColor());
@@ -1833,6 +1836,7 @@ export default function PlanViewer({
   }
 
   // ── AI count check ────────────────────────────────────────────────────────
+  const AI_COUNT_MAX_B64 = 1_200_000; // ≈ 0.9 MB of JPEG, well under the 2 MB action limit
   async function runAiCount() {
     if (!currentSheet) return;
     setError(null);
@@ -1841,14 +1845,23 @@ export default function PlanViewer({
       // 1568 px on the long edge is the size the model reads best.
       const r = await renderSheetAt(1568 / Math.max(baseDims.w, baseDims.h));
       if (!r) throw new Error("The sheet isn't ready yet.");
-      const dataUrl = r.canvas.toDataURL("image/jpeg", 0.85);
+      // The action request must stay under Next's body limit (2 MB, set in
+      // next.config). A clean floor plan is ~350 KB at 0.85; a dense sheet
+      // can be four times that, so step the quality down until it fits.
+      let jpegBase64 = "";
+      for (const q of [0.85, 0.7, 0.55, 0.4]) {
+        const dataUrl = r.canvas.toDataURL("image/jpeg", q);
+        jpegBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+        if (jpegBase64.length <= AI_COUNT_MAX_B64) break;
+      }
       r.canvas.width = 0;
       r.canvas.height = 0;
+      if (jpegBase64.length > AI_COUNT_MAX_B64) throw new Error("This sheet is too dense to send. Crop it to the area you need first.");
       const res = await aiCountSheet({
         projectId,
         sheetId: currentSheet.id,
         sheetName: currentSheet.name ?? currentSheet.label ?? null,
-        jpegBase64: dataUrl.slice(dataUrl.indexOf(",") + 1),
+        jpegBase64,
       });
       if (!res.ok || !res.result) throw new Error(res.error ?? "The AI count failed.");
       setAiCount({ phase: "result", result: res.result, placed: new Set() });

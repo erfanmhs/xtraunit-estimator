@@ -98,7 +98,7 @@ const countInput = z.object({
   projectId: z.string().uuid(),
   sheetId: z.string().uuid(),
   sheetName: z.string().max(200).nullable(),
-  jpegBase64: z.string().min(100).max(6_000_000), // ~4.5 MB of image
+  jpegBase64: z.string().min(100).max(1_300_000), // the viewer keeps it under 1.2 M; the action body limit is 2 MB
   wanted: z.array(z.string().max(40)).max(12).optional(),
 });
 
