@@ -54,7 +54,8 @@ import {
   recomputeValue,
 } from "@/lib/takeoff/measurements";
 import SwipeRow from "@/components/SwipeRow";
-import { polishSheetNotes } from "./actions";
+import { aiCountSheet, polishSheetNotes } from "./actions";
+import type { AiCountResult } from "@/lib/takeoff/aiCount";
 import {
   SelectIcon,
   PanIcon,
@@ -98,6 +99,7 @@ import {
   loadSheetMeasurements,
 } from "@/lib/takeoff/store";
 import LayerNameField from "./LayerNameField";
+import { findSymbolCopies } from "@/lib/takeoff/templateMatchClient";
 
 export default function PlanViewer({
   projectId,
@@ -522,6 +524,19 @@ export default function PlanViewer({
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCountId, setActiveCountId] = useState<string | null>(null);
+  // "Find all like this": box a symbol around the last marker, search the
+  // sheet, review the ghosts, add them to the run. See lib/takeoff/templateMatch.
+  const [autoCount, setAutoCount] = useState<
+    | null
+    | { phase: "box"; box: number }
+    | { phase: "finding"; box: number }
+    | { phase: "review"; box: number; ghosts: { pt: Pt; score: number }[]; off: Set<number> }
+  >(null);
+  // AI count check: the model's own count of the sheet, shown beside yours;
+  // each kind can be dropped onto the sheet as its own editable count layer.
+  const [aiCount, setAiCount] = useState<
+    null | { phase: "working" } | { phase: "result"; result: AiCountResult; placed: Set<string> }
+  >(null);
   const [editGeom, setEditGeom] = useState<Pt[] | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Undo / redo — snapshots of this sheet's measurements; on undo/redo the DB is
@@ -626,6 +641,8 @@ export default function PlanViewer({
     setEditGeom(null);
     activeCountRef.current = null;
     setActiveCountId(null);
+    setAutoCount(null);
+    setAiCount(null); // a count of the OLD sheet must never be placed on the new one
     setUndoStack([]);
     setRedoStack([]);
     setActiveVertex(null);
@@ -1175,6 +1192,7 @@ export default function PlanViewer({
     setDraft([]);
     setHover(null);
     finishCount();
+    setAiCount(null);
     // The active layer sticks across tool switches (keep recording into the
     // same layer); only an empty layer gets a fresh color.
     if (MEASURE_TOOLS.includes(t) && !layer.trim()) setColor(pickNextColor());
@@ -1724,6 +1742,173 @@ export default function PlanViewer({
   function finishCount() {
     activeCountRef.current = null;
     setActiveCountId(null);
+    setAutoCount(null);
+  }
+
+  // ── Find all like this ────────────────────────────────────────────────────
+  // A match at or above this score is ticked by default; below it is shown
+  // greyed for the user to tick. CAD symbols usually land 0.8+; a scan 0.6+.
+  const AUTO_COUNT_SURE = 0.72;
+  // The anchor is the LAST marker of the active count run: that's the symbol
+  // the user just tapped, so "like this" needs no extra drawing on a phone.
+  const autoCountAnchor: Pt | null = (() => {
+    const run = activeCountId ? measurements.find((m) => m.id === activeCountId) : null;
+    return run && run.geometry.length ? run.geometry[run.geometry.length - 1] : null;
+  })();
+
+  // The search wants the symbol about 36 px across. The on-screen bitmap is
+  // whatever the zoom is (5 px per door when zoomed out), so render the
+  // sheet again off-screen at the resolution the search needs — capped at
+  // 8 M pixels, the same crop window as the display.
+  async function renderForSearch(box: number): Promise<{ canvas: HTMLCanvasElement; pxPerPt: number } | null> {
+    if (!baseDims.w || !baseDims.h) return null;
+    const want = 36 / box;
+    const cap = Math.sqrt(8_000_000 / (baseDims.w * baseDims.h));
+    return renderSheetAt(Math.max(0.5, Math.min(want, cap)));
+  }
+
+  /** The current sheet (its crop window, like the display) drawn off-screen at `pxPerPt`. */
+  async function renderSheetAt(pxPerPt: number): Promise<{ canvas: HTMLCanvasElement; pxPerPt: number } | null> {
+    const pdf = pdfRef.current;
+    if (!pdf || !baseDims.w || !baseDims.h) return null;
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({
+      scale: pxPerPt,
+      offsetX: crop ? -crop.x * pxPerPt : 0,
+      offsetY: crop ? -crop.y * pxPerPt : 0,
+    });
+    const off = document.createElement("canvas");
+    off.width = Math.ceil(baseDims.w * pxPerPt);
+    off.height = Math.ceil(baseDims.h * pxPerPt);
+    const ctx = off.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, off.width, off.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return { canvas: off, pxPerPt };
+  }
+
+  async function runAutoCount(box: number) {
+    const anchor = autoCountAnchor;
+    const active = activeCountRef.current;
+    if (!anchor || !active) return;
+    setError(null);
+    setAutoCount({ phase: "finding", box });
+    try {
+      const r = await renderForSearch(box);
+      if (!r) throw new Error("The sheet isn't ready yet.");
+      // Search loosely; strong matches start ticked, weak ones start
+      // unticked but visible, so a near-miss is one tap away instead of lost.
+      const hits = await findSymbolCopies(r.canvas, r.pxPerPt, anchor, box, { threshold: 0.5 });
+      r.canvas.width = 0;
+      r.canvas.height = 0;
+      // Drop the anchor itself and anything already in the run.
+      const near = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y) < box * 0.5;
+      const ghosts = hits.filter((h) => !active.geometry.some((g) => near(g, h.pt)));
+      const off = new Set<number>();
+      ghosts.forEach((g, i) => {
+        if (g.score < AUTO_COUNT_SURE) off.add(i);
+      });
+      setAutoCount({ phase: "review", box, ghosts, off });
+      if (!ghosts.length) setError("No other copies found. Try a bigger or smaller box.");
+    } catch (e) {
+      setAutoCount({ phase: "box", box });
+      setError(e instanceof Error ? e.message : "The search failed.");
+    }
+  }
+
+  async function acceptAutoCount() {
+    const active = activeCountRef.current;
+    if (!autoCount || autoCount.phase !== "review" || !active) return;
+    const add = autoCount.ghosts.filter((_, i) => !autoCount.off.has(i)).map((g) => g.pt);
+    setAutoCount(null);
+    if (!add.length) return;
+    recordHistory();
+    const geometry = [...active.geometry, ...add];
+    activeCountRef.current = { id: active.id, geometry };
+    const value = geometry.length;
+    setMeasurements((arr) => arr.map((x) => (x.id === active.id ? { ...x, geometry, value } : x)));
+    const { error: upErr } = await supabase
+      .from("measurements")
+      .update({ geometry, value })
+      .eq("id", active.id);
+    if (upErr) setError("Could not save the found markers.");
+  }
+
+  // ── AI count check ────────────────────────────────────────────────────────
+  const AI_COUNT_MAX_B64 = 1_200_000; // ≈ 0.9 MB of JPEG, well under the 2 MB action limit
+  async function runAiCount() {
+    if (!currentSheet) return;
+    setError(null);
+    setAiCount({ phase: "working" });
+    try {
+      // 1568 px on the long edge is the size the model reads best.
+      const r = await renderSheetAt(1568 / Math.max(baseDims.w, baseDims.h));
+      if (!r) throw new Error("The sheet isn't ready yet.");
+      // The action request must stay under Next's body limit (2 MB, set in
+      // next.config). A clean floor plan is ~350 KB at 0.85; a dense sheet
+      // can be four times that, so step the quality down until it fits.
+      let jpegBase64 = "";
+      for (const q of [0.85, 0.7, 0.55, 0.4]) {
+        const dataUrl = r.canvas.toDataURL("image/jpeg", q);
+        jpegBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+        if (jpegBase64.length <= AI_COUNT_MAX_B64) break;
+      }
+      r.canvas.width = 0;
+      r.canvas.height = 0;
+      if (jpegBase64.length > AI_COUNT_MAX_B64) throw new Error("This sheet is too dense to send. Crop it to the area you need first.");
+      const res = await aiCountSheet({
+        projectId,
+        sheetId: currentSheet.id,
+        sheetName: currentSheet.name ?? currentSheet.label ?? null,
+        jpegBase64,
+      });
+      if (!res.ok || !res.result) throw new Error(res.error ?? "The AI count failed.");
+      setAiCount({ phase: "result", result: res.result, placed: new Set() });
+    } catch (e) {
+      setAiCount(null);
+      setError(e instanceof Error ? e.message : "The AI count failed.");
+    }
+  }
+
+  /** Drop one AI-counted kind onto the sheet as its own count layer. */
+  async function placeAiCount(kind: AiCountResult["kinds"][number]) {
+    if (!currentSheet || !aiCount || aiCount.phase !== "result") return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setError("Not signed in — nothing was placed.");
+      return;
+    }
+    const geometry: Pt[] = kind.positions.map((p) => ({ x: p.x * baseDims.w, y: p.y * baseDims.h }));
+    if (!geometry.length) return;
+    recordHistory();
+    const { data, error: insErr } = await insertMeasurements(
+      supabase,
+      { projectId, planFileId: planFile.id, sheetId: currentSheet.id, ownerId: user.id },
+      [
+        {
+          type: "count",
+          geometry,
+          value: geometry.length,
+          unit: "ea",
+          layer: `${kind.kind} (AI)`,
+          color: pickNextColor(),
+          wall_sided: null,
+          wall_height: null,
+          vol_mode: null,
+          vol_width: null,
+          vol_depth: null,
+        },
+      ],
+    );
+    if (insErr || !data.length) {
+      setError("Could not place the AI count.");
+      return;
+    }
+    setMeasurements((arr) => [...arr, ...data]);
+    setAiCount((a) => (a && a.phase === "result" ? { ...a, placed: new Set([...a.placed, kind.kind]) } : a));
   }
 
   // Nearest measurement under a point (in PDF points), or null. Shared by the
@@ -4228,14 +4413,135 @@ export default function PlanViewer({
                       ? "Tap each item — every tap saves · hold a marker to remove it"
                       : "Click each item — every click saves"}
                 </span>
-                <button
-                  type="button"
-                  onClick={finishCount}
-                  disabled={!activeCountId}
-                  className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong disabled:opacity-40"
-                >
-                  Finish count
-                </button>
+                {autoCount ? null : (
+                  <button
+                    type="button"
+                    onClick={finishCount}
+                    disabled={!activeCountId}
+                    className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong disabled:opacity-40"
+                  >
+                    Finish count
+                  </button>
+                )}
+                {activeCountId && autoCountAnchor && !autoCount ? (
+                  <button
+                    type="button"
+                    onClick={() => setAutoCount({ phase: "box", box: 30 })}
+                    title="Search the sheet for every copy of the symbol under your last marker"
+                    className="rounded-md border border-brand/50 px-3 py-1 font-medium text-brand-soft hover:bg-brand/10"
+                  >
+                    Find all like this
+                  </button>
+                ) : null}
+                {!autoCount && !aiCount ? (
+                  <button
+                    type="button"
+                    onClick={runAiCount}
+                    title="Ask the AI to count the doors, windows and fixtures it sees on this sheet"
+                    className="rounded-md border border-border px-3 py-1 text-foreground hover:border-brand"
+                  >
+                    AI count check
+                  </button>
+                ) : null}
+                {aiCount?.phase === "working" ? (
+                  <span className="text-xs text-muted">AI is reading the sheet… (10–30 s)</span>
+                ) : null}
+                {autoCount?.phase === "box" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted">Box around your last marker:</span>
+                    <button
+                      type="button"
+                      aria-label="Smaller box"
+                      onClick={() => setAutoCount((a) => (a ? { phase: "box", box: Math.max(8, a.box - 4) } : a))}
+                      className="h-8 w-8 rounded-md border border-border text-foreground"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[3.5rem] text-center text-xs tabular-nums text-foreground">{autoCount.box} pt</span>
+                    <button
+                      type="button"
+                      aria-label="Bigger box"
+                      onClick={() => setAutoCount((a) => (a ? { phase: "box", box: Math.min(200, a.box + 4) } : a))}
+                      className="h-8 w-8 rounded-md border border-border text-foreground"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => runAutoCount(autoCount.box)}
+                      className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong"
+                    >
+                      Find
+                    </button>
+                    <button type="button" onClick={() => setAutoCount(null)} className="text-xs text-muted hover:text-foreground">
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+                {autoCount?.phase === "finding" ? (
+                  <span className="text-xs text-muted">Searching the sheet…</span>
+                ) : null}
+                {autoCount?.phase === "review" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted">
+                      {autoCount.ghosts.length - autoCount.off.size} sure
+                      {autoCount.off.size ? ` · ${autoCount.off.size} unsure (grey — tap to include)` : " · tap one to skip it"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={acceptAutoCount}
+                      className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong"
+                    >
+                      Add {autoCount.ghosts.length - autoCount.off.size}
+                    </button>
+                    <button type="button" onClick={() => setAutoCount(null)} className="text-xs text-muted hover:text-foreground">
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {tool === "count" && aiCount?.phase === "result" ? (
+              <div className="basis-full rounded-lg border border-border bg-background/70 px-3 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs text-muted">
+                    AI sees: <span className="text-foreground">{aiCount.result.sheet_read}</span>
+                    {aiCount.result.kinds.length ? "" : " — nothing it could count with confidence."}
+                  </p>
+                  <button type="button" onClick={() => setAiCount(null)} className="text-xs text-muted hover:text-foreground">
+                    Close
+                  </button>
+                </div>
+                {aiCount.result.kinds.length ? (
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {aiCount.result.kinds.map((k) => {
+                      const placed = aiCount.placed.has(k.kind);
+                      const mine = measurements
+                        .filter((m) => m.type === "count" && (m.layer ?? "").toLowerCase().startsWith(k.kind.toLowerCase()))
+                        .reduce((n, m) => n + m.geometry.length, 0);
+                      return (
+                        <li key={k.kind} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                          <span className="font-medium text-foreground">{k.kind}</span>
+                          <span className="tabular-nums text-foreground">{k.count}</span>
+                          <span className="text-muted">{Math.round(k.confidence * 100)}% sure</span>
+                          {mine ? <span className="text-muted">· you have {mine}</span> : null}
+                          <span className="basis-full text-muted sm:basis-auto sm:flex-1">{k.note}</span>
+                          <button
+                            type="button"
+                            disabled={placed || !k.positions.length}
+                            onClick={() => placeAiCount(k)}
+                            className="rounded-md border border-brand/50 px-2 py-0.5 text-brand-soft hover:bg-brand/10 disabled:opacity-40"
+                          >
+                            {placed ? "Placed ✓" : "Place as markers"}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+                <p className="mt-1.5 text-[11px] text-muted">
+                  Positions are the AI&apos;s best guess — placed markers are yours to move or delete. One Undo removes a placed set.
+                </p>
               </div>
             ) : null}
             {!hasScale && tool !== "count" ? (
@@ -4776,6 +5082,49 @@ export default function PlanViewer({
                       strokeWidth={2}
                     />
                   ) : null}
+                  {/* Find all like this: the symbol box, then the ghosts */}
+                  {autoCount && autoCountAnchor && autoCount.phase !== "review" ? (
+                    <rect
+                      x={(autoCountAnchor.x - autoCount.box / 2) * scale}
+                      y={(autoCountAnchor.y - autoCount.box / 2) * scale}
+                      width={autoCount.box * scale}
+                      height={autoCount.box * scale}
+                      fill="rgba(226,61,76,0.08)"
+                      stroke="#e23d4c"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                      pointerEvents="none"
+                    />
+                  ) : null}
+                  {autoCount?.phase === "review"
+                    ? autoCount.ghosts.map((g, i) => {
+                        const off = autoCount.off.has(i);
+                        return (
+                          <circle
+                            key={i}
+                            cx={g.pt.x * scale}
+                            cy={g.pt.y * scale}
+                            r={coarse ? 11 : 7}
+                            fill={off ? "transparent" : "rgba(226,61,76,0.35)"}
+                            stroke={off ? "#888" : "#e23d4c"}
+                            strokeWidth={off ? 1 : 2}
+                            strokeDasharray={off ? "2 2" : undefined}
+                            style={{ cursor: "pointer" }}
+                            data-score={g.score.toFixed(2)}
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              setAutoCount((a) => {
+                                if (!a || a.phase !== "review") return a;
+                                const next = new Set(a.off);
+                                if (next.has(i)) next.delete(i);
+                                else next.add(i);
+                                return { ...a, off: next };
+                              });
+                            }}
+                          />
+                        );
+                      })
+                    : null}
                 </svg>
                 {currentLedger?.visible && ledgerRows.length ? (
                   <div

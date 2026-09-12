@@ -12,7 +12,8 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient } from "@/lib/anthropic";
 import { enforceAiLimit, settleAiUsage } from "@/lib/ai-usage";
-import { recordAiUsage } from "@/lib/ai-meter";
+import { recordAiUsage, runWithAiBudget } from "@/lib/ai-meter";
+import { countSymbolsOnSheet, type AiCountResult } from "@/lib/takeoff/aiCount";
 import { log } from "@/lib/log";
 import { AI_MODELS } from "@/config/ai";
 
@@ -87,5 +88,52 @@ Rewrite the dictation as bullet notes, one fact per bullet, each starting with "
   } catch (e) {
     log.error("notes.dictate.failed", { projectId, sheetId, userId: user.id, err: e });
     return { ok: false, error: "Couldn't turn that into notes — try again." };
+  }
+}
+
+// ── AI symbol count ─────────────────────────────────────────────────────────
+// The viewer renders the sheet to a JPEG (≤ 1568 px long edge, the size the
+// model reads best) and sends it here. Metered like every one-shot AI call.
+const countInput = z.object({
+  projectId: z.string().uuid(),
+  sheetId: z.string().uuid(),
+  sheetName: z.string().max(200).nullable(),
+  jpegBase64: z.string().min(100).max(1_300_000), // the viewer keeps it under 1.2 M; the action body limit is 2 MB
+  wanted: z.array(z.string().max(40)).max(12).optional(),
+});
+
+export async function aiCountSheet(
+  raw: z.infer<typeof countInput>,
+): Promise<{ ok: boolean; result?: AiCountResult; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const parsed = countInput.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: "The sheet image did not come through." };
+  const { projectId, sheetId, sheetName, jpegBase64, wanted } = parsed.data;
+
+  // The sheet must be the user's (RLS makes a stranger's sheet read as missing).
+  const { data: sheet } = await supabase
+    .from("sheets")
+    .select("id")
+    .eq("id", sheetId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (!sheet) return { ok: false, error: "Sheet not found." };
+
+  const limit = await enforceAiLimit(supabase, user.id, "aicount");
+  if (!limit.ok) return { ok: false, error: limit.error };
+  try {
+    const { result, costUsd } = await runWithAiBudget({ label: "aicount" }, async (m) => ({
+      result: await countSymbolsOnSheet({ jpegBase64, sheetName, wanted }),
+      costUsd: m.spentUsd,
+    }));
+    await settleAiUsage(supabase, limit.usageId, costUsd);
+    return { ok: true, result };
+  } catch (e) {
+    log.error("aicount.failed", { userId: user.id, sheetId, err: e });
+    return { ok: false, error: e instanceof Error ? e.message : "The AI count failed." };
   }
 }

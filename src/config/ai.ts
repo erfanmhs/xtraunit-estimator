@@ -14,6 +14,7 @@
  *                   draft, so the check stays independent)
  *     quoteRead   — extracts fields from uploaded sub-quote PDFs/photos
  *     letter      — drafts the proposal cover letter (the user always edits it)
+ *     count       — the AI count check on a takeoff sheet (a few cents a sheet)
  */
 export const AI_MODELS = {
   scopeDraft: process.env.AI_MODEL_SCOPE_DRAFT ?? "claude-opus-4-8",
@@ -21,4 +22,5 @@ export const AI_MODELS = {
   scopeReview: process.env.AI_MODEL_SCOPE_REVIEW ?? "claude-sonnet-4-6",
   quoteRead: process.env.AI_MODEL_QUOTE_READ ?? "claude-sonnet-4-6",
   letter: process.env.AI_MODEL_LETTER ?? "claude-sonnet-4-6",
+  count: process.env.AI_MODEL_COUNT ?? "claude-sonnet-4-6",
 } as const;
