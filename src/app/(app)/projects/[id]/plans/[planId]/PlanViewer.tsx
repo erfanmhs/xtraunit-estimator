@@ -72,374 +72,32 @@ import {
 } from "@/components/ToolIcons";
 import type { PlanFile } from "@/types";
 
-// On-sheet takeoff legend placement (fractions of the page + a size multiplier).
-type Ledger = { x: number; y: number; scale: number; visible: boolean };
-/** A cropped sheet's window onto its page: PDF points, top-left origin, page scale 1. */
-type Crop = { x: number; y: number; w: number; h: number };
-type Sheet = {
-  id: string;
-  page_number: number;
-  name?: string | null;
-  label: string | null;
-  notes: string | null;
-  discipline?: string | null;
-  scale_x: number | null;
-  scale_y: number | null;
-  scale_preset: string | null;
-  ledger?: Ledger | null;
-  crop?: Crop | null; // migration 0035 — a sheet cut from a page, non-destructively
-  source_sheet_id?: string | null;
-  created_at?: string;
-};
-
-// Standard paper shapes for the Crop tool (inches). Only the SHAPE is held —
-// the size is whatever you drag; the readout shows it in inches.
-const PAPER: { id: string; label: string; w: number; h: number }[] = [
-  { id: "free", label: "Free", w: 0, h: 0 },
-  { id: "ansi-a", label: "ANSI A · 8½×11", w: 8.5, h: 11 },
-  { id: "ansi-b", label: "ANSI B · 11×17", w: 11, h: 17 },
-  { id: "ansi-c", label: "ANSI C · 17×22", w: 17, h: 22 },
-  { id: "ansi-d", label: "ANSI D · 22×34", w: 22, h: 34 },
-  { id: "ansi-e", label: "ANSI E · 34×44", w: 34, h: 44 },
-  { id: "arch-a", label: "ARCH A · 9×12", w: 9, h: 12 },
-  { id: "arch-b", label: "ARCH B · 12×18", w: 12, h: 18 },
-  { id: "arch-c", label: "ARCH C · 18×24", w: 18, h: 24 },
-  { id: "arch-d", label: "ARCH D · 24×36", w: 24, h: 36 },
-  { id: "arch-e", label: "ARCH E · 36×48", w: 36, h: 48 },
-  { id: "a4", label: "A4 · 8.27×11.69", w: 8.27, h: 11.69 },
-  { id: "a3", label: "A3 · 11.69×16.54", w: 11.69, h: 16.54 },
-  { id: "a2", label: "A2 · 16.54×23.39", w: 16.54, h: 23.39 },
-  { id: "a1", label: "A1 · 23.39×33.11", w: 23.39, h: 33.11 },
-];
-const PT_PER_IN = 72;
-
-const DEFAULT_LEDGER: Ledger = { x: 0.7, y: 0.04, scale: 1, visible: false };
-// Base ledger size in PDF points (then × page zoom × the user's size multiplier).
-const LEDGER_BASE_W = 200;
-const LEDGER_BASE_FONT = 11;
-type Measurement = {
-  id: string;
-  type: string;
-  geometry: Pt[];
-  value: number | null;
-  unit: string | null;
-  layer: string | null;
-  color: string | null;
-  wall_sided: string | null;
-  wall_height: number | null;
-  vol_mode: string | null;
-  vol_width: number | null;
-  vol_depth: number | null;
-  // Leader-only: the text note + its arrowhead/font sizes (PDF points).
-  text?: string | null;
-  font_size?: number | null;
-  head_size?: number | null;
-};
-type Tool =
-  | "browse"
-  | "select"
-  | "calibrate"
-  | "line"
-  | "polyline"
-  | "area"
-  | "wall"
-  | "volume"
-  | "count"
-  | "leader"
-  | "crop";
-
-const MEAS_COLS =
-  "id,type,geometry,value,unit,layer,color,wall_sided,wall_height,vol_mode,vol_width,vol_depth,text,font_size,head_size";
-// Leader annotation defaults (PDF points). User grows/shrinks each per leader.
-const LEADER_FONT_DEFAULT = 14;
-const LEADER_HEAD_DEFAULT = 12;
-
-const PRESETS: { label: string; inPerFt: number; group: string }[] = [
-  { label: '3"=1\'', inPerFt: 3, group: "Architectural" },
-  { label: '1-1/2"=1\'', inPerFt: 1.5, group: "Architectural" },
-  { label: '1"=1\'', inPerFt: 1, group: "Architectural" },
-  { label: '3/4"=1\'', inPerFt: 0.75, group: "Architectural" },
-  { label: '1/2"=1\'', inPerFt: 0.5, group: "Architectural" },
-  { label: '1/4"=1\'', inPerFt: 0.25, group: "Architectural" },
-  { label: '3/16"=1\'', inPerFt: 0.1875, group: "Architectural" },
-  { label: '1/8"=1\'', inPerFt: 0.125, group: "Architectural" },
-  { label: '1/16"=1\'', inPerFt: 0.0625, group: "Architectural" },
-  { label: '1"=10\'', inPerFt: 0.1, group: "Civil" },
-  { label: '1"=20\'', inPerFt: 0.05, group: "Civil" },
-  { label: '1"=30\'', inPerFt: 1 / 30, group: "Civil" },
-  { label: '1"=40\'', inPerFt: 0.025, group: "Civil" },
-  { label: '1"=50\'', inPerFt: 0.02, group: "Civil" },
-  { label: '1"=100\'', inPerFt: 0.01, group: "Civil" },
-];
-// 12 distinct colors — each new tool pick auto-rotates to an unused one.
-const COLORS = [
-  "#A01C2D",
-  "#2563eb",
-  "#16a34a",
-  "#d97706",
-  "#7c3aed",
-  "#0891b2",
-  "#db2777",
-  "#65a30d",
-  "#ea580c",
-  "#6366f1",
-  "#0d9488",
-  "#ca8a04",
-];
-const MEASURE_TOOLS: Tool[] = [
-  "line",
-  "polyline",
-  "area",
-  "wall",
-  "volume",
-  "count",
-  "leader",
-];
-// Layers group by trimmed name; unnamed measurements share the "Unlabeled" group.
-
-// Group measurements into layer takeoff lines (shared by the side panel, the
-// on-sheet legend, and the PDF export).
-function hexToRgba(hex: string, a: number): string {
-  const h = (hex || "#A01C2D").replace("#", "");
-  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const r = parseInt(n.slice(0, 2), 16) || 0;
-  const g = parseInt(n.slice(2, 4), 16) || 0;
-  const b = parseInt(n.slice(4, 6), 16) || 0;
-  return `rgba(${r},${g},${b},${a})`;
-}
-
-// Draw all takeoff markup onto a 2D canvas at exportScale k (PDF points × k).
-// Mirrors the on-screen SVG overlay so exports look like the live sheet.
-function drawMarkupOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  ms: Measurement[],
-  k: number,
-) {
-  const P = (p: Pt) => ({ x: p.x * k, y: p.y * k });
-  for (const m of ms) {
-    const col = m.color ?? "#A01C2D";
-    const g = m.geometry;
-    if (!g || !g.length) continue;
-    if (m.type === "count") {
-      for (const v of g) {
-        const c = P(v);
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, 5 * k, 0, Math.PI * 2);
-        ctx.fillStyle = hexToRgba(col, 0.85);
-        ctx.fill();
-        ctx.lineWidth = 1.2 * k;
-        ctx.strokeStyle = "#fff";
-        ctx.stroke();
-      }
-    } else {
-      const filled =
-        m.type === "area" || (m.type === "volume" && m.vol_mode === "area");
-      ctx.beginPath();
-      g.forEach((p, i) => {
-        const c = P(p);
-        if (i) ctx.lineTo(c.x, c.y);
-        else ctx.moveTo(c.x, c.y);
-      });
-      if (filled) {
-        ctx.closePath();
-        ctx.fillStyle = hexToRgba(col, 0.15);
-        ctx.fill();
-      }
-      ctx.lineWidth = 2 * k;
-      ctx.strokeStyle = col;
-      ctx.stroke();
-      if (m.type === "leader" && g.length >= 2) {
-        const head = P(g[0]);
-        const box = P(g[1]);
-        const ang = Math.atan2(head.y - box.y, head.x - box.x);
-        const hs = (m.head_size ?? LEADER_HEAD_DEFAULT) * k;
-        ctx.beginPath();
-        ctx.moveTo(head.x, head.y);
-        ctx.lineTo(head.x - hs * Math.cos(ang - 0.42), head.y - hs * Math.sin(ang - 0.42));
-        ctx.lineTo(head.x - hs * Math.cos(ang + 0.42), head.y - hs * Math.sin(ang + 0.42));
-        ctx.closePath();
-        ctx.fillStyle = col;
-        ctx.fill();
-        const fs = (m.font_size ?? LEADER_FONT_DEFAULT) * k;
-        ctx.font = `600 ${fs}px sans-serif`;
-        ctx.textBaseline = "alphabetic";
-        (m.text ?? "").split("\n").forEach((ln, i) => {
-          const ty = box.y + i * fs * 1.15;
-          ctx.lineWidth = Math.max(2, fs * 0.16);
-          ctx.strokeStyle = "#fff";
-          ctx.strokeText(ln, box.x + 5 * k, ty);
-          ctx.fillStyle = col;
-          ctx.fillText(ln, box.x + 5 * k, ty);
-        });
-      }
-    }
-    const text = labelText(m);
-    if (text) {
-      // Areas carry their value in the middle of the shape, matching the
-      // screen; everything else hangs its label off the anchor point.
-      const inside =
-        (m.type === "area" || (m.type === "volume" && m.vol_mode === "area")) &&
-        g.length >= 3;
-      const centered = inside || m.type === "count";
-      const anchor = centered
-        ? polyCentroid(g)
-        : g.length >= 2
-          ? { x: (g[0].x + g[1].x) / 2, y: (g[0].y + g[1].y) / 2 }
-          : g[0];
-      const a = P(anchor);
-      const fs = 14 * k;
-      ctx.font = `700 ${fs}px sans-serif`;
-      ctx.textAlign = inside ? "center" : "left";
-      ctx.textBaseline = inside ? "middle" : "alphabetic";
-      const tx = inside ? a.x : a.x + 6 * k;
-      const ty = inside ? a.y : a.y - 6 * k;
-      ctx.lineWidth = 3.5 * k;
-      ctx.strokeStyle = "#000";
-      ctx.strokeText(text, tx, ty);
-      ctx.fillStyle = "#fff";
-      ctx.fillText(text, tx, ty);
-      ctx.textAlign = "left";
-      ctx.textBaseline = "alphabetic";
-    }
-  }
-}
-
-// Draw the takeoff legend onto the export canvas (matches the on-sheet box).
-function drawLedgerOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  ms: Measurement[],
-  k: number,
-  ledger: Ledger | null | undefined,
-  cw: number,
-  ch: number,
-) {
-  if (!ledger?.visible) return;
-  const rows = buildLayerGroups(ms).filter((g) => g.lines.length > 0);
-  if (!rows.length) return;
-  const sc = ledger.scale * k;
-  const W = LEDGER_BASE_W * sc;
-  const font = LEDGER_BASE_FONT * sc;
-  const pad = 6 * sc;
-  const rowH = font * 1.5 + 4 * sc;
-  const headH = font + 2 * pad;
-  const H = headH + rows.length * rowH + 4 * sc;
-  let x = ledger.x * cw;
-  let y = ledger.y * ch;
-  x = Math.max(2, Math.min(x, cw - W - 2));
-  y = Math.max(2, Math.min(y, ch - H - 2));
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  ctx.fillRect(x, y, W, H);
-  ctx.lineWidth = Math.max(1, sc);
-  ctx.strokeStyle = "#888";
-  ctx.strokeRect(x, y, W, H);
-  ctx.fillStyle = "#eef0f2";
-  ctx.fillRect(x, y, W, headH);
-  ctx.strokeRect(x, y, W, headH);
-  ctx.fillStyle = "#111";
-  ctx.textBaseline = "middle";
-  ctx.font = `600 ${font}px sans-serif`;
-  ctx.fillText("Takeoff Legend", x + pad, y + headH / 2);
-  let ry = y + headH;
-  for (const r of rows) {
-    const sw = font * 0.7;
-    ctx.fillStyle = r.color;
-    ctx.fillRect(x + pad, ry + rowH / 2 - sw / 2, sw, sw);
-    ctx.fillStyle = "#111";
-    ctx.font = `${font}px sans-serif`;
-    const txt = `${r.layer} — ${r.lines.join(", ")} · ${r.rows.length} run${r.rows.length === 1 ? "" : "s"}`;
-    ctx.fillText(txt, x + pad * 2 + sw, ry + rowH / 2, W - pad * 3 - sw);
-    ry += rowH;
-  }
-}
-
-/**
- * The layer-name field inside the picker.
- *
- * It deliberately keeps its own text state. `layer` lives on PlanViewer, and a
- * setState there re-renders the whole viewer — every SVG shape, the layer
- * totals, the measurements list — which on a phone made typing lag and drop
- * characters. The name is handed up only when it's COMMITTED (Done, Enter,
- * blur, or the picker closing), which is the only moment it has to be right.
- */
-function LayerNameField({
-  initial,
-  existing,
-  skipCommitRef,
-  onCommit,
-  onDone,
-}: {
-  initial: string;
-  existing: string[];
-  /** Set by the parent when a layer was picked from the list instead. */
-  skipCommitRef: { current: boolean };
-  onCommit: (name: string) => void;
-  onDone: () => void;
-}) {
-  const [text, setText] = useState(initial);
-  const latest = useRef(text);
-  const commitRef = useRef(onCommit);
-  useEffect(() => {
-    latest.current = text;
-  }, [text]);
-  useEffect(() => {
-    commitRef.current = onCommit;
-  }, [onCommit]);
-  // The picker can close without a blur (tap on the drawing) — commit then too,
-  // unless the close came from picking an existing layer.
-  useEffect(
-    () => () => {
-      if (skipCommitRef.current) {
-        skipCommitRef.current = false;
-        return;
-      }
-      commitRef.current(latest.current.trim());
-    },
-    [skipCommitRef],
-  );
-
-  const trimmed = text.trim();
-  return (
-    <>
-      <div className="flex items-center gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === "Escape") {
-              onCommit(trimmed);
-              onDone();
-            }
-          }}
-          onBlur={() => onCommit(trimmed)}
-          autoFocus={!initial.trim()}
-          spellCheck
-          autoCapitalize="sentences"
-          enterKeyHint="done"
-          placeholder="New layer name (e.g. Exterior wall)"
-          aria-label="Layer name"
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-2 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
-        />
-        <button
-          type="button"
-          onClick={() => {
-            onCommit(trimmed);
-            onDone();
-          }}
-          className="glass-brand min-h-10 shrink-0 rounded-md px-3 font-medium text-foreground"
-        >
-          Done
-        </button>
-      </div>
-      <p className="px-1 pt-1 text-[10px] text-muted">
-        {trimmed
-          ? existing.includes(trimmed)
-            ? `Continuing "${trimmed}" — new runs add to it.`
-            : `New layer "${trimmed}" — saved with the first run you draw.`
-          : "Type a name for the runs you're about to draw, or pick a layer below."}
-      </p>
-    </>
-  );
-}
+import {
+  COLORS,
+  DEFAULT_LEDGER,
+  LEADER_FONT_DEFAULT,
+  LEADER_HEAD_DEFAULT,
+  LEDGER_BASE_FONT,
+  LEDGER_BASE_W,
+  MEASURE_TOOLS,
+  MEAS_COLS,
+  PAPER,
+  PRESETS,
+  PT_PER_IN,
+  type Crop,
+  type Ledger,
+  type Measurement,
+  type Sheet,
+  type Tool,
+} from "@/lib/takeoff/model";
+import { drawLedgerOnCanvas, drawMarkupOnCanvas } from "@/lib/takeoff/draw";
+import {
+  deleteMeasurements,
+  insertMeasurements,
+  loadMeasurementsForSheets,
+  loadSheetMeasurements,
+} from "@/lib/takeoff/store";
+import LayerNameField from "./LayerNameField";
 
 export default function PlanViewer({
   projectId,
@@ -977,13 +635,8 @@ export default function PlanViewer({
     // sheet's measurements with another sheet's — or an empty list.)
     let live = true;
     (async () => {
-      const { data } = await supabase
-        .from("measurements")
-        .select(MEAS_COLS)
-        .eq("sheet_id", currentSheet.id)
-        .order("created_at", { ascending: true });
+      const rows = await loadSheetMeasurements(supabase, currentSheet.id);
       if (!live) return;
-      const rows = (data as Measurement[]) ?? [];
       setMeasurements(rows);
       // Keep recording where the sheet left off: with no layer chosen yet
       // (fresh load, first visit to this sheet), the chip takes the newest
@@ -3171,35 +2824,16 @@ export default function PlanViewer({
       const c = cur.get(m.id);
       return c && JSON.stringify(c) !== JSON.stringify(m);
     });
-    if (toDelete.length)
-      await supabase.from("measurements").delete().in("id", toDelete);
+    await deleteMeasurements(supabase, toDelete);
     if (toInsert.length && currentSheet) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (user) {
-        await supabase.from("measurements").insert(
-          toInsert.map((m) => ({
-            id: m.id,
-            project_id: projectId,
-            plan_file_id: planFile.id,
-            sheet_id: currentSheet.id,
-            owner_id: user.id,
-            type: m.type,
-            geometry: m.geometry,
-            value: m.value,
-            unit: m.unit,
-            layer: m.layer,
-            color: m.color,
-            wall_sided: m.wall_sided,
-            wall_height: m.wall_height,
-            vol_mode: m.vol_mode,
-            vol_width: m.vol_width,
-            vol_depth: m.vol_depth,
-            text: m.text,
-            font_size: m.font_size,
-            head_size: m.head_size,
-          })),
+        await insertMeasurements(
+          supabase,
+          { projectId, planFileId: planFile.id, sheetId: currentSheet.id, ownerId: user.id },
+          toInsert,
         );
       }
     }
@@ -3548,12 +3182,8 @@ export default function PlanViewer({
     if (!pdf || !exportSel.size) return;
     setExporting("Preparing…");
     try {
-      const { data } = await supabase
-        .from("measurements")
-        .select(`${MEAS_COLS},sheet_id`)
-        .in("sheet_id", [...exportSel]);
       const bySheet = new Map<string, Measurement[]>();
-      for (const m of (data ?? []) as (Measurement & { sheet_id: string })[]) {
+      for (const m of await loadMeasurementsForSheets(supabase, [...exportSel])) {
         const arr = bySheet.get(m.sheet_id) ?? [];
         arr.push(m);
         bySheet.set(m.sheet_id, arr);
