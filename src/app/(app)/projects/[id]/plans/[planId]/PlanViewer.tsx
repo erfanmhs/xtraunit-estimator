@@ -98,6 +98,7 @@ import {
   loadSheetMeasurements,
 } from "@/lib/takeoff/store";
 import LayerNameField from "./LayerNameField";
+import { findSymbolCopies } from "@/lib/takeoff/templateMatchClient";
 
 export default function PlanViewer({
   projectId,
@@ -522,6 +523,14 @@ export default function PlanViewer({
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCountId, setActiveCountId] = useState<string | null>(null);
+  // "Find all like this": box a symbol around the last marker, search the
+  // sheet, review the ghosts, add them to the run. See lib/takeoff/templateMatch.
+  const [autoCount, setAutoCount] = useState<
+    | null
+    | { phase: "box"; box: number }
+    | { phase: "finding"; box: number }
+    | { phase: "review"; box: number; ghosts: { pt: Pt; score: number }[]; off: Set<number> }
+  >(null);
   const [editGeom, setEditGeom] = useState<Pt[] | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Undo / redo — snapshots of this sheet's measurements; on undo/redo the DB is
@@ -1724,6 +1733,92 @@ export default function PlanViewer({
   function finishCount() {
     activeCountRef.current = null;
     setActiveCountId(null);
+    setAutoCount(null);
+  }
+
+  // ── Find all like this ────────────────────────────────────────────────────
+  // A match at or above this score is ticked by default; below it is shown
+  // greyed for the user to tick. CAD symbols usually land 0.8+; a scan 0.6+.
+  const AUTO_COUNT_SURE = 0.72;
+  // The anchor is the LAST marker of the active count run: that's the symbol
+  // the user just tapped, so "like this" needs no extra drawing on a phone.
+  const autoCountAnchor: Pt | null = (() => {
+    const run = activeCountId ? measurements.find((m) => m.id === activeCountId) : null;
+    return run && run.geometry.length ? run.geometry[run.geometry.length - 1] : null;
+  })();
+
+  // The search wants the symbol about 36 px across. The on-screen bitmap is
+  // whatever the zoom is (5 px per door when zoomed out), so render the
+  // sheet again off-screen at the resolution the search needs — capped at
+  // 8 M pixels, the same crop window as the display.
+  async function renderForSearch(box: number): Promise<{ canvas: HTMLCanvasElement; pxPerPt: number } | null> {
+    const pdf = pdfRef.current;
+    if (!pdf || !baseDims.w || !baseDims.h) return null;
+    const want = 36 / box;
+    const cap = Math.sqrt(8_000_000 / (baseDims.w * baseDims.h));
+    const pxPerPt = Math.max(0.5, Math.min(want, cap));
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({
+      scale: pxPerPt,
+      offsetX: crop ? -crop.x * pxPerPt : 0,
+      offsetY: crop ? -crop.y * pxPerPt : 0,
+    });
+    const off = document.createElement("canvas");
+    off.width = Math.ceil(baseDims.w * pxPerPt);
+    off.height = Math.ceil(baseDims.h * pxPerPt);
+    const ctx = off.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, off.width, off.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return { canvas: off, pxPerPt };
+  }
+
+  async function runAutoCount(box: number) {
+    const anchor = autoCountAnchor;
+    const active = activeCountRef.current;
+    if (!anchor || !active) return;
+    setError(null);
+    setAutoCount({ phase: "finding", box });
+    try {
+      const r = await renderForSearch(box);
+      if (!r) throw new Error("The sheet isn't ready yet.");
+      // Search loosely; strong matches start ticked, weak ones start
+      // unticked but visible, so a near-miss is one tap away instead of lost.
+      const hits = await findSymbolCopies(r.canvas, r.pxPerPt, anchor, box, { threshold: 0.5 });
+      r.canvas.width = 0;
+      r.canvas.height = 0;
+      // Drop the anchor itself and anything already in the run.
+      const near = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y) < box * 0.5;
+      const ghosts = hits.filter((h) => !active.geometry.some((g) => near(g, h.pt)));
+      const off = new Set<number>();
+      ghosts.forEach((g, i) => {
+        if (g.score < AUTO_COUNT_SURE) off.add(i);
+      });
+      setAutoCount({ phase: "review", box, ghosts, off });
+      if (!ghosts.length) setError("No other copies found. Try a bigger or smaller box.");
+    } catch (e) {
+      setAutoCount({ phase: "box", box });
+      setError(e instanceof Error ? e.message : "The search failed.");
+    }
+  }
+
+  async function acceptAutoCount() {
+    const active = activeCountRef.current;
+    if (!autoCount || autoCount.phase !== "review" || !active) return;
+    const add = autoCount.ghosts.filter((_, i) => !autoCount.off.has(i)).map((g) => g.pt);
+    setAutoCount(null);
+    if (!add.length) return;
+    recordHistory();
+    const geometry = [...active.geometry, ...add];
+    activeCountRef.current = { id: active.id, geometry };
+    const value = geometry.length;
+    setMeasurements((arr) => arr.map((x) => (x.id === active.id ? { ...x, geometry, value } : x)));
+    const { error: upErr } = await supabase
+      .from("measurements")
+      .update({ geometry, value })
+      .eq("id", active.id);
+    if (upErr) setError("Could not save the found markers.");
   }
 
   // Nearest measurement under a point (in PDF points), or null. Shared by the
@@ -4228,14 +4323,79 @@ export default function PlanViewer({
                       ? "Tap each item — every tap saves · hold a marker to remove it"
                       : "Click each item — every click saves"}
                 </span>
-                <button
-                  type="button"
-                  onClick={finishCount}
-                  disabled={!activeCountId}
-                  className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong disabled:opacity-40"
-                >
-                  Finish count
-                </button>
+                {autoCount ? null : (
+                  <button
+                    type="button"
+                    onClick={finishCount}
+                    disabled={!activeCountId}
+                    className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong disabled:opacity-40"
+                  >
+                    Finish count
+                  </button>
+                )}
+                {activeCountId && autoCountAnchor && !autoCount ? (
+                  <button
+                    type="button"
+                    onClick={() => setAutoCount({ phase: "box", box: 30 })}
+                    title="Search the sheet for every copy of the symbol under your last marker"
+                    className="rounded-md border border-brand/50 px-3 py-1 font-medium text-brand-soft hover:bg-brand/10"
+                  >
+                    Find all like this
+                  </button>
+                ) : null}
+                {autoCount?.phase === "box" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted">Box around your last marker:</span>
+                    <button
+                      type="button"
+                      aria-label="Smaller box"
+                      onClick={() => setAutoCount((a) => (a ? { phase: "box", box: Math.max(8, a.box - 4) } : a))}
+                      className="h-8 w-8 rounded-md border border-border text-foreground"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[3.5rem] text-center text-xs tabular-nums text-foreground">{autoCount.box} pt</span>
+                    <button
+                      type="button"
+                      aria-label="Bigger box"
+                      onClick={() => setAutoCount((a) => (a ? { phase: "box", box: Math.min(200, a.box + 4) } : a))}
+                      className="h-8 w-8 rounded-md border border-border text-foreground"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => runAutoCount(autoCount.box)}
+                      className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong"
+                    >
+                      Find
+                    </button>
+                    <button type="button" onClick={() => setAutoCount(null)} className="text-xs text-muted hover:text-foreground">
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+                {autoCount?.phase === "finding" ? (
+                  <span className="text-xs text-muted">Searching the sheet…</span>
+                ) : null}
+                {autoCount?.phase === "review" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted">
+                      {autoCount.ghosts.length - autoCount.off.size} sure
+                      {autoCount.off.size ? ` · ${autoCount.off.size} unsure (grey — tap to include)` : " · tap one to skip it"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={acceptAutoCount}
+                      className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong"
+                    >
+                      Add {autoCount.ghosts.length - autoCount.off.size}
+                    </button>
+                    <button type="button" onClick={() => setAutoCount(null)} className="text-xs text-muted hover:text-foreground">
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {!hasScale && tool !== "count" ? (
@@ -4776,6 +4936,49 @@ export default function PlanViewer({
                       strokeWidth={2}
                     />
                   ) : null}
+                  {/* Find all like this: the symbol box, then the ghosts */}
+                  {autoCount && autoCountAnchor && autoCount.phase !== "review" ? (
+                    <rect
+                      x={(autoCountAnchor.x - autoCount.box / 2) * scale}
+                      y={(autoCountAnchor.y - autoCount.box / 2) * scale}
+                      width={autoCount.box * scale}
+                      height={autoCount.box * scale}
+                      fill="rgba(226,61,76,0.08)"
+                      stroke="#e23d4c"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                      pointerEvents="none"
+                    />
+                  ) : null}
+                  {autoCount?.phase === "review"
+                    ? autoCount.ghosts.map((g, i) => {
+                        const off = autoCount.off.has(i);
+                        return (
+                          <circle
+                            key={i}
+                            cx={g.pt.x * scale}
+                            cy={g.pt.y * scale}
+                            r={coarse ? 11 : 7}
+                            fill={off ? "transparent" : "rgba(226,61,76,0.35)"}
+                            stroke={off ? "#888" : "#e23d4c"}
+                            strokeWidth={off ? 1 : 2}
+                            strokeDasharray={off ? "2 2" : undefined}
+                            style={{ cursor: "pointer" }}
+                            data-score={g.score.toFixed(2)}
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              setAutoCount((a) => {
+                                if (!a || a.phase !== "review") return a;
+                                const next = new Set(a.off);
+                                if (next.has(i)) next.delete(i);
+                                else next.add(i);
+                                return { ...a, off: next };
+                              });
+                            }}
+                          />
+                        );
+                      })
+                    : null}
                 </svg>
                 {currentLedger?.visible && ledgerRows.length ? (
                   <div
