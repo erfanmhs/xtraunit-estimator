@@ -65,6 +65,9 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
+          # The runner ships an older client too, and plain "pg_dump" resolves to
+          # it. Put 17's own bin dir first for every later step.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Fetch that night's dump
         env:
@@ -90,7 +93,7 @@ jobs:
           # surface in the count step, which must match the dump.
           pg_restore --dbname="$TARGET" \
             --clean --if-exists --no-owner --no-privileges \
-            --schema=public --exit-on-error=false \
+            --schema=public \
             "$DUMP" || echo "pg_restore reported warnings (see above); checking the data landed…"
 
       - name: Show what landed (rows per table)
