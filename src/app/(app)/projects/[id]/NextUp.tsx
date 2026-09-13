@@ -2,9 +2,10 @@ import Link from "next/link";
 import type { Stage } from "@/lib/projects/overview";
 
 /**
- * "Next up" — the one thing to do now on this project, worked out from what
- * is already done, with the six stages as a row of ticks. Server-rendered
- * from the same stage data the cards and the rail use, so all three agree.
+ * Where the job stands, in one slim strip: the six stages as a track with
+ * the current one lit, and the single next action as a button. Nothing to
+ * read — the how-to lives behind the "?" guide. Erfan, 2026-09-13: the
+ * card version was "too big and not elegant".
  */
 type Stages = {
   plans: Stage;
@@ -36,108 +37,76 @@ export default function NextUp({
   const base = `/projects/${projectId}`;
   const current = ORDER.find((s) => stages[s.key] !== "done")?.key ?? null;
 
-  // What to do, where to click, and where the button goes.
-  const step: { title: string; how: string; href: string | null; cta: string } = (() => {
+  // One verb, one destination.
+  const next: { label: string; href: string | null } = (() => {
     switch (current) {
       case "plans":
-        return {
-          title: "Upload the plans",
-          how: "Click “＋ Upload or drop a plan PDF” below (or “Photograph a sheet” on a phone), then sort the pages when asked.",
-          href: null,
-          cta: "",
-        };
+        return { label: "Upload the plans", href: null }; // the upload box is right below
       case "takeoff":
-        return {
-          title: "Set the scale and measure the drivers",
-          how: "Open a sheet, pick its scale in the “Scale” box, then measure 5–10 things that drive the job: floor area, exterior walls, roof, windows and doors.",
-          href: firstPlanId ? `${base}/plans/${firstPlanId}` : null,
-          cta: "Open the takeoff",
-        };
+        return { label: "Set the scale & measure", href: firstPlanId ? `${base}/plans/${firstPlanId}` : null };
       case "scope":
-        return {
-          title: "Generate the scope",
-          how: "Choose “Full building” or “Specific trades”, click “Generate Scope of Work”, then read it trade by trade and answer the questions.",
-          href: `${base}/scope`,
-          cta: "Go to Scope",
-        };
+        return { label: "Generate the scope", href: `${base}/scope` };
       case "pricing":
-        return {
-          title: stages.pricing === "partial" ? "Confirm the prices" : "Price the scope",
-          how: "“Suggest prices with AI” fills the lines; check each one and tap “Confirm” (or “Confirm all”). Add sub quotes with “+ Add Quote”.",
-          href: `${base}/pricing`,
-          cta: "Go to Pricing",
-        };
+        return { label: stages.pricing === "partial" ? "Confirm the prices" : "Price the scope", href: `${base}/pricing` };
       case "estimate":
-        return {
-          title: "Set the markups",
-          how: "Contingency, insurance, overhead & profit as percentages, plus the building square footage for the $/SF check.",
-          href: `${base}/estimate`,
-          cta: "Go to Estimate",
-        };
+        return { label: "Set the markups", href: `${base}/estimate` };
       case "proposal":
-        return {
-          title: "Build the proposal",
-          how: "“Draft summary with AI”, fill in the dates and timeline, check the preview, then “Publish client link” or save as PDF.",
-          href: `${base}/proposal`,
-          cta: "Go to Proposal",
-        };
+        return { label: "Build the proposal", href: `${base}/proposal` };
       default:
-        return {
-          title: "Proposal ready",
-          how: "Send the client link or the PDF. When the client answers, mark the project Sent, Won or Lost from the Projects page.",
-          href: `${base}/proposal`,
-          cta: "Open the proposal",
-        };
+        return { label: "Send the proposal", href: `${base}/proposal` };
     }
   })();
 
   const doneCount = ORDER.filter((s) => stages[s.key] === "done").length;
 
   return (
-    <section className="rounded-xl border border-brand/30 bg-brand/5 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0 flex-1 basis-64">
-          <p className="text-[11px] uppercase tracking-wider text-brand-soft">
-            Next up · {doneCount} of {ORDER.length} stages done
-          </p>
-          <h2 className="mt-0.5 font-heading text-lg text-foreground">{step.title}</h2>
-          <p className="mt-1 max-w-xl text-sm text-muted">{step.how}</p>
-        </div>
-        {step.href ? (
-          <Link
-            href={step.href}
-            className="shrink-0 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-strong"
-          >
-            {step.cta} →
-          </Link>
-        ) : null}
-      </div>
-
-      <ol className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      {/* The track */}
+      <ol className="flex min-w-0 flex-1 basis-64 items-center" aria-label={`${doneCount} of ${ORDER.length} stages done`}>
         {ORDER.map((s, i) => {
           const st = stages[s.key];
           const here = s.key === current;
+          const done = st === "done";
           return (
-            <li key={s.key} className={`flex items-center gap-1.5 ${here ? "text-foreground" : "text-muted"}`}>
-              <span
-                aria-hidden
-                className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${
-                  st === "done"
-                    ? "bg-green-400 text-black"
-                    : st === "partial"
-                      ? "bg-amber-400 text-black"
-                      : here
-                        ? "bg-brand text-white"
-                        : "border border-border"
-                }`}
-              >
-                {st === "done" ? "✓" : i + 1}
-              </span>
-              <span className={here ? "font-medium" : ""}>{s.label}</span>
+            <li key={s.key} className="flex min-w-0 flex-1 items-center last:flex-none">
+              <div className="flex flex-col items-center gap-1">
+                <span
+                  aria-hidden
+                  className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${
+                    done
+                      ? "bg-green-400 text-black"
+                      : st === "partial"
+                        ? "bg-amber-400 text-black"
+                        : here
+                          ? "bg-brand text-white ring-4 ring-brand/25"
+                          : "border border-border text-muted"
+                  }`}
+                >
+                  {done ? "✓" : i + 1}
+                </span>
+                <span className={`text-[10px] leading-none ${here ? "font-medium text-foreground" : "text-muted"}`}>{s.label}</span>
+              </div>
+              {i < ORDER.length - 1 ? (
+                <span aria-hidden className={`mx-1 mb-3.5 h-px min-w-3 flex-1 ${done ? "bg-green-400/60" : "bg-border"}`} />
+              ) : null}
             </li>
           );
         })}
       </ol>
-    </section>
+
+      {/* The one next action */}
+      {next.href ? (
+        <Link
+          href={next.href}
+          className="shrink-0 rounded-md bg-brand px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-strong"
+        >
+          {next.label} →
+        </Link>
+      ) : (
+        <span className="shrink-0 text-sm text-muted">
+          Next: <span className="text-foreground">{next.label}</span> ↓
+        </span>
+      )}
+    </div>
   );
 }

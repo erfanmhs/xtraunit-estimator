@@ -4,24 +4,29 @@
  * Page triage: show every page of a dropped PDF, let the user keep the
  * sheets that matter, record each kept sheet.
  *
- * Two paths, chosen by file size:
+ * Two things happen at once the moment a file is picked:
  *
- *   CLOUD-FIRST (the normal case, file within the storage upload limit):
- *   the original PDF is uploaded straight from the file picker — the browser
- *   streams it, nothing is read into memory — and the thumbnails are drawn
- *   from that cloud copy through range requests, a page at a time. Saving
- *   only writes rows: each kept sheet points at its page in the stored file.
- *   The phone never holds the whole file, which is what used to make an
- *   iPhone run out of memory and silently reload the tab (Erfan, 2026-09-12,
- *   a plan set picked from Google Drive; the 47-page set before it).
+ *   THE UPLOAD — the original PDF, as-is, streamed from the file picker to
+ *   storage with a real progress bar (an XHR, because the storage client
+ *   gives no progress events). Nothing is rebuilt; what you dropped is what
+ *   is stored.
  *
- *   TRIM-IN-BROWSER (file over the upload limit): the old path — read the
- *   file, render thumbnails, rebuild a PDF of only the kept pages, upload
- *   that. Heavy, and warned about on phones, but the only way a 120 MB set
- *   gets in under a 50 MB upload limit.
+ *   THE PREVIEWS — pdf.js reads the same File (one copy, handed to its
+ *   worker) and draws a thumbnail per page, releasing each page as it goes.
+ *   Previews appear while the upload is still running, so a 30 MB set over
+ *   cellular is never a blank box with a spinner (Erfan, 2026-09-13).
+ *
+ * Saving writes rows only: each kept sheet points at its own page number in
+ * the stored file (page_number = original_page_number), so the viewer, the
+ * prepare step and the export need no change. Cancel aborts the upload and
+ * removes anything that already landed.
+ *
+ * A file over the storage upload limit (50 MB on the free plan) still takes
+ * the old trim-in-browser path: rebuild a PDF of the kept pages, upload
+ * that. Heavy, and warned about on phones, but the only way in.
  *
  * Naming and categorizing happen ONCE, in the takeoff viewer (sheet list →
- * rename / category), not here — so there's no second place to keep in sync.
+ * rename / category), not here.
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -36,14 +41,63 @@ import {
   sizeVerdict,
   withTimeout,
 } from "@/lib/plans/uploadGuards";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { PDFDocument as PdfLibDocument } from "pdf-lib";
 
 /** `url` is null when the preview failed — the page itself is still intact and can be kept. */
 type Thumb = { page: number; url: string | null };
 
-/** How pdf.js fetches the cloud copy: 1 MB ranges, only what a page needs. */
-const RANGE_CHUNK = 1024 * 1024;
+type Upload =
+  | { state: "idle" }
+  | { state: "running"; sent: number; total: number; startedAt: number }
+  | { state: "done"; path: string; bytes: number }
+  | { state: "failed"; message: string };
+
+/**
+ * Upload a File to Supabase Storage with progress. The JS client wraps
+ * fetch, which reports nothing; this is the same REST call with an XHR.
+ */
+function uploadWithProgress(opts: {
+  path: string;
+  file: Blob;
+  token: string;
+  onProgress: (sent: number, total: number) => void;
+}): { promise: Promise<void>; abort: () => void } {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<void>((resolve, reject) => {
+    xhr.open("POST", `${base}/storage/v1/object/plans/${opts.path}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${opts.token}`);
+    xhr.setRequestHeader("apikey", anon);
+    xhr.setRequestHeader("Content-Type", "application/pdf");
+    xhr.setRequestHeader("x-upsert", "false");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) opts.onProgress(e.loaded, e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let msg = `Upload failed (${xhr.status}).`;
+      try {
+        const j = JSON.parse(xhr.responseText) as { message?: string; error?: string };
+        msg = j.message || j.error || msg;
+      } catch {}
+      reject(new Error(msg));
+    };
+    xhr.onerror = () => reject(new Error("The connection dropped during the upload."));
+    xhr.onabort = () => reject(new Error("aborted"));
+    xhr.send(opts.file);
+  });
+  return { promise, abort: () => xhr.abort() };
+}
+
+function eta(sent: number, total: number, startedAt: number): string {
+  const elapsed = (Date.now() - startedAt) / 1000;
+  if (sent <= 0 || elapsed < 2) return "";
+  const rate = sent / elapsed; // bytes/s
+  const left = (total - sent) / rate;
+  if (!isFinite(left) || left < 1) return "";
+  return left < 60 ? `about ${Math.ceil(left)} s left` : `about ${Math.ceil(left / 60)} min left`;
+}
 
 export default function PlanTriage({
   projectId,
@@ -62,9 +116,16 @@ export default function PlanTriage({
   const [thumbs, setThumbs] = useState<Thumb[]>([]);
   const [total, setTotal] = useState(0);
   const [kept, setKept] = useState<Set<number>>(new Set());
+  const [rendering, setRendering] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [upload, setUpload] = useState<Upload>({ state: "idle" });
+  const [error, setError] = useState<string | null>(null);
+  const [failedPages, setFailedPages] = useState<number[]>([]);
+  const [progress, setProgress] = useState<string | null>(null);
+
   // Cloud-first when the original fits the upload limit; otherwise trim here.
   const cloudFirst = file.size <= UPLOAD_LIMIT_BYTES;
-  // The old path's memory guard (only the trim path reads the file into memory).
+  // The old path's memory guard (the trim path reads the file a second time).
   const [verdict] = useState(() => {
     if (cloudFirst) return { kind: "ok" as const };
     const phone =
@@ -72,87 +133,88 @@ export default function PlanTriage({
       (window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768);
     return sizeVerdict(file.size, phone);
   });
-  const [phase, setPhase] = useState<"uploading" | "rendering" | "ready" | "saving">(
-    verdict.kind === "refuse" ? "ready" : cloudFirst ? "uploading" : "rendering",
-  );
-  const [error, setError] = useState<string | null>(
-    verdict.kind === "refuse" ? verdict.message : null,
-  );
   const notice = verdict.kind === "warn" ? verdict.message : null;
-  const [failedPages, setFailedPages] = useState<number[]>([]);
-  const [progress, setProgress] = useState<string | null>(null);
-  // The cloud copy's path, once uploaded. Cancelling removes it.
+  const abortRef = useRef<(() => void) | null>(null);
   const uploadedRef = useRef<string | null>(null);
-  const userRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (verdict.kind === "refuse") return;
+    if (verdict.kind === "refuse") {
+      setError(verdict.message);
+      setRendering(false);
+    }
+  }, [verdict]);
 
-    // This effect can run twice for one file (React's development double
-    // mount). Each run owns its own document and stands down the moment it
-    // is cleaned up, so the survivor is the only one that touches state.
+  // ── The upload, straight from the picker ──────────────────────────────────
+  useEffect(() => {
+    if (!cloudFirst) return;
+    let cancelled = false;
+    (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        setUpload({ state: "failed", message: "Your session expired. Please sign in again." });
+        return;
+      }
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${session.user.id}/${projectId}/${Date.now()}-${safeName}`;
+      const startedAt = Date.now();
+      setUpload({ state: "running", sent: 0, total: file.size, startedAt });
+      const u = uploadWithProgress({
+        path,
+        file,
+        token: session.access_token,
+        onProgress: (sent, tot) => {
+          if (!cancelled) setUpload({ state: "running", sent, total: tot, startedAt });
+        },
+      });
+      abortRef.current = u.abort;
+      try {
+        await u.promise;
+        if (cancelled) {
+          await supabase.storage.from("plans").remove([path]);
+          return;
+        }
+        uploadedRef.current = path;
+        setUpload({ state: "done", path, bytes: file.size });
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : "Upload failed.";
+        setUpload({
+          state: "failed",
+          message: /exceeded the maximum allowed size|payload too large|413/i.test(msg)
+            ? `This PDF is ${formatMb(file.size)}, over the storage upload limit. Drop pages in Bluebeam first, or raise the limit in Supabase (Storage → Settings).`
+            : msg,
+        });
+      } finally {
+        abortRef.current = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      abortRef.current?.();
+    };
+  }, [file, cloudFirst, projectId, supabase]);
+
+  // ── The previews, from the same File ──────────────────────────────────────
+  useEffect(() => {
+    if (verdict.kind === "refuse") return;
+    // Can run twice for one file (React's development double mount). Each
+    // run owns its own document and stands down when cleaned up.
     let cancelled = false;
     let doc: { destroy: () => Promise<void> } | null = null;
-
     (async () => {
       try {
         const pdfjs = await withTimeout(getPdfjs(), OPEN_TIMEOUT_MS, "Loading the PDF reader");
-        let pdf: PDFDocumentProxy;
-
-        if (cloudFirst) {
-          // 1. Upload the original as-is. The browser streams the File; the
-          //    page never holds its bytes.
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          if (!user) throw new Error("Your session expired. Please sign in again.");
-          userRef.current = user.id;
-          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-          const path = `${user.id}/${projectId}/${Date.now()}-${safeName}`;
-          setProgress(`Uploading ${formatMb(file.size)}…`);
-          const { error: upErr } = await supabase.storage
-            .from("plans")
-            .upload(path, file, { contentType: "application/pdf" });
-          if (upErr) {
-            if (/exceeded the maximum allowed size|payload too large|413/i.test(upErr.message))
-              throw new Error(
-                `This PDF is ${formatMb(file.size)}, over the storage upload limit. Drop pages in Bluebeam first, or raise the limit in Supabase (Storage → Settings).`,
-              );
-            throw upErr;
-          }
-          if (cancelled) {
-            await supabase.storage.from("plans").remove([path]);
-            return;
-          }
-          uploadedRef.current = path;
-          setProgress(null);
-          setPhase("rendering");
-
-          // 2. Open the cloud copy by range requests: pdf.js pulls only the
-          //    bytes each page needs, so the phone never holds the file.
-          const { data: signed, error: sErr } = await supabase.storage
-            .from("plans")
-            .createSignedUrl(path, 60 * 30);
-          if (sErr || !signed) throw sErr ?? new Error("Could not open the uploaded file.");
-          const task = pdfjs.getDocument({
-            url: signed.signedUrl,
-            rangeChunkSize: RANGE_CHUNK,
-            disableAutoFetch: true,
-            disableStream: false,
-            standardFontDataUrl: "/standard_fonts/",
-          });
-          pdf = await withTimeout(task.promise, OPEN_TIMEOUT_MS, "Opening the PDF", () => {
-            void task.destroy();
-          });
-        } else {
-          const task = pdfjs.getDocument({
-            data: await file.arrayBuffer(),
-            standardFontDataUrl: "/standard_fonts/",
-          });
-          pdf = await withTimeout(task.promise, OPEN_TIMEOUT_MS, "Opening the PDF", () => {
-            void task.destroy();
-          });
-        }
+        // One copy of the file, handed to the worker (the buffer is transferred,
+        // not duplicated). Nothing else holds it.
+        const task = pdfjs.getDocument({
+          data: await file.arrayBuffer(),
+          standardFontDataUrl: "/standard_fonts/",
+        });
+        const pdf = await withTimeout(task.promise, OPEN_TIMEOUT_MS, "Opening the PDF", () => {
+          void task.destroy();
+        });
         doc = pdf;
         if (cancelled) return;
         setTotal(pdf.numPages);
@@ -160,9 +222,6 @@ export default function PlanTriage({
         const failed: number[] = [];
         for (let n = 1; n <= pdf.numPages; n++) {
           if (cancelled) return;
-          // One bad page (a corrupt scan, a 200 MB embedded image, a render
-          // that never returns) must not take the other 46 with it. It gets a
-          // placeholder and can still be kept.
           let url: string | null = null;
           let page: Awaited<ReturnType<typeof pdf.getPage>> | null = null;
           try {
@@ -184,33 +243,29 @@ export default function PlanTriage({
           } catch {
             failed.push(n);
           } finally {
-            // Drop this page's decoded images before moving on — pdf.js keeps
-            // them cached per page, and on a scanned set that cache IS the
-            // memory problem.
+            // Drop this page's decoded images before moving on — on a scanned
+            // set that cache IS the memory problem.
             page?.cleanup();
           }
           if (cancelled) return;
           setThumbs((prev) => [...prev, { page: n, url }]);
         }
         setFailedPages(failed);
-        setPhase("ready");
       } catch (e) {
         if (cancelled) return;
         setError(explainOpenFailure(e));
-        setPhase("ready");
       } finally {
-        // The worker holds the parsed document; free it before the save step
-        // (the trim path reads the file again), so the two never overlap.
+        setRendering(false);
+        // Free the worker's copy as soon as the previews exist.
         void doc?.destroy();
         doc = null;
       }
     })();
-
     return () => {
       cancelled = true;
       void doc?.destroy();
     };
-  }, [file, verdict, cloudFirst, projectId, supabase]);
+  }, [file, verdict]);
 
   function toggle(page: number) {
     setKept((prev) => {
@@ -221,8 +276,9 @@ export default function PlanTriage({
     });
   }
 
-  /** Cancel: the cloud copy must not linger with no sheet records. */
+  /** Cancel: abort a running upload; remove a finished one. */
   async function cancel() {
+    abortRef.current?.();
     const path = uploadedRef.current;
     uploadedRef.current = null;
     if (path) await supabase.storage.from("plans").remove([path]);
@@ -231,7 +287,7 @@ export default function PlanTriage({
 
   async function save() {
     if (kept.size === 0) return;
-    setPhase("saving");
+    setSaving(true);
     setError(null);
     try {
       const {
@@ -246,10 +302,10 @@ export default function PlanTriage({
       // opens); original_page_number = its index in the file the user dropped.
       let rows: { page_number: number; original_page_number: number }[];
 
-      if (cloudFirst && uploadedRef.current) {
-        // The stored file IS the original: every kept sheet keeps its number.
-        path = uploadedRef.current;
-        sizeBytes = file.size;
+      if (cloudFirst) {
+        if (upload.state !== "done") throw new Error("The upload hasn't finished yet.");
+        path = upload.path;
+        sizeBytes = upload.bytes;
         rows = keptPages.map((p) => ({ page_number: p, original_page_number: p }));
       } else {
         // Trim path: rebuild a PDF of only the kept pages, renumbered 1..n.
@@ -271,15 +327,7 @@ export default function PlanTriage({
         );
         copied.forEach((p) => out.addPage(p));
         const bytes = await out.save();
-        const trimMb = bytes.length / (1024 * 1024);
-        const origMb = file.size / (1024 * 1024);
-        setProgress(
-          `Uploading ${trimMb.toFixed(1)} MB` +
-            (origMb > trimMb + 0.1
-              ? ` — trimmed from ${origMb.toFixed(1)} MB (${keptPages.length} of ${total} pages)`
-              : "") +
-            "…",
-        );
+        setProgress(`Uploading ${formatMb(bytes.length)} (${keptPages.length} of ${total} pages)…`);
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         path = `${user.id}/${projectId}/${Date.now()}-${safeName}`;
         const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
@@ -287,10 +335,9 @@ export default function PlanTriage({
           .from("plans")
           .upload(path, blob, { contentType: "application/pdf" });
         if (upErr) {
-          const mb = (bytes.length / (1024 * 1024)).toFixed(1);
           if (/exceeded the maximum allowed size|payload too large|413/i.test(upErr.message)) {
             throw new Error(
-              `This trimmed plan set is ${mb} MB, over your storage upload limit. In Supabase, raise the "plans" bucket file-size limit (Storage → Buckets → plans → Edit) and the project upload limit (Storage → Settings). Or keep fewer / lighter pages.`,
+              `This trimmed plan set is ${formatMb(bytes.length)}, over your storage upload limit. Keep fewer pages, or raise the limit in Supabase (Storage → Settings).`,
             );
           }
           throw upErr;
@@ -314,12 +361,7 @@ export default function PlanTriage({
       if (pfErr) throw pfErr;
 
       const { error: shErr } = await supabase.from("sheets").insert(
-        rows.map((r) => ({
-          project_id: projectId,
-          plan_file_id: pf.id,
-          owner_id: user.id,
-          ...r,
-        })),
+        rows.map((r) => ({ project_id: projectId, plan_file_id: pf.id, owner_id: user.id, ...r })),
       );
       if (shErr) {
         // Roll back so we never leave a file with no sheet records.
@@ -334,60 +376,79 @@ export default function PlanTriage({
       onDone();
     } catch (e) {
       setError("Save failed: " + (e instanceof Error ? e.message : String(e)));
-      setPhase("ready");
+      setSaving(false);
     }
   }
 
-  const uploading = phase === "uploading";
-  const rendering = phase === "rendering";
-  const saving = phase === "saving";
+  const pct =
+    upload.state === "running" && upload.total > 0 ? Math.min(100, Math.round((upload.sent / upload.total) * 100)) : null;
+  const uploadLine =
+    upload.state === "running"
+      ? `Uploading ${formatMb(upload.sent)} of ${formatMb(upload.total)} · ${pct}% ${eta(upload.sent, upload.total, upload.startedAt)}`.trim()
+      : upload.state === "done"
+        ? `Uploaded ${formatMb(upload.bytes)} ✓`
+        : upload.state === "failed"
+          ? upload.message
+          : null;
+  const canSave = kept.size > 0 && !saving && !rendering && (!cloudFirst || upload.state === "done");
 
   return (
     <section className="flex flex-col gap-4 rounded-xl glass p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="font-heading text-lg text-foreground">
-            Select the sheets to keep
-          </h2>
-          <p className="text-sm text-muted">
-            {(saving || uploading) && progress
-              ? progress
-              : uploading
-                ? "Uploading…"
-                : rendering
-                  ? `Loading thumbnails… ${thumbs.length}/${total || "?"}`
-                  : `${kept.size} of ${total} pages kept — ${file.name}`}
+      <div>
+        <h2 className="font-heading text-lg text-foreground">Select the sheets to keep</h2>
+        <p className="text-sm text-muted">
+          {saving && progress
+            ? progress
+            : rendering
+              ? `Loading pages… ${thumbs.length}/${total || "?"} — ${file.name}`
+              : `${kept.size} of ${total} pages kept — ${file.name}`}
+        </p>
+        {!rendering && !saving ? (
+          <p className="mt-0.5 text-xs text-muted/70">
+            Name and categorize the kept sheets in the viewer next — one place, once.
           </p>
-          {!rendering && !saving && !uploading ? (
-            <p className="mt-0.5 text-xs text-muted/70">
-              Name and categorize the kept sheets in the viewer next — one place, once.
-            </p>
-          ) : null}
-        </div>
+        ) : null}
       </div>
 
-      {error ? (
-        <p
-          role="alert"
-          className="rounded-md border border-brand/40 bg-brand/10 px-3 py-2 text-sm text-brand-soft"
+      {/* The upload, in the open: a bar, the MB, the time left. */}
+      {cloudFirst && upload.state !== "idle" ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`rounded-md border px-3 py-2 text-sm ${
+            upload.state === "failed"
+              ? "border-brand/40 bg-brand/10 text-brand-soft"
+              : "border-border bg-background/60 text-foreground"
+          }`}
         >
+          <div className="flex items-center justify-between gap-3">
+            <span>{uploadLine}</span>
+            {upload.state === "running" ? (
+              <span className="text-xs text-muted">you can pick sheets while it uploads</span>
+            ) : null}
+          </div>
+          {upload.state === "running" ? (
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border">
+              <div className="h-full rounded-full bg-brand transition-[width] duration-300" style={{ width: `${pct ?? 0}%` }} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {error ? (
+        <p role="alert" className="rounded-md border border-brand/40 bg-brand/10 px-3 py-2 text-sm text-brand-soft">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">
-          {notice}
-        </p>
+        <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">{notice}</p>
       ) : null}
       {failedPages.length > 0 ? (
         <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">
           {failedPages.length === 1
             ? `Page ${failedPages[0]} couldn't be previewed`
-            : `${failedPages.length} pages couldn't be previewed (${failedPages.slice(0, 8).join(", ")}${
-                failedPages.length > 8 ? "…" : ""
-              })`}
-          . You can still keep {failedPages.length === 1 ? "it" : "them"} — the page itself is
-          intact and will be saved as-is.
+            : `${failedPages.length} pages couldn't be previewed (${failedPages.slice(0, 8).join(", ")}${failedPages.length > 8 ? "…" : ""})`}
+          . You can still keep {failedPages.length === 1 ? "it" : "them"} — the page itself is intact and will be saved as-is.
         </p>
       ) : null}
 
@@ -401,9 +462,7 @@ export default function PlanTriage({
                 onClick={() => toggle(t.page)}
                 disabled={saving}
                 className={`relative overflow-hidden rounded-md border bg-white transition-all ${
-                  on
-                    ? "border-brand ring-2 ring-brand"
-                    : "border-border opacity-60 hover:opacity-100"
+                  on ? "border-brand ring-2 ring-brand" : "border-border opacity-60 hover:opacity-100"
                 }`}
               >
                 {t.url ? (
@@ -414,27 +473,24 @@ export default function PlanTriage({
                     No preview
                   </span>
                 )}
-                <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
-                  {t.page}
-                </span>
+                <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">{t.page}</span>
                 {on ? (
-                  <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand text-xs text-white">
-                    ✓
-                  </span>
+                  <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand text-xs text-white">✓</span>
                 ) : null}
               </button>
             </div>
           );
         })}
+        {rendering && thumbs.length === 0
+          ? // Placeholders so the box is never empty while the first page renders.
+            [0, 1, 2, 3].map((i) => <div key={i} className="aspect-[4/3] animate-pulse rounded-md border border-border bg-muted/10" />)
+          : null}
       </div>
 
-      {/* Actions after the sheets, sticky to the bottom: Save is always in
-          thumb reach on a phone, the count always visible. */}
+      {/* Actions after the sheets, sticky to the bottom: Save always in thumb reach. */}
       <div className="sticky bottom-0 -mx-6 -mb-6 mt-1 flex flex-wrap items-center gap-2 border-t border-border bg-surface/95 px-6 py-3 backdrop-blur pb-safe">
         <span className="text-sm text-muted" aria-live="polite">
-          {kept.size === 0
-            ? "No sheets picked yet"
-            : `${kept.size} of ${total} selected`}
+          {kept.size === 0 ? "No sheets picked yet" : `${kept.size} of ${total} selected`}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -456,10 +512,15 @@ export default function PlanTriage({
           <button
             type="button"
             onClick={save}
-            disabled={saving || rendering || uploading || kept.size === 0}
+            disabled={!canSave}
+            title={cloudFirst && upload.state === "running" ? "Waiting for the upload to finish" : undefined}
             className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? "Saving…" : `Save ${kept.size} page${kept.size === 1 ? "" : "s"}`}
+            {saving
+              ? "Saving…"
+              : cloudFirst && upload.state === "running" && kept.size > 0
+                ? `Uploading… ${pct ?? 0}%`
+                : `Save ${kept.size} page${kept.size === 1 ? "" : "s"}`}
           </button>
         </div>
       </div>
