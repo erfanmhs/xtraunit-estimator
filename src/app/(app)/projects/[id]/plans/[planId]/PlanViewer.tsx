@@ -165,6 +165,7 @@ export default function PlanViewer({
   const [colorOpen, setColorOpen] = useState(false);
   const [layerOpen, setLayerOpen] = useState(false); // the layer picker popover
   const skipLayerCommitRef = useRef(false); // see LayerNameField
+  const pickerDownRef = useRef(0); // when a finger last landed inside the layer picker
 
   // Narrow windows (tablet, half-screen laptop): start with both side panels
   // collapsed so the DRAWING gets the width, and collapse again if the window
@@ -1259,13 +1260,20 @@ export default function PlanViewer({
    * runs follow — unless the name is another layer's, which means "continue
    * that one". "Unlabeled" runs are never swept up by a typed name.
    */
-  function commitLayerName(name: string) {
+  function commitLayerName(name: string, via?: "blur") {
     const next = name.trim();
     const cur = layerKeyOf(layer);
     const group = cur !== "Unlabeled" ? layerGroups.find((g) => g.layer === cur) : undefined;
     const other = next && layerGroups.some((g) => g.layer === layerKeyOf(next));
     if (group && next && next !== cur && !other) void renameLayer(group.rows, next);
     setLayer(name);
+    // The phone keyboard's Done / ✓ only blurs the field. A changed name is
+    // a finished job: close the picker (Erfan, 2026-09-13: "should not have
+    // to click Done twice") — unless the blur came from a tap inside the
+    // picker, which is doing its own thing.
+    if (via === "blur" && next && next !== cur && Date.now() - pickerDownRef.current > 500) {
+      setTimeout(() => setLayerOpen(false), 250);
+    }
   }
 
   /** The layer a run of `type` may be saved into: the current one if it fits, else a fresh one. */
@@ -2181,7 +2189,8 @@ export default function PlanViewer({
       // hold on a line you can see beneath your thumb opens its menu either
       // way (Erfan, 2026-09-13: held a wall to delete it, "nothing happens").
       const under = { x: (cx - rect.left) / scale, y: (cy - rect.top) / scale };
-      const v = pointerId != null && tool !== "crop" ? vertexAt(pt) : null;
+      const vAim = pointerId != null && tool !== "crop" ? vertexAt(pt) : null;
+      const v = vAim ?? (pointerId != null && tool !== "crop" ? vertexAt(under) : null);
       const shape = pickMeasurementAt(pt) ?? pickMeasurementAt(under);
       if (drawing && !v && !shape) return;
       longPressFiredRef.current = true;
@@ -2193,11 +2202,14 @@ export default function PlanViewer({
           setSelectedId(m.id);
           setActiveVertex(v);
           {
+            const vp = m.geometry[v.index];
             dragRef.current = {
               id: m.id,
               index: v.index,
               pointerId,
-              grab: { x: 0, y: 0 }, // the vertex rides the crosshair
+              // Aimed at: the vertex rides the crosshair. Held under the
+              // finger: it keeps its offset (the lens shows it from above).
+              grab: vAim ? { x: 0, y: 0 } : { x: vp.x - pt.x, y: vp.y - pt.y },
             };
           }
           dragStartRef.current = { x: cx, y: cy, moved: false, hold: true };
@@ -2621,10 +2633,18 @@ export default function PlanViewer({
     }
 
     if (tool === "select") {
+      // A finger hits at the crosshair OR at the spot it actually touches.
+      // People press the handle they can see under their thumb (Erfan,
+      // 2026-09-13: "not able to move any of these corners"); the crosshair
+      // rule alone had them pressing 90 px below it. The crosshair wins when
+      // both hit; a handle grabbed under the finger keeps its offset from
+      // the crosshair so it never jumps on the first move.
+      const under = touch ? evtToPoint(e) : pt;
       if (selected) {
         // A handle of the selected shape: press = maybe a drag (after 8 px),
         // maybe a tap (nudge pad), maybe a hold (vertex menu).
-        const v = vertexAt(pt, true);
+        const vAim = vertexAt(pt, true);
+        const v = vAim ?? (touch ? vertexAt(under, true) : null);
         if (v) {
           const vp = selected.geometry[v.index];
           const aim = evtToAim(e);
@@ -2632,10 +2652,11 @@ export default function PlanViewer({
             id: selected.id,
             index: v.index,
             pointerId: e.pointerId,
-            // A finger's handle snaps onto the crosshair and travels with it,
-            // so the lens always shows the handle at its centre. A mouse
-            // keeps the offset it grabbed with (the cursor IS the point).
-            grab: touch ? { x: 0, y: 0 } : { x: vp.x - aim.x, y: vp.y - aim.y },
+            // Aimed with the crosshair: the handle snaps onto it and travels
+            // with it, so the lens shows the handle at its centre. Pressed
+            // under the finger, or a mouse: it keeps the offset it was
+            // grabbed with (the lens above the finger shows it).
+            grab: touch && vAim ? { x: 0, y: 0 } : { x: vp.x - aim.x, y: vp.y - aim.y },
           };
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false };
           setEditGeom(selected.geometry.map((q) => ({ ...q })));
@@ -2649,7 +2670,8 @@ export default function PlanViewer({
           return;
         }
         // A "+" midpoint: add a vertex there and carry it with the finger.
-        const mid = midpointAt(pt);
+        const midAim = midpointAt(pt);
+        const mid = midAim ?? (touch ? midpointAt(under) : null);
         if (mid) {
           const ng = [...selected.geometry.slice(0, mid.at), mid.p, ...selected.geometry.slice(mid.at)].map((q) => ({ ...q }));
           {
@@ -2658,7 +2680,7 @@ export default function PlanViewer({
               id: selected.id,
               index: mid.at,
               pointerId: e.pointerId,
-              grab: touch ? { x: 0, y: 0 } : { x: mid.p.x - aim.x, y: mid.p.y - aim.y },
+              grab: touch && midAim ? { x: 0, y: 0 } : { x: mid.p.x - aim.x, y: mid.p.y - aim.y },
             };
           }
           dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false, hold: false, inserted: true };
@@ -2676,7 +2698,7 @@ export default function PlanViewer({
           selected.type === "area" || (selected.type === "volume" && selected.vol_mode === "area");
         if (
           moveArmedRef.current ||
-          (filled && selected.geometry.length >= 3 && pointInPoly(pt, selected.geometry))
+          (filled && selected.geometry.length >= 3 && (pointInPoly(pt, selected.geometry) || pointInPoly(under, selected.geometry)))
         ) {
           moveArmedRef.current = false;
           const orig = selected.geometry.map((q) => ({ ...q }));
@@ -2849,7 +2871,7 @@ export default function PlanViewer({
         if (fired || pinchedRef.current) return;
         if (!censusMayPlace(censusRef.current, Date.now())) return;
         if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) return;
-        const id = pickMeasurementAt(evtToAim(e)); // a finger selects what is under the crosshair
+        const id = pickMeasurementAt(evtToAim(e)) ?? pickMeasurementAt(evtToPoint(e)); // under the crosshair, else under the finger
         setSelectedId(id);
         // Double-tap on the same shape = its menu.
         const now = Date.now();
@@ -4313,7 +4335,7 @@ export default function PlanViewer({
               {layerOpen
                 ? popover(
                     () => setLayerOpen(false),
-                    <div className="p-1.5 text-sm">
+                    <div className="p-1.5 text-sm" onPointerDownCapture={() => (pickerDownRef.current = Date.now())}>
                       {isDefaultLayerName(layer) ? (
                         <p className="px-1 pb-1 text-[11px] text-foreground">
                           A new layer for {TYPE_NOUN[tool] ?? "this tool"} — give it a name, or keep the number.

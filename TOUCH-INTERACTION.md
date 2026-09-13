@@ -98,6 +98,13 @@ a count marker). The shape gets a white outline and every vertex becomes a
 handle. A short caption appears in the bottom pill: "Drag a handle · hold a
 handle for the nudge pad".
 
+**Where a finger "is".** A finger hits at the loupe's crosshair *or* at the spot it
+actually touches — whichever finds a handle, a "+" or a shape; the crosshair wins
+when both do. New points are always placed at the crosshair. A handle grabbed
+under the finger keeps its offset from the crosshair while it is dragged (the
+lens above the finger shows it); one aimed at with the crosshair rides the
+crosshair. (Added 2026-09-13: pressing the visible handle used to do nothing.)
+
 **Edit a corner (the direct way).** Put a finger on a handle and slide. The loupe
 opens above the finger showing the drawing magnified 2.5× with a crosshair at
 the exact point. The vertex follows the finger; the length / area label updates
