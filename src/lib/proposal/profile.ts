@@ -35,8 +35,6 @@ export type ProposalTerms = {
   owner_responsibilities: string;
   permits: string;
   site_safety: string;
-  site_safety:
-    "The contractor keeps the site safe and orderly, follows the safety laws that apply to its work, protects the owner's property and the neighbours' from damage caused by its operations, and repairs any such damage at its own cost. The contractor removes its debris regularly and leaves the site broom-clean at completion. The contractor confines its work, storage and vehicles to the areas the owner makes available, and does cutting and patching of existing work only as the scope needs.",
   hazardous_materials: string;
   force_majeure: string;
   insurance: string;
@@ -121,6 +119,8 @@ export const DEFAULT_TERMS: ProposalTerms = {
     "The owner provides access to the site during working hours, a place for materials and a dumpster, water and power, and decisions and selections by the dates in the timeline. The owner keeps children and pets away from the work area, removes or protects belongings in it, and tells the contractor about known hazards, easements, HOA rules and prior unpermitted work. The owner is responsible for the accuracy of any surveys, plans or reports the owner supplies.",
   permits:
     "The contractor obtains the building permits the scope names and schedules inspections. Permit, plan-check and utility fees are paid by the owner at cost unless the scope says otherwise. Work is performed to the codes in force when the permit is issued. Code upgrades required by an inspector that the plans did not show are a concealed condition.",
+  site_safety:
+    "The contractor keeps the site safe and orderly, follows the safety laws that apply to its work, protects the owner's property and the neighbours' from damage caused by its operations, and repairs any such damage at its own cost. The contractor removes its debris regularly and leaves the site broom-clean at completion. The contractor confines its work, storage and vehicles to the areas the owner makes available, and does cutting and patching of existing work only as the scope needs.",
   hazardous_materials:
     "The price does not include finding, testing for, or removing asbestos, lead paint, mould or other hazardous materials. If any is found the contractor stops work in that area at once, and the owner arranges testing and licensed abatement. The schedule extends by the time this takes.",
   force_majeure:
