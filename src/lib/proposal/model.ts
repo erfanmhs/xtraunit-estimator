@@ -12,6 +12,7 @@
  * Shared by server (page, publish) and client (renderer) — no server imports.
  */
 import type { ProposalProfile } from "./profile";
+import { resolveContract, type ProposalContract } from "./contract";
 // Relative on purpose: this file also runs under vitest, which has no "@/" alias.
 import { groupByTrade } from "../scope/trades";
 
@@ -58,6 +59,8 @@ export type CompanyInfo = {
   company_license: string | null;
   signer_name: string | null;
   signer_title: string | null;
+  /** The company's look, frozen with the doc. Absent on docs published before branding existed. */
+  branding?: { logo: string | null; primary: string; slogan: string; tagline: string };
 };
 
 export type ScopeRow = {
@@ -127,6 +130,8 @@ export type ProposalDoc = {
     options: ProposalOption[];
   };
   timeline: ProposalTimeline;
+  /** The contract answers (dates, payments, notices on/off). Docs frozen before 0043 read as defaults. */
+  contract: ProposalContract;
   published_at: string | null;
 };
 
@@ -171,6 +176,7 @@ export type ProposalFields = {
   understanding: string | null;
   options: unknown;
   timeline: unknown;
+  contract?: unknown;
   published_at: string | null;
 };
 
@@ -393,6 +399,7 @@ export function buildProposalDoc(input: {
       options: cleanOptions(fields.options),
     },
     timeline: cleanTimeline(fields.timeline),
+    contract: resolveContract(fields.contract, project.project_type),
     published_at: fields.published_at,
   };
 }

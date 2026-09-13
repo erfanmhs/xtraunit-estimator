@@ -5,6 +5,8 @@ import PageHeader from "@/components/PageHeader";
 import ProjectMenu from "./ProjectMenu";
 import PlanManager from "./PlanManager";
 import AiSpendSection from "./AiSpendSection";
+import NextUp from "./NextUp";
+import { getProjectsOverview } from "@/lib/projects/overview";
 import { getAiSpend } from "@/lib/projects/aiSpend";
 import type { PlanFile, Project } from "@/types";
 
@@ -33,6 +35,10 @@ export default async function ProjectDetailPage({
     .order("created_at", { ascending: false });
   const files = (filesData ?? []) as PlanFile[];
   const aiSpend = await getAiSpend(supabase, id);
+  // Where the job stands — the same six-stage read the cards and rail use.
+  const overview = (await getProjectsOverview(supabase, [id]))[id] ?? null;
+  // Oldest upload first: that's the sheet the Takeoff tab opens too.
+  const firstPlanId = files.length ? files[files.length - 1].id : null;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -57,6 +63,11 @@ export default async function ProjectDetailPage({
       <div className="flex flex-col gap-6 p-8">
         {project.notes ? (
           <p className="max-w-2xl text-sm text-muted">{project.notes}</p>
+        ) : null}
+
+        {/* The one thing to do now. */}
+        {overview ? (
+          <NextUp projectId={project.id} stages={overview.stages} firstPlanId={firstPlanId} />
         ) : null}
 
         {/* Phase 2 — live */}

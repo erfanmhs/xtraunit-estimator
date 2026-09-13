@@ -9,8 +9,7 @@ import {
   saveCompanySettings,
   saveProposalProfile,
   draftProposalProfile,
-  type CompanySettings,
-} from "./actions";
+  type CompanySettings, saveBranding } from "./actions";
 import { evalFormula } from "@/lib/formula";
 import {
   TERM_LABELS,
@@ -19,6 +18,8 @@ import {
   type ProjectReference,
 } from "@/lib/proposal/profile";
 import Caret from "@/components/Caret";
+import BrandingSection from "@/components/BrandingSection";
+import { type Branding } from "@/lib/branding";
 
 const REF_FIELD =
   "rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand";
@@ -57,11 +58,31 @@ export default function SettingsForm({
   initial,
   profile,
   profileWasSet,
+  branding: initialBranding,
 }: {
   initial: CompanySettings;
   profile: ProposalProfile;
   profileWasSet: boolean;
+  branding: Branding;
 }) {
+  const [branding, setBranding] = useState<Branding>(initialBranding);
+  const [brandState, setBrandState] = useState<"idle" | "saved" | "error">("idle");
+  const [brandError, setBrandError] = useState<string | null>(null);
+  const [brandPending, startBrand] = useTransition();
+  function onSaveBranding() {
+    setBrandState("idle");
+    setBrandError(null);
+    startBrand(async () => {
+      const res = await saveBranding({ ...branding, onboarded_at: branding.onboarded_at ?? new Date().toISOString() });
+      if (res.ok) {
+        setBrandState("saved");
+        window.location.reload(); // the accent colour and logo are applied by the layout on the server
+      } else {
+        setBrandState("error");
+        setBrandError(res.error ?? "Could not save.");
+      }
+    });
+  }
   const [identity, setIdentity] = useState<Record<string, string>>(() => {
     const o: Record<string, string> = {};
     for (const [k] of IDENTITY_FIELDS) o[k] = initial[k] ?? "";
@@ -112,7 +133,29 @@ export default function SettingsForm({
 
   return (
     <div className="mt-6 max-w-2xl space-y-6">
-      <section className="glass rounded-xl p-5">
+            <section className="glass rounded-xl p-5">
+        <h2 className="font-heading text-sm uppercase tracking-wider text-brand-soft">Branding</h2>
+        <p className="mt-0.5 text-xs text-muted">
+          Your logo, colour and words — on the app, on every proposal, and on the client&apos;s link.
+        </p>
+        <div className="mt-4">
+          <BrandingSection value={branding} onChange={setBranding} />
+        </div>
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onSaveBranding}
+            disabled={brandPending}
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-50"
+          >
+            {brandPending ? "Saving…" : "Save branding"}
+          </button>
+          {brandState === "saved" ? <span className="text-xs text-green-400">Saved ✓</span> : null}
+          {brandState === "error" ? <span className="text-xs text-brand-soft">{brandError}</span> : null}
+        </div>
+      </section>
+
+<section className="glass rounded-xl p-5">
         <h2 className="font-heading text-sm uppercase tracking-wider text-brand-soft">
           Company identity
         </h2>
@@ -194,7 +237,11 @@ export default function SettingsForm({
         </button>
       </div>
 
-      <ProposalProfileSection initial={profile} wasSet={profileWasSet} />
+      <ProposalProfileSection
+        initial={profile}
+        wasSet={profileWasSet}
+        voiceOf={{ company_name: identity.company_name, voice: branding.voice, job_types: branding.job_types, slogan: branding.slogan }}
+      />
     </div>
   );
 }
@@ -204,9 +251,12 @@ export default function SettingsForm({
 function ProposalProfileSection({
   initial,
   wasSet,
+  voiceOf,
 }: {
   initial: ProposalProfile;
   wasSet: boolean;
+  /** From the Branding section above: the AI writes in this voice, for these jobs. */
+  voiceOf: { company_name: string; voice: Branding["voice"]; job_types: string[]; slogan: string };
 }) {
   const [p, setP] = useState<ProposalProfile>(initial);
   const [state, setState] = useState<"idle" | "saved" | "error">("idle");
@@ -237,7 +287,7 @@ function ProposalProfileSection({
     setError(null);
     setDrafting(true);
     start(async () => {
-      const res = await draftProposalProfile(notes);
+      const res = await draftProposalProfile({ ...notes, ...voiceOf });
       setDrafting(false);
       if (!res.ok || !res.profile) {
         setError(res.error ?? "Could not draft.");
@@ -405,6 +455,59 @@ function ProposalProfileSection({
             spellCheck
             className="mt-1.5 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground outline-none focus:border-brand"
           />
+        </div>
+
+        {/* Insurance statements the California contract must carry, word for word */}
+        <div>
+          <span className="text-[11px] uppercase tracking-wider text-muted">Insurance statements (home improvement contracts)</span>
+          <p className="text-xs text-muted/70">
+            California requires the contract to state, in its own words, whether you carry general liability and
+            workers&apos; compensation. Your answers pick the sentence; the client sees the carrier and phone number.
+          </p>
+          <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+            <label className="text-xs text-muted">
+              General liability
+              <select
+                value={p.compliance.cgl}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, cgl: e.target.value as ProposalProfile["compliance"]["cgl"] } }))}
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              >
+                <option value="carried">Carried — insured by a carrier</option>
+                <option value="llc">LLC — liability insurance or other security as required by law</option>
+                <option value="self">Self-insured</option>
+                <option value="none">Not carried</option>
+              </select>
+            </label>
+            <label className="text-xs text-muted">
+              Workers&apos; compensation
+              <select
+                value={p.compliance.workers_comp}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, workers_comp: e.target.value as ProposalProfile["compliance"]["workers_comp"] } }))}
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              >
+                <option value="employees">Carried for all employees</option>
+                <option value="exempt">No employees — exempt</option>
+              </select>
+            </label>
+            <label className="text-xs text-muted">
+              Liability carrier (as on the policy)
+              <input
+                value={p.compliance.cgl_carrier}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, cgl_carrier: e.target.value } }))}
+                placeholder="e.g. State Compensation Insurance Fund"
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              />
+            </label>
+            <label className="text-xs text-muted">
+              Carrier phone (the client may call to verify)
+              <input
+                value={p.compliance.cgl_phone}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, cgl_phone: e.target.value } }))}
+                placeholder="800-555-0100"
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              />
+            </label>
+          </div>
         </div>
 
         {/* Terms & conditions */}

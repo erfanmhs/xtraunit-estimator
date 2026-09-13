@@ -54,7 +54,8 @@ import {
   recomputeValue,
 } from "@/lib/takeoff/measurements";
 import SwipeRow from "@/components/SwipeRow";
-import { polishSheetNotes } from "./actions";
+import { aiCountSheet, polishSheetNotes } from "./actions";
+import type { AiCountResult } from "@/lib/takeoff/aiCount";
 import {
   SelectIcon,
   PanIcon,
@@ -72,374 +73,34 @@ import {
 } from "@/components/ToolIcons";
 import type { PlanFile } from "@/types";
 
-// On-sheet takeoff legend placement (fractions of the page + a size multiplier).
-type Ledger = { x: number; y: number; scale: number; visible: boolean };
-/** A cropped sheet's window onto its page: PDF points, top-left origin, page scale 1. */
-type Crop = { x: number; y: number; w: number; h: number };
-type Sheet = {
-  id: string;
-  page_number: number;
-  name?: string | null;
-  label: string | null;
-  notes: string | null;
-  discipline?: string | null;
-  scale_x: number | null;
-  scale_y: number | null;
-  scale_preset: string | null;
-  ledger?: Ledger | null;
-  crop?: Crop | null; // migration 0035 — a sheet cut from a page, non-destructively
-  source_sheet_id?: string | null;
-  created_at?: string;
-};
-
-// Standard paper shapes for the Crop tool (inches). Only the SHAPE is held —
-// the size is whatever you drag; the readout shows it in inches.
-const PAPER: { id: string; label: string; w: number; h: number }[] = [
-  { id: "free", label: "Free", w: 0, h: 0 },
-  { id: "ansi-a", label: "ANSI A · 8½×11", w: 8.5, h: 11 },
-  { id: "ansi-b", label: "ANSI B · 11×17", w: 11, h: 17 },
-  { id: "ansi-c", label: "ANSI C · 17×22", w: 17, h: 22 },
-  { id: "ansi-d", label: "ANSI D · 22×34", w: 22, h: 34 },
-  { id: "ansi-e", label: "ANSI E · 34×44", w: 34, h: 44 },
-  { id: "arch-a", label: "ARCH A · 9×12", w: 9, h: 12 },
-  { id: "arch-b", label: "ARCH B · 12×18", w: 12, h: 18 },
-  { id: "arch-c", label: "ARCH C · 18×24", w: 18, h: 24 },
-  { id: "arch-d", label: "ARCH D · 24×36", w: 24, h: 36 },
-  { id: "arch-e", label: "ARCH E · 36×48", w: 36, h: 48 },
-  { id: "a4", label: "A4 · 8.27×11.69", w: 8.27, h: 11.69 },
-  { id: "a3", label: "A3 · 11.69×16.54", w: 11.69, h: 16.54 },
-  { id: "a2", label: "A2 · 16.54×23.39", w: 16.54, h: 23.39 },
-  { id: "a1", label: "A1 · 23.39×33.11", w: 23.39, h: 33.11 },
-];
-const PT_PER_IN = 72;
-
-const DEFAULT_LEDGER: Ledger = { x: 0.7, y: 0.04, scale: 1, visible: false };
-// Base ledger size in PDF points (then × page zoom × the user's size multiplier).
-const LEDGER_BASE_W = 200;
-const LEDGER_BASE_FONT = 11;
-type Measurement = {
-  id: string;
-  type: string;
-  geometry: Pt[];
-  value: number | null;
-  unit: string | null;
-  layer: string | null;
-  color: string | null;
-  wall_sided: string | null;
-  wall_height: number | null;
-  vol_mode: string | null;
-  vol_width: number | null;
-  vol_depth: number | null;
-  // Leader-only: the text note + its arrowhead/font sizes (PDF points).
-  text?: string | null;
-  font_size?: number | null;
-  head_size?: number | null;
-};
-type Tool =
-  | "browse"
-  | "select"
-  | "calibrate"
-  | "line"
-  | "polyline"
-  | "area"
-  | "wall"
-  | "volume"
-  | "count"
-  | "leader"
-  | "crop";
-
-const MEAS_COLS =
-  "id,type,geometry,value,unit,layer,color,wall_sided,wall_height,vol_mode,vol_width,vol_depth,text,font_size,head_size";
-// Leader annotation defaults (PDF points). User grows/shrinks each per leader.
-const LEADER_FONT_DEFAULT = 14;
-const LEADER_HEAD_DEFAULT = 12;
-
-const PRESETS: { label: string; inPerFt: number; group: string }[] = [
-  { label: '3"=1\'', inPerFt: 3, group: "Architectural" },
-  { label: '1-1/2"=1\'', inPerFt: 1.5, group: "Architectural" },
-  { label: '1"=1\'', inPerFt: 1, group: "Architectural" },
-  { label: '3/4"=1\'', inPerFt: 0.75, group: "Architectural" },
-  { label: '1/2"=1\'', inPerFt: 0.5, group: "Architectural" },
-  { label: '1/4"=1\'', inPerFt: 0.25, group: "Architectural" },
-  { label: '3/16"=1\'', inPerFt: 0.1875, group: "Architectural" },
-  { label: '1/8"=1\'', inPerFt: 0.125, group: "Architectural" },
-  { label: '1/16"=1\'', inPerFt: 0.0625, group: "Architectural" },
-  { label: '1"=10\'', inPerFt: 0.1, group: "Civil" },
-  { label: '1"=20\'', inPerFt: 0.05, group: "Civil" },
-  { label: '1"=30\'', inPerFt: 1 / 30, group: "Civil" },
-  { label: '1"=40\'', inPerFt: 0.025, group: "Civil" },
-  { label: '1"=50\'', inPerFt: 0.02, group: "Civil" },
-  { label: '1"=100\'', inPerFt: 0.01, group: "Civil" },
-];
-// 12 distinct colors — each new tool pick auto-rotates to an unused one.
-const COLORS = [
-  "#A01C2D",
-  "#2563eb",
-  "#16a34a",
-  "#d97706",
-  "#7c3aed",
-  "#0891b2",
-  "#db2777",
-  "#65a30d",
-  "#ea580c",
-  "#6366f1",
-  "#0d9488",
-  "#ca8a04",
-];
-const MEASURE_TOOLS: Tool[] = [
-  "line",
-  "polyline",
-  "area",
-  "wall",
-  "volume",
-  "count",
-  "leader",
-];
-// Layers group by trimmed name; unnamed measurements share the "Unlabeled" group.
-
-// Group measurements into layer takeoff lines (shared by the side panel, the
-// on-sheet legend, and the PDF export).
-function hexToRgba(hex: string, a: number): string {
-  const h = (hex || "#A01C2D").replace("#", "");
-  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const r = parseInt(n.slice(0, 2), 16) || 0;
-  const g = parseInt(n.slice(2, 4), 16) || 0;
-  const b = parseInt(n.slice(4, 6), 16) || 0;
-  return `rgba(${r},${g},${b},${a})`;
-}
-
-// Draw all takeoff markup onto a 2D canvas at exportScale k (PDF points × k).
-// Mirrors the on-screen SVG overlay so exports look like the live sheet.
-function drawMarkupOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  ms: Measurement[],
-  k: number,
-) {
-  const P = (p: Pt) => ({ x: p.x * k, y: p.y * k });
-  for (const m of ms) {
-    const col = m.color ?? "#A01C2D";
-    const g = m.geometry;
-    if (!g || !g.length) continue;
-    if (m.type === "count") {
-      for (const v of g) {
-        const c = P(v);
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, 5 * k, 0, Math.PI * 2);
-        ctx.fillStyle = hexToRgba(col, 0.85);
-        ctx.fill();
-        ctx.lineWidth = 1.2 * k;
-        ctx.strokeStyle = "#fff";
-        ctx.stroke();
-      }
-    } else {
-      const filled =
-        m.type === "area" || (m.type === "volume" && m.vol_mode === "area");
-      ctx.beginPath();
-      g.forEach((p, i) => {
-        const c = P(p);
-        if (i) ctx.lineTo(c.x, c.y);
-        else ctx.moveTo(c.x, c.y);
-      });
-      if (filled) {
-        ctx.closePath();
-        ctx.fillStyle = hexToRgba(col, 0.15);
-        ctx.fill();
-      }
-      ctx.lineWidth = 2 * k;
-      ctx.strokeStyle = col;
-      ctx.stroke();
-      if (m.type === "leader" && g.length >= 2) {
-        const head = P(g[0]);
-        const box = P(g[1]);
-        const ang = Math.atan2(head.y - box.y, head.x - box.x);
-        const hs = (m.head_size ?? LEADER_HEAD_DEFAULT) * k;
-        ctx.beginPath();
-        ctx.moveTo(head.x, head.y);
-        ctx.lineTo(head.x - hs * Math.cos(ang - 0.42), head.y - hs * Math.sin(ang - 0.42));
-        ctx.lineTo(head.x - hs * Math.cos(ang + 0.42), head.y - hs * Math.sin(ang + 0.42));
-        ctx.closePath();
-        ctx.fillStyle = col;
-        ctx.fill();
-        const fs = (m.font_size ?? LEADER_FONT_DEFAULT) * k;
-        ctx.font = `600 ${fs}px sans-serif`;
-        ctx.textBaseline = "alphabetic";
-        (m.text ?? "").split("\n").forEach((ln, i) => {
-          const ty = box.y + i * fs * 1.15;
-          ctx.lineWidth = Math.max(2, fs * 0.16);
-          ctx.strokeStyle = "#fff";
-          ctx.strokeText(ln, box.x + 5 * k, ty);
-          ctx.fillStyle = col;
-          ctx.fillText(ln, box.x + 5 * k, ty);
-        });
-      }
-    }
-    const text = labelText(m);
-    if (text) {
-      // Areas carry their value in the middle of the shape, matching the
-      // screen; everything else hangs its label off the anchor point.
-      const inside =
-        (m.type === "area" || (m.type === "volume" && m.vol_mode === "area")) &&
-        g.length >= 3;
-      const centered = inside || m.type === "count";
-      const anchor = centered
-        ? polyCentroid(g)
-        : g.length >= 2
-          ? { x: (g[0].x + g[1].x) / 2, y: (g[0].y + g[1].y) / 2 }
-          : g[0];
-      const a = P(anchor);
-      const fs = 14 * k;
-      ctx.font = `700 ${fs}px sans-serif`;
-      ctx.textAlign = inside ? "center" : "left";
-      ctx.textBaseline = inside ? "middle" : "alphabetic";
-      const tx = inside ? a.x : a.x + 6 * k;
-      const ty = inside ? a.y : a.y - 6 * k;
-      ctx.lineWidth = 3.5 * k;
-      ctx.strokeStyle = "#000";
-      ctx.strokeText(text, tx, ty);
-      ctx.fillStyle = "#fff";
-      ctx.fillText(text, tx, ty);
-      ctx.textAlign = "left";
-      ctx.textBaseline = "alphabetic";
-    }
-  }
-}
-
-// Draw the takeoff legend onto the export canvas (matches the on-sheet box).
-function drawLedgerOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  ms: Measurement[],
-  k: number,
-  ledger: Ledger | null | undefined,
-  cw: number,
-  ch: number,
-) {
-  if (!ledger?.visible) return;
-  const rows = buildLayerGroups(ms).filter((g) => g.lines.length > 0);
-  if (!rows.length) return;
-  const sc = ledger.scale * k;
-  const W = LEDGER_BASE_W * sc;
-  const font = LEDGER_BASE_FONT * sc;
-  const pad = 6 * sc;
-  const rowH = font * 1.5 + 4 * sc;
-  const headH = font + 2 * pad;
-  const H = headH + rows.length * rowH + 4 * sc;
-  let x = ledger.x * cw;
-  let y = ledger.y * ch;
-  x = Math.max(2, Math.min(x, cw - W - 2));
-  y = Math.max(2, Math.min(y, ch - H - 2));
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  ctx.fillRect(x, y, W, H);
-  ctx.lineWidth = Math.max(1, sc);
-  ctx.strokeStyle = "#888";
-  ctx.strokeRect(x, y, W, H);
-  ctx.fillStyle = "#eef0f2";
-  ctx.fillRect(x, y, W, headH);
-  ctx.strokeRect(x, y, W, headH);
-  ctx.fillStyle = "#111";
-  ctx.textBaseline = "middle";
-  ctx.font = `600 ${font}px sans-serif`;
-  ctx.fillText("Takeoff Legend", x + pad, y + headH / 2);
-  let ry = y + headH;
-  for (const r of rows) {
-    const sw = font * 0.7;
-    ctx.fillStyle = r.color;
-    ctx.fillRect(x + pad, ry + rowH / 2 - sw / 2, sw, sw);
-    ctx.fillStyle = "#111";
-    ctx.font = `${font}px sans-serif`;
-    const txt = `${r.layer} — ${r.lines.join(", ")} · ${r.rows.length} run${r.rows.length === 1 ? "" : "s"}`;
-    ctx.fillText(txt, x + pad * 2 + sw, ry + rowH / 2, W - pad * 3 - sw);
-    ry += rowH;
-  }
-}
-
-/**
- * The layer-name field inside the picker.
- *
- * It deliberately keeps its own text state. `layer` lives on PlanViewer, and a
- * setState there re-renders the whole viewer — every SVG shape, the layer
- * totals, the measurements list — which on a phone made typing lag and drop
- * characters. The name is handed up only when it's COMMITTED (Done, Enter,
- * blur, or the picker closing), which is the only moment it has to be right.
- */
-function LayerNameField({
-  initial,
-  existing,
-  skipCommitRef,
-  onCommit,
-  onDone,
-}: {
-  initial: string;
-  existing: string[];
-  /** Set by the parent when a layer was picked from the list instead. */
-  skipCommitRef: { current: boolean };
-  onCommit: (name: string) => void;
-  onDone: () => void;
-}) {
-  const [text, setText] = useState(initial);
-  const latest = useRef(text);
-  const commitRef = useRef(onCommit);
-  useEffect(() => {
-    latest.current = text;
-  }, [text]);
-  useEffect(() => {
-    commitRef.current = onCommit;
-  }, [onCommit]);
-  // The picker can close without a blur (tap on the drawing) — commit then too,
-  // unless the close came from picking an existing layer.
-  useEffect(
-    () => () => {
-      if (skipCommitRef.current) {
-        skipCommitRef.current = false;
-        return;
-      }
-      commitRef.current(latest.current.trim());
-    },
-    [skipCommitRef],
-  );
-
-  const trimmed = text.trim();
-  return (
-    <>
-      <div className="flex items-center gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === "Escape") {
-              onCommit(trimmed);
-              onDone();
-            }
-          }}
-          onBlur={() => onCommit(trimmed)}
-          autoFocus={!initial.trim()}
-          spellCheck
-          autoCapitalize="sentences"
-          enterKeyHint="done"
-          placeholder="New layer name (e.g. Exterior wall)"
-          aria-label="Layer name"
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-2 text-foreground placeholder:text-muted/60 focus:border-brand focus:outline-none"
-        />
-        <button
-          type="button"
-          onClick={() => {
-            onCommit(trimmed);
-            onDone();
-          }}
-          className="glass-brand min-h-10 shrink-0 rounded-md px-3 font-medium text-foreground"
-        >
-          Done
-        </button>
-      </div>
-      <p className="px-1 pt-1 text-[10px] text-muted">
-        {trimmed
-          ? existing.includes(trimmed)
-            ? `Continuing "${trimmed}" — new runs add to it.`
-            : `New layer "${trimmed}" — saved with the first run you draw.`
-          : "Type a name for the runs you're about to draw, or pick a layer below."}
-      </p>
-    </>
-  );
-}
+import {
+  COLORS,
+  DEFAULT_LEDGER,
+  LEADER_FONT_DEFAULT,
+  LEADER_HEAD_DEFAULT,
+  LEDGER_BASE_FONT,
+  LEDGER_BASE_W,
+  MEASURE_TOOLS,
+  MEAS_COLS,
+  PAPER,
+  PRESETS,
+  PT_PER_IN,
+  type Crop,
+  type Ledger,
+  type Measurement,
+  type Sheet,
+  type Tool,
+} from "@/lib/takeoff/model";
+import { drawLedgerOnCanvas, drawMarkupOnCanvas } from "@/lib/takeoff/draw";
+import {
+  deleteMeasurements,
+  insertMeasurements,
+  loadMeasurementsForSheets,
+  loadSheetMeasurements,
+} from "@/lib/takeoff/store";
+import LayerNameField from "./LayerNameField";
+import { TYPE_NOUN, blockedLayers, layerFits, nextLayerName } from "@/lib/takeoff/layers";
+import { findSymbolCopies } from "@/lib/takeoff/templateMatchClient";
 
 export default function PlanViewer({
   projectId,
@@ -577,6 +238,14 @@ export default function PlanViewer({
   // never closed the picker.)
   const popoverRef = useRef<HTMLDivElement>(null);
   const layerAnchorRef = useRef<DOMRect | null>(null); // the layer chip's box when opened
+  const layerChipRef = useRef<HTMLButtonElement>(null); // the chip itself, for opening the wizard from code
+  // One kind of measurement per layer. A tool switch starts a fresh layer,
+  // "Layer N" numbered across the whole project (names are read once per
+  // plan file and every new name is added), and opens the wizard with the
+  // name selected so typing replaces it.
+  const lastMeasureToolRef = useRef<Tool | null>(null);
+  const projectLayerNamesRef = useRef<Set<string>>(new Set());
+  const [layerWizard, setLayerWizard] = useState(false); // picker opened by a tool switch: select the name
   function popover(close: () => void, body: React.ReactNode, width = "w-80", anchor?: DOMRect | null) {
     if (phone) {
       // Small popover pinned under its control (portaled so the backdrop is
@@ -864,6 +533,19 @@ export default function PlanViewer({
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCountId, setActiveCountId] = useState<string | null>(null);
+  // "Find all like this": box a symbol around the last marker, search the
+  // sheet, review the ghosts, add them to the run. See lib/takeoff/templateMatch.
+  const [autoCount, setAutoCount] = useState<
+    | null
+    | { phase: "box"; box: number }
+    | { phase: "finding"; box: number }
+    | { phase: "review"; box: number; ghosts: { pt: Pt; score: number }[]; off: Set<number> }
+  >(null);
+  // AI count check: the model's own count of the sheet, shown beside yours;
+  // each kind can be dropped onto the sheet as its own editable count layer.
+  const [aiCount, setAiCount] = useState<
+    null | { phase: "working" } | { phase: "result"; result: AiCountResult; placed: Set<string> }
+  >(null);
   const [editGeom, setEditGeom] = useState<Pt[] | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Undo / redo — snapshots of this sheet's measurements; on undo/redo the DB is
@@ -968,6 +650,8 @@ export default function PlanViewer({
     setEditGeom(null);
     activeCountRef.current = null;
     setActiveCountId(null);
+    setAutoCount(null);
+    setAiCount(null); // a count of the OLD sheet must never be placed on the new one
     setUndoStack([]);
     setRedoStack([]);
     setActiveVertex(null);
@@ -977,13 +661,8 @@ export default function PlanViewer({
     // sheet's measurements with another sheet's — or an empty list.)
     let live = true;
     (async () => {
-      const { data } = await supabase
-        .from("measurements")
-        .select(MEAS_COLS)
-        .eq("sheet_id", currentSheet.id)
-        .order("created_at", { ascending: true });
+      const rows = await loadSheetMeasurements(supabase, currentSheet.id);
       if (!live) return;
-      const rows = (data as Measurement[]) ?? [];
       setMeasurements(rows);
       // Keep recording where the sheet left off: with no layer chosen yet
       // (fresh load, first visit to this sheet), the chip takes the newest
@@ -1516,21 +1195,77 @@ export default function PlanViewer({
     );
   }
 
-  // Selecting a measure tool starts fresh: empty layer name, new color.
+  // Every layer name on this plan file's sheets, so "Layer N" never repeats
+  // across sheets. Read once; new names are added as they are made.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { data } = await supabase
+        .from("measurements")
+        .select("layer")
+        .eq("project_id", projectId)
+        .not("layer", "is", null);
+      if (!live) return;
+      for (const r of (data as { layer: string | null }[] | null) ?? []) if (r.layer) projectLayerNamesRef.current.add(r.layer);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [supabase, projectId]);
+
+  /** The next free automatic name, counting this sheet and every other sheet on the file. */
+  function freshLayerName(): string {
+    const used = new Set(projectLayerNamesRef.current);
+    for (const n of layerNames) used.add(n);
+    if (layer.trim()) used.add(layer.trim());
+    const name = nextLayerName(used);
+    projectLayerNamesRef.current.add(name);
+    return name;
+  }
+
+  /** Start a new layer for `t` and open the wizard with its name selected. */
+  function startNewLayer() {
+    skipLayerCommitRef.current = true; // an open picker must not commit the old text over the new name
+    setLayer(freshLayerName());
+    setColor(pickNextColor());
+    layerAnchorRef.current = layerChipRef.current?.getBoundingClientRect() ?? null;
+    setLayerWizard(true);
+    setLayerOpen(true);
+  }
+
+  /** The layer a run of `type` may be saved into: the current one if it fits, else a fresh one. */
+  function layerFor(type: string): string | null {
+    const name = layer.trim();
+    if (!name) return null;
+    if (layerFits(measurements, name, type)) return name;
+    const fresh = freshLayerName();
+    setLayer(fresh);
+    setColor(pickNextColor());
+    return fresh;
+  }
+
+  // Selecting a measure tool: a different tool than last time (or a layer
+  // that already holds another kind) starts a fresh layer and asks for its
+  // name. Re-selecting the same tool, or going through Select / Pan and
+  // back, keeps recording into the same layer.
   function selectTool(t: Tool) {
     setTool(t);
     setDraft([]);
     setHover(null);
     finishCount();
-    // The active layer sticks across tool switches (keep recording into the
-    // same layer); only an empty layer gets a fresh color.
-    if (MEASURE_TOOLS.includes(t) && !layer.trim()) setColor(pickNextColor());
+    setAiCount(null);
+    if (!MEASURE_TOOLS.includes(t)) return;
+    const prev = lastMeasureToolRef.current;
+    lastMeasureToolRef.current = t;
+    const switched = prev !== null && prev !== t;
+    if (switched || !layer.trim() || !layerFits(measurements, layer.trim(), t)) startNewLayer();
   }
 
   // "Digitizer" continue: re-arm a layer group so new draws keep adding to it.
   function continueLayer(g: { layer: string; color: string; rows: Measurement[] }) {
     const first = g.rows[0];
     finishCount();
+    if (MEASURE_TOOLS.includes(first.type as Tool)) lastMeasureToolRef.current = first.type as Tool;
     setLayer(g.layer === "Unlabeled" ? "" : g.layer);
     setColor(g.color);
     if (first.type === "wall") {
@@ -1750,13 +1485,14 @@ export default function PlanViewer({
     // the user had started drawing next on a slow connection, and the saved
     // shape "vanished" until the round trip came back.)
     const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const layerName = layerFor(type);
     const optimistic: Measurement = {
       id: tempId,
       type,
       geometry,
       value,
       unit,
-      layer: layer.trim() || null,
+      layer: layerName,
       color,
       wall_sided: null,
       wall_height: null,
@@ -1788,7 +1524,7 @@ export default function PlanViewer({
         geometry,
         value,
         unit,
-        layer: layer.trim() || null,
+        layer: layerName,
         color,
         ...extra,
       })
@@ -1850,6 +1586,7 @@ export default function PlanViewer({
   }
 
   async function insertLeader(geometry: Pt[]) {
+    const layerName = layerFor("leader");
     if (!currentSheet) return;
     // Draft clears and the arrow shows right away; the note card opens once
     // the row exists (its text edits need the real id).
@@ -1863,7 +1600,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer.trim() || null,
+        layer: layerName,
         color,
         wall_sided: null,
         wall_height: null,
@@ -1896,7 +1633,7 @@ export default function PlanViewer({
         geometry,
         value: null,
         unit: null,
-        layer: layer.trim() || null,
+        layer: layerName,
         color,
         text: "",
         font_size: LEADER_FONT_DEFAULT,
@@ -2055,7 +1792,7 @@ export default function PlanViewer({
         geometry,
         value: 1,
         unit: "ea",
-        layer: layer.trim() || null,
+        layer: layerFor("count"),
         color,
       })
       .select(MEAS_COLS)
@@ -2071,6 +1808,173 @@ export default function PlanViewer({
   function finishCount() {
     activeCountRef.current = null;
     setActiveCountId(null);
+    setAutoCount(null);
+  }
+
+  // ── Find all like this ────────────────────────────────────────────────────
+  // A match at or above this score is ticked by default; below it is shown
+  // greyed for the user to tick. CAD symbols usually land 0.8+; a scan 0.6+.
+  const AUTO_COUNT_SURE = 0.72;
+  // The anchor is the LAST marker of the active count run: that's the symbol
+  // the user just tapped, so "like this" needs no extra drawing on a phone.
+  const autoCountAnchor: Pt | null = (() => {
+    const run = activeCountId ? measurements.find((m) => m.id === activeCountId) : null;
+    return run && run.geometry.length ? run.geometry[run.geometry.length - 1] : null;
+  })();
+
+  // The search wants the symbol about 36 px across. The on-screen bitmap is
+  // whatever the zoom is (5 px per door when zoomed out), so render the
+  // sheet again off-screen at the resolution the search needs — capped at
+  // 8 M pixels, the same crop window as the display.
+  async function renderForSearch(box: number): Promise<{ canvas: HTMLCanvasElement; pxPerPt: number } | null> {
+    if (!baseDims.w || !baseDims.h) return null;
+    const want = 36 / box;
+    const cap = Math.sqrt(8_000_000 / (baseDims.w * baseDims.h));
+    return renderSheetAt(Math.max(0.5, Math.min(want, cap)));
+  }
+
+  /** The current sheet (its crop window, like the display) drawn off-screen at `pxPerPt`. */
+  async function renderSheetAt(pxPerPt: number): Promise<{ canvas: HTMLCanvasElement; pxPerPt: number } | null> {
+    const pdf = pdfRef.current;
+    if (!pdf || !baseDims.w || !baseDims.h) return null;
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({
+      scale: pxPerPt,
+      offsetX: crop ? -crop.x * pxPerPt : 0,
+      offsetY: crop ? -crop.y * pxPerPt : 0,
+    });
+    const off = document.createElement("canvas");
+    off.width = Math.ceil(baseDims.w * pxPerPt);
+    off.height = Math.ceil(baseDims.h * pxPerPt);
+    const ctx = off.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, off.width, off.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return { canvas: off, pxPerPt };
+  }
+
+  async function runAutoCount(box: number) {
+    const anchor = autoCountAnchor;
+    const active = activeCountRef.current;
+    if (!anchor || !active) return;
+    setError(null);
+    setAutoCount({ phase: "finding", box });
+    try {
+      const r = await renderForSearch(box);
+      if (!r) throw new Error("The sheet isn't ready yet.");
+      // Search loosely; strong matches start ticked, weak ones start
+      // unticked but visible, so a near-miss is one tap away instead of lost.
+      const hits = await findSymbolCopies(r.canvas, r.pxPerPt, anchor, box, { threshold: 0.5 });
+      r.canvas.width = 0;
+      r.canvas.height = 0;
+      // Drop the anchor itself and anything already in the run.
+      const near = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y) < box * 0.5;
+      const ghosts = hits.filter((h) => !active.geometry.some((g) => near(g, h.pt)));
+      const off = new Set<number>();
+      ghosts.forEach((g, i) => {
+        if (g.score < AUTO_COUNT_SURE) off.add(i);
+      });
+      setAutoCount({ phase: "review", box, ghosts, off });
+      if (!ghosts.length) setError("No other copies found. Try a bigger or smaller box.");
+    } catch (e) {
+      setAutoCount({ phase: "box", box });
+      setError(e instanceof Error ? e.message : "The search failed.");
+    }
+  }
+
+  async function acceptAutoCount() {
+    const active = activeCountRef.current;
+    if (!autoCount || autoCount.phase !== "review" || !active) return;
+    const add = autoCount.ghosts.filter((_, i) => !autoCount.off.has(i)).map((g) => g.pt);
+    setAutoCount(null);
+    if (!add.length) return;
+    recordHistory();
+    const geometry = [...active.geometry, ...add];
+    activeCountRef.current = { id: active.id, geometry };
+    const value = geometry.length;
+    setMeasurements((arr) => arr.map((x) => (x.id === active.id ? { ...x, geometry, value } : x)));
+    const { error: upErr } = await supabase
+      .from("measurements")
+      .update({ geometry, value })
+      .eq("id", active.id);
+    if (upErr) setError("Could not save the found markers.");
+  }
+
+  // ── AI count check ────────────────────────────────────────────────────────
+  const AI_COUNT_MAX_B64 = 1_200_000; // ≈ 0.9 MB of JPEG, well under the 2 MB action limit
+  async function runAiCount() {
+    if (!currentSheet) return;
+    setError(null);
+    setAiCount({ phase: "working" });
+    try {
+      // 1568 px on the long edge is the size the model reads best.
+      const r = await renderSheetAt(1568 / Math.max(baseDims.w, baseDims.h));
+      if (!r) throw new Error("The sheet isn't ready yet.");
+      // The action request must stay under Next's body limit (2 MB, set in
+      // next.config). A clean floor plan is ~350 KB at 0.85; a dense sheet
+      // can be four times that, so step the quality down until it fits.
+      let jpegBase64 = "";
+      for (const q of [0.85, 0.7, 0.55, 0.4]) {
+        const dataUrl = r.canvas.toDataURL("image/jpeg", q);
+        jpegBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+        if (jpegBase64.length <= AI_COUNT_MAX_B64) break;
+      }
+      r.canvas.width = 0;
+      r.canvas.height = 0;
+      if (jpegBase64.length > AI_COUNT_MAX_B64) throw new Error("This sheet is too dense to send. Crop it to the area you need first.");
+      const res = await aiCountSheet({
+        projectId,
+        sheetId: currentSheet.id,
+        sheetName: currentSheet.name ?? currentSheet.label ?? null,
+        jpegBase64,
+      });
+      if (!res.ok || !res.result) throw new Error(res.error ?? "The AI count failed.");
+      setAiCount({ phase: "result", result: res.result, placed: new Set() });
+    } catch (e) {
+      setAiCount(null);
+      setError(e instanceof Error ? e.message : "The AI count failed.");
+    }
+  }
+
+  /** Drop one AI-counted kind onto the sheet as its own count layer. */
+  async function placeAiCount(kind: AiCountResult["kinds"][number]) {
+    if (!currentSheet || !aiCount || aiCount.phase !== "result") return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setError("Not signed in — nothing was placed.");
+      return;
+    }
+    const geometry: Pt[] = kind.positions.map((p) => ({ x: p.x * baseDims.w, y: p.y * baseDims.h }));
+    if (!geometry.length) return;
+    recordHistory();
+    const { data, error: insErr } = await insertMeasurements(
+      supabase,
+      { projectId, planFileId: planFile.id, sheetId: currentSheet.id, ownerId: user.id },
+      [
+        {
+          type: "count",
+          geometry,
+          value: geometry.length,
+          unit: "ea",
+          layer: `${kind.kind} (AI)`,
+          color: pickNextColor(),
+          wall_sided: null,
+          wall_height: null,
+          vol_mode: null,
+          vol_width: null,
+          vol_depth: null,
+        },
+      ],
+    );
+    if (insErr || !data.length) {
+      setError("Could not place the AI count.");
+      return;
+    }
+    setMeasurements((arr) => [...arr, ...data]);
+    setAiCount((a) => (a && a.phase === "result" ? { ...a, placed: new Set([...a.placed, kind.kind]) } : a));
   }
 
   // Nearest measurement under a point (in PDF points), or null. Shared by the
@@ -3171,35 +3075,16 @@ export default function PlanViewer({
       const c = cur.get(m.id);
       return c && JSON.stringify(c) !== JSON.stringify(m);
     });
-    if (toDelete.length)
-      await supabase.from("measurements").delete().in("id", toDelete);
+    await deleteMeasurements(supabase, toDelete);
     if (toInsert.length && currentSheet) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (user) {
-        await supabase.from("measurements").insert(
-          toInsert.map((m) => ({
-            id: m.id,
-            project_id: projectId,
-            plan_file_id: planFile.id,
-            sheet_id: currentSheet.id,
-            owner_id: user.id,
-            type: m.type,
-            geometry: m.geometry,
-            value: m.value,
-            unit: m.unit,
-            layer: m.layer,
-            color: m.color,
-            wall_sided: m.wall_sided,
-            wall_height: m.wall_height,
-            vol_mode: m.vol_mode,
-            vol_width: m.vol_width,
-            vol_depth: m.vol_depth,
-            text: m.text,
-            font_size: m.font_size,
-            head_size: m.head_size,
-          })),
+        await insertMeasurements(
+          supabase,
+          { projectId, planFileId: planFile.id, sheetId: currentSheet.id, ownerId: user.id },
+          toInsert,
         );
       }
     }
@@ -3548,12 +3433,8 @@ export default function PlanViewer({
     if (!pdf || !exportSel.size) return;
     setExporting("Preparing…");
     try {
-      const { data } = await supabase
-        .from("measurements")
-        .select(`${MEAS_COLS},sheet_id`)
-        .in("sheet_id", [...exportSel]);
       const bySheet = new Map<string, Measurement[]>();
-      for (const m of (data ?? []) as (Measurement & { sheet_id: string })[]) {
+      for (const m of await loadMeasurementsForSheets(supabase, [...exportSel])) {
         const arr = bySheet.get(m.sheet_id) ?? [];
         arr.push(m);
         bySheet.set(m.sheet_id, arr);
@@ -4351,9 +4232,11 @@ export default function PlanViewer({
             <div className="relative flex min-w-0 flex-1 basis-40 items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
               <button
+                ref={layerChipRef}
                 type="button"
                 onClick={(e) => {
                   layerAnchorRef.current = e.currentTarget.getBoundingClientRect();
+                  setLayerWizard(false);
                   setLayerOpen((o) => !o);
                 }}
                 aria-haspopup="listbox"
@@ -4375,20 +4258,29 @@ export default function PlanViewer({
                 ? popover(
                     () => setLayerOpen(false),
                     <div className="p-1.5 text-sm">
+                      {layerWizard ? (
+                        <p className="px-1 pb-1 text-[11px] text-foreground">
+                          New layer for {TYPE_NOUN[tool] ?? "this tool"}. Name it, or keep the number.
+                        </p>
+                      ) : null}
                       <LayerNameField
+                        key={layer}
                         initial={layer}
                         existing={layerNames}
+                        blocked={blockedLayers(measurements, tool)}
+                        toolNoun={TYPE_NOUN[tool] ?? "runs"}
+                        selectOnMount={layerWizard}
                         skipCommitRef={skipLayerCommitRef}
                         onCommit={setLayer}
                         onDone={() => setLayerOpen(false)}
                       />
-                      {layerGroups.length ? (
+                      {layerGroups.some((g) => g.rows[0]?.type === tool) ? (
                         <>
                           <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-muted">
-                            Continue a layer
+                            Continue a layer of {TYPE_NOUN[tool] ?? "this kind"}
                           </p>
                           <div className="max-h-[32vh] overflow-y-auto sm:max-h-56">
-                            {layerGroups.map((g) => {
+                            {layerGroups.filter((g) => g.rows[0]?.type === tool).map((g) => {
                               const active = layerKeyOf(layer) === g.layer;
                               return (
                                 <button
@@ -4598,14 +4490,135 @@ export default function PlanViewer({
                       ? "Tap each item — every tap saves · hold a marker to remove it"
                       : "Click each item — every click saves"}
                 </span>
-                <button
-                  type="button"
-                  onClick={finishCount}
-                  disabled={!activeCountId}
-                  className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong disabled:opacity-40"
-                >
-                  Finish count
-                </button>
+                {autoCount ? null : (
+                  <button
+                    type="button"
+                    onClick={finishCount}
+                    disabled={!activeCountId}
+                    className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong disabled:opacity-40"
+                  >
+                    Finish count
+                  </button>
+                )}
+                {activeCountId && autoCountAnchor && !autoCount ? (
+                  <button
+                    type="button"
+                    onClick={() => setAutoCount({ phase: "box", box: 30 })}
+                    title="Search the sheet for every copy of the symbol under your last marker"
+                    className="rounded-md border border-brand/50 px-3 py-1 font-medium text-brand-soft hover:bg-brand/10"
+                  >
+                    Find all like this
+                  </button>
+                ) : null}
+                {!autoCount && !aiCount ? (
+                  <button
+                    type="button"
+                    onClick={runAiCount}
+                    title="Ask the AI to count the doors, windows and fixtures it sees on this sheet"
+                    className="rounded-md border border-border px-3 py-1 text-foreground hover:border-brand"
+                  >
+                    AI count check
+                  </button>
+                ) : null}
+                {aiCount?.phase === "working" ? (
+                  <span className="text-xs text-muted">AI is reading the sheet… (10–30 s)</span>
+                ) : null}
+                {autoCount?.phase === "box" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted">Box around your last marker:</span>
+                    <button
+                      type="button"
+                      aria-label="Smaller box"
+                      onClick={() => setAutoCount((a) => (a ? { phase: "box", box: Math.max(8, a.box - 4) } : a))}
+                      className="h-8 w-8 rounded-md border border-border text-foreground"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[3.5rem] text-center text-xs tabular-nums text-foreground">{autoCount.box} pt</span>
+                    <button
+                      type="button"
+                      aria-label="Bigger box"
+                      onClick={() => setAutoCount((a) => (a ? { phase: "box", box: Math.min(200, a.box + 4) } : a))}
+                      className="h-8 w-8 rounded-md border border-border text-foreground"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => runAutoCount(autoCount.box)}
+                      className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong"
+                    >
+                      Find
+                    </button>
+                    <button type="button" onClick={() => setAutoCount(null)} className="text-xs text-muted hover:text-foreground">
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+                {autoCount?.phase === "finding" ? (
+                  <span className="text-xs text-muted">Searching the sheet…</span>
+                ) : null}
+                {autoCount?.phase === "review" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted">
+                      {autoCount.ghosts.length - autoCount.off.size} sure
+                      {autoCount.off.size ? ` · ${autoCount.off.size} unsure (grey — tap to include)` : " · tap one to skip it"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={acceptAutoCount}
+                      className="rounded-md bg-brand px-3 py-1 font-medium text-white hover:bg-brand-strong"
+                    >
+                      Add {autoCount.ghosts.length - autoCount.off.size}
+                    </button>
+                    <button type="button" onClick={() => setAutoCount(null)} className="text-xs text-muted hover:text-foreground">
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {tool === "count" && aiCount?.phase === "result" ? (
+              <div className="basis-full rounded-lg border border-border bg-background/70 px-3 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs text-muted">
+                    AI sees: <span className="text-foreground">{aiCount.result.sheet_read}</span>
+                    {aiCount.result.kinds.length ? "" : " — nothing it could count with confidence."}
+                  </p>
+                  <button type="button" onClick={() => setAiCount(null)} className="text-xs text-muted hover:text-foreground">
+                    Close
+                  </button>
+                </div>
+                {aiCount.result.kinds.length ? (
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {aiCount.result.kinds.map((k) => {
+                      const placed = aiCount.placed.has(k.kind);
+                      const mine = measurements
+                        .filter((m) => m.type === "count" && (m.layer ?? "").toLowerCase().startsWith(k.kind.toLowerCase()))
+                        .reduce((n, m) => n + m.geometry.length, 0);
+                      return (
+                        <li key={k.kind} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                          <span className="font-medium text-foreground">{k.kind}</span>
+                          <span className="tabular-nums text-foreground">{k.count}</span>
+                          <span className="text-muted">{Math.round(k.confidence * 100)}% sure</span>
+                          {mine ? <span className="text-muted">· you have {mine}</span> : null}
+                          <span className="basis-full text-muted sm:basis-auto sm:flex-1">{k.note}</span>
+                          <button
+                            type="button"
+                            disabled={placed || !k.positions.length}
+                            onClick={() => placeAiCount(k)}
+                            className="rounded-md border border-brand/50 px-2 py-0.5 text-brand-soft hover:bg-brand/10 disabled:opacity-40"
+                          >
+                            {placed ? "Placed ✓" : "Place as markers"}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+                <p className="mt-1.5 text-[11px] text-muted">
+                  Positions are the AI&apos;s best guess — placed markers are yours to move or delete. One Undo removes a placed set.
+                </p>
               </div>
             ) : null}
             {!hasScale && tool !== "count" ? (
@@ -5146,6 +5159,49 @@ export default function PlanViewer({
                       strokeWidth={2}
                     />
                   ) : null}
+                  {/* Find all like this: the symbol box, then the ghosts */}
+                  {autoCount && autoCountAnchor && autoCount.phase !== "review" ? (
+                    <rect
+                      x={(autoCountAnchor.x - autoCount.box / 2) * scale}
+                      y={(autoCountAnchor.y - autoCount.box / 2) * scale}
+                      width={autoCount.box * scale}
+                      height={autoCount.box * scale}
+                      fill="rgba(226,61,76,0.08)"
+                      stroke="#e23d4c"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                      pointerEvents="none"
+                    />
+                  ) : null}
+                  {autoCount?.phase === "review"
+                    ? autoCount.ghosts.map((g, i) => {
+                        const off = autoCount.off.has(i);
+                        return (
+                          <circle
+                            key={i}
+                            cx={g.pt.x * scale}
+                            cy={g.pt.y * scale}
+                            r={coarse ? 11 : 7}
+                            fill={off ? "transparent" : "rgba(226,61,76,0.35)"}
+                            stroke={off ? "#888" : "#e23d4c"}
+                            strokeWidth={off ? 1 : 2}
+                            strokeDasharray={off ? "2 2" : undefined}
+                            style={{ cursor: "pointer" }}
+                            data-score={g.score.toFixed(2)}
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              setAutoCount((a) => {
+                                if (!a || a.phase !== "review") return a;
+                                const next = new Set(a.off);
+                                if (next.has(i)) next.delete(i);
+                                else next.add(i);
+                                return { ...a, off: next };
+                              });
+                            }}
+                          />
+                        );
+                      })
+                    : null}
                 </svg>
                 {currentLedger?.visible && ledgerRows.length ? (
                   <div

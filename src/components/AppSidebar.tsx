@@ -47,7 +47,14 @@ const DOT: Record<StageState, string> = {
   todo: "",
 };
 
-export default function AppSidebar({ email }: { email: string | null }) {
+export default function AppSidebar({
+  email,
+  brand,
+}: {
+  email: string | null;
+  /** The company's logo (data URL) and name; null → the XtraUnit mark. */
+  brand?: { logo: string | null; name: string | null };
+}) {
   const pathname = usePathname();
   // Inside a project? (/projects/<uuid>/…) — never /projects/new.
   const projectId =
@@ -187,10 +194,15 @@ export default function AppSidebar({ email }: { email: string | null }) {
             className="flex items-center gap-3 transition-opacity hover:opacity-80"
           >
             <span className="flex w-8 shrink-0 justify-center">
-              <Image src="/logo-mark.svg" alt="XtraUnit" width={30} height={21} priority />
+              {brand?.logo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={brand.logo} alt={brand.name ?? "Company logo"} className="h-7 w-8 object-contain" />
+              ) : (
+                <Image src="/logo-mark.svg" alt="XtraUnit" width={30} height={21} priority />
+              )}
             </span>
-            <span className={`font-heading text-lg text-foreground ${label}`}>
-              Estimator
+            <span className={`truncate font-heading text-lg text-foreground ${label}`} title={brand?.name ?? undefined}>
+              {brand?.name || "Estimator"}
             </span>
           </Link>
         </div>

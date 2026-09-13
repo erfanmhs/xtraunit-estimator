@@ -15,10 +15,15 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-- [ ] 0042_ai_usage_cost.sql — adds a `cost_usd` column to `ai_usage` so one-shot
-  AI calls (reading a sub quote, drafting proposal text, testing the key) count
-  toward the monthly dollar budget. Without it the app still works; those calls
-  just are not counted until it runs.
+- [ ] 0044_company_branding.sql — adds a `branding` column to `company_settings`
+  (logo, colour, theme, slogan, tagline, voice, job types) and marks existing
+  accounts as onboarded so the welcome wizard greets only new ones. Until it
+  runs, Settings → Branding can't save; everything else works.
+- [ ] 0043_proposal_contract.sql — adds a `contract` column to `proposals` for the
+  California home improvement contract answers (dates, down payment, progress
+  payments, subcontractors, senior buyer). Until it runs, the proposal page still
+  works; the contract section shows the defaults and can't be saved.
+
 
 ---
 
@@ -69,3 +74,4 @@ one once in Supabase, then it moves to **Already run**.
 - [x] 0039_project_archive_and_order.sql — run 2026-09-08 (archived_at + sort_order verified present 2026-09-08)
 - [x] 0040_projects_housekeeping_updated_at.sql — run 2026-09-09 (projects_set_updated_at trigger verified; a sort_order change left updated_at untouched)
 - [x] 0041_line_items_trade_packages.sql — run 2026-09-09 (five trade columns + line_items_project_trade_idx verified present)
+- [x] 0042_ai_usage_cost.sql — run 2026-09-12

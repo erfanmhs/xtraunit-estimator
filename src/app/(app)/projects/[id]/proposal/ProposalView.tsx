@@ -10,6 +10,8 @@
  */
 import { useMemo, useState, useTransition } from "react";
 import ProposalDocument from "@/components/proposal/ProposalDocument";
+import { downpaymentCap, scheduleGap, type ProgressPayment, type ProposalContract } from "@/lib/proposal/contract";
+const usd0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 import {
   cleanOptions,
   cleanTimeline,
@@ -52,6 +54,7 @@ export default function ProposalView({
   const [description, setDescription] = useState(base.project_description);
   const [options, setOptions] = useState<ProposalOption[]>(base.pricing.options);
   const [timeline, setTimeline] = useState<ProposalTimeline>(base.timeline);
+  const [contract, setContract] = useState<ProposalContract>(base.contract);
 
   const [editing, setEditing] = useState(!base.executive_summary);
   const [busy, setBusy] = useState<string | null>(null);
@@ -72,8 +75,9 @@ export default function ProposalView({
       project_description: description,
       pricing: { ...base.pricing, options: cleanOptions(options) },
       timeline: cleanTimeline(timeline),
+      contract,
     }),
-    [base, clientName, proposalDate, validUntil, summary, description, options, timeline],
+    [base, clientName, proposalDate, validUntil, summary, description, options, timeline, contract],
   );
 
   const shareUrl =
@@ -91,7 +95,17 @@ export default function ProposalView({
       project_description: description.trim() || null,
       options: cleanOptions(options),
       timeline: cleanTimeline(timeline),
+      contract: {
+        ...contract,
+        progress_payments: contract.progress_payments.filter((p) => p.phase || p.work || p.amount),
+      },
     };
+  }
+  const contractPrice = base.pricing.total + options.filter((o) => o.default_on).reduce((n, o) => n + o.amount, 0);
+  const capUsd = downpaymentCap(contractPrice);
+  const gap = scheduleGap(contract, contractPrice);
+  function setPay(i: number, patch: Partial<ProgressPayment>) {
+    setContract((c) => ({ ...c, progress_payments: c.progress_payments.map((p, j) => (j === i ? { ...p, ...patch } : p)) }));
   }
 
   function onSave(then?: () => void) {
@@ -419,8 +433,95 @@ export default function ProposalView({
             />
           </div>
 
+          {/* Contract — the answers the California home improvement contract needs */}
+          <div>
+            <span className={LABEL}>05 · Contract</span>
+            <label className="mt-2 flex items-start gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={contract.home_improvement}
+                onChange={(e) => setContract((c) => ({ ...c, home_improvement: e.target.checked }))}
+                className="mt-1 accent-brand"
+              />
+              <span>
+                Home improvement contract (work on the owner&apos;s residence). Adds the California §7159 section:
+                dates, down payment cap, progress payments, insurance statements, lien warning, right to cancel.
+                <span className="block text-xs text-muted">Leave off for commercial work or when a separate contract will be signed.</span>
+              </span>
+            </label>
+            {contract.home_improvement ? (
+              <div className="mt-3 space-y-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={contract.senior} onChange={(e) => setContract((c) => ({ ...c, senior: e.target.checked }))} className="accent-brand" />
+                    The buyer is 65 or older (five-day right to cancel)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={contract.uses_subcontractors} onChange={(e) => setContract((c) => ({ ...c, uses_subcontractors: e.target.checked }))} className="accent-brand" />
+                    Subcontractors will be used
+                  </label>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input value={contract.start_date} onChange={(e) => setContract((c) => ({ ...c, start_date: e.target.value }))} placeholder="Approximate start date (e.g. June 2, 2026 or 2 weeks after permit)" className={FIELD} />
+                  <input value={contract.completion_date} onChange={(e) => setContract((c) => ({ ...c, completion_date: e.target.value }))} placeholder="Approximate completion date" className={FIELD} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted">
+                    Down payment — the law caps it at {usd0.format(capUsd)} for this price ($1,000 or 10 %, whichever is less)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={contract.downpayment || ""}
+                    onChange={(e) => setContract((c) => ({ ...c, downpayment: Math.max(0, Number(e.target.value) || 0) }))}
+                    placeholder={String(capUsd)}
+                    className={`${FIELD} mt-1 sm:w-48 ${contract.downpayment > capUsd ? "border-brand" : ""}`}
+                  />
+                  {contract.downpayment > capUsd ? (
+                    <p className="mt-1 text-xs text-brand-soft">Over the legal cap — the client will see a warning until this is {usd0.format(capUsd)} or less.</p>
+                  ) : null}
+                </div>
+                <div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-xs text-muted">
+                      Schedule of progress payments — each phase, what it delivers, and the amount. Must add up to the contract price with the down payment.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setContract((c) => ({ ...c, progress_payments: [...c.progress_payments, { phase: "", work: "", amount: 0 }] }))}
+                      className="text-xs text-brand-soft hover:underline"
+                    >
+                      + Add phase
+                    </button>
+                  </div>
+                  {contract.progress_payments.length ? (
+                    <div className="mt-1.5 space-y-1.5">
+                      {contract.progress_payments.map((pp, i) => (
+                        <div key={i} className="grid gap-1.5 sm:grid-cols-[10rem_1fr_8rem_auto]">
+                          <input value={pp.phase} onChange={(e) => setPay(i, { phase: e.target.value })} placeholder="Phase (Rough framing)" spellCheck className={FIELD} />
+                          <input value={pp.work} onChange={(e) => setPay(i, { work: e.target.value })} placeholder="Work or services supplied in this phase" spellCheck className={FIELD} />
+                          <input type="number" min={0} value={pp.amount || ""} onChange={(e) => setPay(i, { amount: Math.max(0, Number(e.target.value) || 0) })} placeholder="Amount" className={FIELD} />
+                          <button type="button" onClick={() => setContract((c) => ({ ...c, progress_payments: c.progress_payments.filter((_, j) => j !== i) }))} className="text-xs text-muted hover:text-brand-soft">
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                      <p className={`text-xs ${gap === 0 ? "text-muted" : "text-brand-soft"}`}>
+                        Down payment + phases = {usd0.format(contractPrice - gap)} of {usd0.format(contractPrice)}
+                        {gap === 0 ? " ✓" : gap > 0 ? ` — ${usd0.format(gap)} still to allocate` : ` — ${usd0.format(-gap)} over`}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted">No phases yet — the contract will say payments follow the milestones in the timeline. Adding phases is what the statute expects.</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
           <p className="text-xs text-muted">
-            Scope, pricing breakdown, terms, and references come from the project and your Settings → Proposal profile.
+            Scope, pricing breakdown, terms, insurance statements and references come from the project and your Settings → Proposal profile.
           </p>
         </div>
       ) : null}

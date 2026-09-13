@@ -10,6 +10,7 @@ import "server-only";
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveProfile } from "./profile";
+import { resolveBranding } from "../branding";
 import { buildProposalDoc, type LineInput, type ProposalDoc } from "./model";
 
 export type ProposalMeta = {
@@ -88,7 +89,10 @@ export async function loadProposal(
     published_at: str("published_at"),
     accepted_at: str("accepted_at"),
     accepted_by: (row.accepted_by as ProposalMeta["accepted_by"]) ?? null,
-    hasShareColumns: !prop.error && !!prop.data && "share_token" in row,
+    // No row yet reads as "columns present": the page used to tell a new
+    // project that migration 0033 was missing when the proposal simply had
+    // not been saved once. The first save is the real test.
+    hasShareColumns: !prop.error && (!prop.data || "share_token" in row),
   };
 
   if (!project) return { doc: null, meta, lineCount: lines.length };
@@ -102,6 +106,10 @@ export async function loadProposal(
       company_license: cs?.company_license ?? null,
       signer_name: cs?.signer_name ?? null,
       signer_title: cs?.signer_title ?? null,
+      branding: (() => {
+        const b = resolveBranding(cs?.branding);
+        return { logo: b.logo, primary: b.primary, slogan: b.slogan, tagline: b.tagline };
+      })(),
     },
     profile: resolveProfile(cs?.proposal_profile),
     project: {
@@ -123,6 +131,7 @@ export async function loadProposal(
       understanding: str("understanding"),
       options: row.options,
       timeline: row.timeline,
+      contract: row.contract,
       published_at: str("published_at"),
     },
   });
