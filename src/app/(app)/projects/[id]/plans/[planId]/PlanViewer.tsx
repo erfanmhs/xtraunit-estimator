@@ -99,7 +99,7 @@ import {
   loadSheetMeasurements,
 } from "@/lib/takeoff/store";
 import LayerNameField from "./LayerNameField";
-import { TYPE_NOUN, blockedLayers, isDefaultLayerName, layerFits, nextLayerName } from "@/lib/takeoff/layers";
+import { TYPE_NOUN, blockedLayers, isDefaultLayerName, layerFits, nextLayerName, layerTypeOf } from "@/lib/takeoff/layers";
 import { findSymbolCopies } from "@/lib/takeoff/templateMatchClient";
 
 export default function PlanViewer({
@@ -243,7 +243,6 @@ export default function PlanViewer({
   // "Layer N" numbered across the whole project (names are read once per
   // plan file and every new name is added), and opens the wizard with the
   // name selected so typing replaces it.
-  const lastMeasureToolRef = useRef<Tool | null>(null);
   const projectLayerNamesRef = useRef<Set<string>>(new Set());
   const [optOpen, setOptOpen] = useState(false); // phone: the wall / volume options popover
   const optAnchorRef = useRef<DOMRect | null>(null);
@@ -1280,10 +1279,12 @@ export default function PlanViewer({
     return fresh;
   }
 
-  // Selecting a measure tool: a different tool than last time (or a layer
-  // that already holds another kind) starts a fresh layer and asks for its
-  // name. Re-selecting the same tool, or going through Select / Pan and
-  // back, keeps recording into the same layer.
+  // Selecting a measure tool: if the chip's layer already fits this kind,
+  // keep recording there. Otherwise go back to the LAST layer of this kind
+  // on the sheet — walls after areas land in the wall layer you were using,
+  // not in "Layer 7" — and only the first time a kind is drawn does a fresh
+  // "Layer N" appear. A new layer of the same kind is the chip's "＋ New
+  // layer" (Erfan, 2026-09-13: option B, less clutter).
   function selectTool(t: Tool) {
     setTool(t);
     setDraft([]);
@@ -1291,17 +1292,35 @@ export default function PlanViewer({
     finishCount();
     setAiCount(null);
     if (!MEASURE_TOOLS.includes(t)) return;
-    const prev = lastMeasureToolRef.current;
-    lastMeasureToolRef.current = t;
-    const switched = prev !== null && prev !== t;
-    if (switched || !layer.trim() || !layerFits(measurements, layer.trim(), t)) startNewLayer();
+    const name = layer.trim();
+    const held = name ? layerTypeOf(measurements, name) : null;
+    if (held === t) return; // already recording this kind here
+    // A layer the user named but hasn't drawn into yet waits for its first
+    // run, whatever the tool; an empty automatic "Layer N" only does so when
+    // there is no earlier layer of this kind to go back to.
+    if (name && held === null && !isDefaultLayerName(name)) return;
+    const last = lastLayerOf(t);
+    if (last) continueLayer(last);
+    else if (name && held === null) return;
+    else startNewLayer();
+  }
+
+  /** The layer group that holds the newest run of `type` on this sheet, if it has a name. */
+  function lastLayerOf(type: string) {
+    for (let i = measurements.length - 1; i >= 0; i--) {
+      const m = measurements[i];
+      if (m.type !== type) continue;
+      const key = layerKeyOf(m.layer);
+      if (key === "Unlabeled") return null;
+      return layerGroups.find((g) => g.layer === key) ?? null;
+    }
+    return null;
   }
 
   // "Digitizer" continue: re-arm a layer group so new draws keep adding to it.
   function continueLayer(g: { layer: string; color: string; rows: Measurement[] }) {
     const first = g.rows[0];
     finishCount();
-    if (MEASURE_TOOLS.includes(first.type as Tool)) lastMeasureToolRef.current = first.type as Tool;
     setLayer(g.layer === "Unlabeled" ? "" : g.layer);
     setColor(g.color);
     if (first.type === "wall") {
