@@ -101,6 +101,9 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
     steps: [
       { do: "Set the scale first: the “Scale” box in the toolbar (e.g. 1/4″ = 1′-0″).", note: "No scale printed? Use “Calibrate”: tap both ends of a dimension you know and type its length. Every sheet needs a scale before it saves a measurement." },
       { do: "Pick a tool: “Area” for floors, roofs and slabs · “Line” or “Wall” for walls, footings, curbs · “Count” for doors, windows, fixtures · “Volume” for excavation and concrete.", note: "“Polyline” for a run of connected walls. “Select” to pick something you already drew; “Pan” to move the sheet with one finger." },
+      { do: "Each tool gets its own layer. Switching tools opens the layer box with a name like “Layer 3” selected — type a real name (“Exterior walls”) or tap Done to keep the number.", note: "A layer holds one kind of measurement, so areas and counts never mix. To keep adding to an earlier layer of the same kind, pick it under “Continue a layer”." },
+      { do: "Counting many of the same thing? Tap one, then “Find all like this”.", note: "A dashed box appears around your last marker — size it with − / + until it just covers the symbol, then “Find”. Strong matches come back ticked, unsure ones grey; tap any to flip it, then “Add”. One Undo takes them all back." },
+      { do: "Want a second opinion? “AI count check” reads the whole sheet and lists what it sees — doors, windows, fixtures — next to your counts.", note: "About two cents a sheet. “Place as markers” drops a kind onto the sheet as its own layer, which you can then move or delete." },
       { do: "Tap the corners. On a phone the crosshair floats above your finger — line it up, then lift.", note: "Two fingers pan and zoom, never place a point. Hold a point for move / delete. When the last corner is in, tap “✓ Close shape” (or “✓ Finish” for a line)." },
       { do: "Name each measurement the way you'd say it: “Main floor area”, “Exterior walls”, “Kitchen windows”.", note: "The AI reads the names when it writes the scope. Good names → good scope." },
       { do: "Measure 5–10 drivers, not everything.", note: "Floor area · exterior wall length · roof area · window and door counts · kitchens and baths · excavation. Stop there." },
@@ -166,6 +169,7 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
       { do: "Fill the letter: proposal date, pricing valid through, anticipated start, duration.", note: "Company name, license and closing line come from Settings." },
       { do: "Add timeline milestones and, if you offer choices, price options (“Recommended” / “Enhanced”).", note: "" },
       { do: "Check the preview. Print, or Save as PDF from the print dialog.", note: "Every page prints; the browser's print button works." },
+      { do: "For work on someone's home, keep “Home improvement contract” ticked under 05 · Contract and fill it in: start and completion dates, the down payment (the editor shows the legal cap), and the phases of the payment schedule until it adds up.", note: "That section makes the accepted proposal a California home improvement contract — the lien warning, right to cancel and insurance statements print automatically. Turn it off for commercial work." },
       { do: "Click “Publish client link” and send the link.", note: "The client reads it on their phone and can accept in the document. After edits, “Update client link”." },
     ],
     done: "A published link, or a PDF, in the client's hands. Mark the project Sent on the Projects page.",
@@ -191,6 +195,8 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
     steps: [
       { do: "Fill the company identity: name, license / bonding note, “Who we are”, “Next steps”, “Closing line”.", note: "Prints on every proposal." },
       { do: "Set the default markups (contingency, insurance, overhead & profit).", note: "Change them per project on the Estimate page." },
+      { do: "Under “Branding”, upload your logo, pick your brand colour and default theme, add a slogan, choose the voice your proposals should sound like, and tick the kinds of jobs you take. “Save branding”.", note: "The colour becomes the app's buttons and links; the logo and slogan go on every proposal's letterhead and the client's link." },
+      { do: "Under “Insurance statements”, choose how you carry general liability and workers' comp and type the carrier and phone.", note: "California requires these sentences on a home improvement contract; your answers pick the right one." },
       { do: "Pick light or dark under “Appearance”.", note: "" },
     ],
     done: "A proposal that reads like it came from your company, not from software.",
