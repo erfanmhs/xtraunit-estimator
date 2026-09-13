@@ -59,6 +59,8 @@ export type CompanyInfo = {
   company_license: string | null;
   signer_name: string | null;
   signer_title: string | null;
+  /** The company's look, frozen with the doc. Absent on docs published before branding existed. */
+  branding?: { logo: string | null; primary: string; slogan: string; tagline: string };
 };
 
 export type ScopeRow = {

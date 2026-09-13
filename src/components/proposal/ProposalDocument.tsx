@@ -27,7 +27,10 @@ import {
 import { TERM_LABELS, type ProposalTerms } from "@/lib/proposal/profile";
 import ContractTerms from "./ContractTerms";
 
-const BRAND = "#A01C2D";
+// The default letterhead colour; a company's own brand colour replaces it
+// through the --brand custom property set on the document root below.
+const BRAND = "var(--brand)";
+const BRAND_DEFAULT = "#A01C2D";
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -69,6 +72,9 @@ export default function ProposalDocument({
   const expired =
     !!doc.valid_until && new Date(`${doc.valid_until}T23:59:59`) < new Date();
   const companyName = doc.company.company_name || "XtraUnit Construction";
+  const brandColor = doc.company.branding?.primary || BRAND_DEFAULT;
+  const logo = doc.company.branding?.logo ?? null;
+  const slogan = doc.company.branding?.slogan ?? "";
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -87,7 +93,10 @@ export default function ProposalDocument({
   }, [doc, selected]);
 
   return (
-    <div className="proposal-sheet mx-auto w-full max-w-4xl bg-white text-neutral-900 shadow-2xl sm:rounded-lg">
+    <div
+      className="proposal-sheet mx-auto w-full max-w-4xl bg-white text-neutral-900 shadow-2xl sm:rounded-lg"
+      style={{ "--brand": brandColor } as React.CSSProperties}
+    >
       {/* Section links (screen only) */}
       <nav className="print-hide sticky top-0 z-20 flex items-center gap-1 overflow-x-auto border-b border-neutral-200 bg-white/95 px-3 py-2 backdrop-blur sm:px-6">
         <span className="mr-2 hidden shrink-0 text-xs font-bold uppercase tracking-widest sm:inline" style={{ color: BRAND }}>
@@ -116,9 +125,14 @@ export default function ProposalDocument({
         <header className="border-b-2 pb-5" style={{ borderColor: BRAND }}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
+              {logo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logo} alt={companyName} className="mb-2 h-14 w-auto max-w-[220px] object-contain" />
+              ) : null}
               <p className="font-heading text-2xl font-bold tracking-wide" style={{ color: BRAND }}>
                 {companyName}
               </p>
+              {slogan ? <p className="text-sm italic text-neutral-600">{slogan}</p> : null}
               <p className="mt-1 text-xs text-neutral-600">
                 {[doc.company.company_address, doc.company.company_phone, doc.company.company_email]
                   .filter(Boolean)
@@ -755,7 +769,7 @@ function AcceptBlock({
               checked={agree}
               onChange={(e) => setAgree(e.target.checked)}
               disabled={mode !== "public" || expired || !identified}
-              className="mt-0.5 accent-[#A01C2D]"
+              className="mt-0.5" style={{ accentColor: "var(--brand)" }}
             />
             I have read the scope, pricing, timeline{doc.contract?.home_improvement ? ", terms and the home improvement contract section" : " and terms"} above
             and accept this proposal on behalf of the owner, and I have received a copy of it. Typing my name

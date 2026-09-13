@@ -1,6 +1,8 @@
 import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import { resolveBranding } from "@/lib/branding";
 import { getProjectsOverview, type Stage } from "@/lib/projects/overview";
 import type { Project, ProjectStatus } from "@/types";
 import ProjectCard from "./ProjectCard";
@@ -76,6 +78,11 @@ function StageDots({ stages }: { stages: Record<string, Stage> }) {
 
 export default async function ProjectsPage() {
   const supabase = await createClient();
+  // First sign-in: the welcome wizard, once. Existing accounts were marked
+  // onboarded by migration 0044; until it runs this reads as onboarded too,
+  // so nobody is sent to a page they can't save from.
+  const cs = await supabase.from("company_settings").select("*").maybeSingle();
+  if (!cs.error && !resolveBranding(cs.data?.branding).onboarded_at && !cs.data?.company_name) redirect("/welcome");
   // The user's own order first (migration 0039; a project never arranged has
   // no number and goes to the top, which is where a new one belongs), then
   // most recently touched.

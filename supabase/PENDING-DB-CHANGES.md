@@ -15,6 +15,10 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
+- [ ] 0044_company_branding.sql — adds a `branding` column to `company_settings`
+  (logo, colour, theme, slogan, tagline, voice, job types) and marks existing
+  accounts as onboarded so the welcome wizard greets only new ones. Until it
+  runs, Settings → Branding can't save; everything else works.
 - [ ] 0043_proposal_contract.sql — adds a `contract` column to `proposals` for the
   California home improvement contract answers (dates, down payment, progress
   payments, subcontractors, senior buyer). Until it runs, the proposal page still
