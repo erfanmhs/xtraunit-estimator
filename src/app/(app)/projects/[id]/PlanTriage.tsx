@@ -42,6 +42,7 @@ import {
   withTimeout,
 } from "@/lib/plans/uploadGuards";
 import type { PDFDocument as PdfLibDocument } from "pdf-lib";
+import { PREVIEW_MAX_IMAGE_PIXELS, largestPageJpeg, thumbnailFromJpeg } from "@/lib/plans/previews";
 
 /** `url` is null when the preview failed — the page itself is still intact and can be kept. */
 type Thumb = { page: number; url: string | null };
@@ -197,6 +198,12 @@ export default function PlanTriage({
   }, [file, cloudFirst, projectId, supabase]);
 
   // ── The previews, from the same File ──────────────────────────────────────
+  // Two readers, cheapest first. pdf-lib opens the file on the main thread
+  // and, for a page that is one big JPEG (a scan), hands the still-compressed
+  // bytes to the browser's own decoder, which scales as it decodes. pdf.js
+  // draws only the pages that are actually drawn, with a cap on image size
+  // so it never decodes a 300 MB scan for a 180 px thumbnail — the thing
+  // that killed the tab on an iPhone.
   useEffect(() => {
     if (verdict.kind === "refuse") return;
     // Can run twice for one file (React's development double mount). Each
@@ -205,11 +212,28 @@ export default function PlanTriage({
     let doc: { destroy: () => Promise<void> } | null = null;
     (async () => {
       try {
+        const bytes = await file.arrayBuffer();
+        // Which pages are scans? pdf-lib parses structure only — no decoding.
+        const { PDFDocument } = await import("pdf-lib");
+        let lib: PdfLibDocument | null = null;
+        try {
+          lib = await withTimeout(
+            PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false }),
+            OPEN_TIMEOUT_MS,
+            "Reading the PDF",
+          );
+        } catch {
+          lib = null; // a file pdf-lib can't parse still gets the pdf.js path
+        }
+        if (cancelled) return;
+        const pageCount = lib?.getPageCount() ?? 0;
+        if (pageCount) setTotal(pageCount);
+
         const pdfjs = await withTimeout(getPdfjs(), OPEN_TIMEOUT_MS, "Loading the PDF reader");
-        // One copy of the file, handed to the worker (the buffer is transferred,
-        // not duplicated). Nothing else holds it.
+        // pdf.js takes a copy so pdf-lib keeps its own; the worker frees it on destroy.
         const task = pdfjs.getDocument({
-          data: await file.arrayBuffer(),
+          data: bytes.slice(0),
+          maxImageSize: PREVIEW_MAX_IMAGE_PIXELS,
           standardFontDataUrl: "/standard_fonts/",
         });
         const pdf = await withTimeout(task.promise, OPEN_TIMEOUT_MS, "Opening the PDF", () => {
@@ -225,6 +249,14 @@ export default function PlanTriage({
           let url: string | null = null;
           let page: Awaited<ReturnType<typeof pdf.getPage>> | null = null;
           try {
+            // A scan: the browser makes the thumbnail from the raw JPEG.
+            const jpeg = lib && n <= pageCount ? largestPageJpeg(lib, n - 1) : null;
+            if (jpeg) {
+              url = await withTimeout(thumbnailFromJpeg(jpeg, 180), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`);
+              if (cancelled) return;
+              setThumbs((prev) => [...prev, { page: n, url }]);
+              continue;
+            }
             page = await withTimeout(pdf.getPage(n), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`);
             const base = page.getViewport({ scale: 1 });
             const scale = 180 / base.width;
