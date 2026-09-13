@@ -99,7 +99,7 @@ import {
   loadSheetMeasurements,
 } from "@/lib/takeoff/store";
 import LayerNameField from "./LayerNameField";
-import { TYPE_NOUN, blockedLayers, layerFits, nextLayerName } from "@/lib/takeoff/layers";
+import { TYPE_NOUN, blockedLayers, isDefaultLayerName, layerFits, nextLayerName } from "@/lib/takeoff/layers";
 import { findSymbolCopies } from "@/lib/takeoff/templateMatchClient";
 
 export default function PlanViewer({
@@ -245,7 +245,12 @@ export default function PlanViewer({
   // name selected so typing replaces it.
   const lastMeasureToolRef = useRef<Tool | null>(null);
   const projectLayerNamesRef = useRef<Set<string>>(new Set());
-  const [layerWizard, setLayerWizard] = useState(false); // picker opened by a tool switch: select the name
+  // Record / pause: while paused the measure tools draw nothing, so a layer
+  // can be "left open" without every tap adding to it (PlanSwift's record
+  // button). Picking a tool or a layer resumes.
+  const [recording, setRecording] = useState(true);
+  const [optOpen, setOptOpen] = useState(false); // phone: the wall / volume options popover
+  const optAnchorRef = useRef<DOMRect | null>(null);
   function popover(close: () => void, body: React.ReactNode, width = "w-80", anchor?: DOMRect | null) {
     if (phone) {
       // Small popover pinned under its control (portaled so the backdrop is
@@ -1243,9 +1248,8 @@ export default function PlanViewer({
     skipLayerCommitRef.current = true; // an open picker must not commit the old text over the new name
     setLayer(freshLayerName());
     setColor(pickNextColor());
-    layerAnchorRef.current = layerChipRef.current?.getBoundingClientRect() ?? null;
-    setLayerWizard(true);
-    setLayerOpen(true);
+    setLayerOpen(false); // no popup: draw straight away; tap the chip to rename
+    setRecording(true);
   }
 
   /** The layer a run of `type` may be saved into: the current one if it fits, else a fresh one. */
@@ -1270,6 +1274,7 @@ export default function PlanViewer({
     finishCount();
     setAiCount(null);
     if (!MEASURE_TOOLS.includes(t)) return;
+    setRecording(true);
     const prev = lastMeasureToolRef.current;
     lastMeasureToolRef.current = t;
     const switched = prev !== null && prev !== t;
@@ -1280,6 +1285,7 @@ export default function PlanViewer({
   function continueLayer(g: { layer: string; color: string; rows: Measurement[] }) {
     const first = g.rows[0];
     finishCount();
+    setRecording(true);
     if (MEASURE_TOOLS.includes(first.type as Tool)) lastMeasureToolRef.current = first.type as Tool;
     setLayer(g.layer === "Unlabeled" ? "" : g.layer);
     setColor(g.color);
@@ -2552,6 +2558,12 @@ export default function PlanViewer({
     // and what the lens magnifies is always what sits under it (Erfan,
     // 2026-09-10: "same issue with the magnifier on the other tools").
     const pt = touch ? evtToAim(e) : evtToPoint(e);
+
+    // Paused: the measure tools draw nothing until ● is tapped again.
+    if (!recording && MEASURE_TOOLS.includes(tool)) {
+      setError(`Paused — tap ● to record into "${layer.trim() || "this layer"}".`);
+      return;
+    }
 
     // Finger on a draw tool: nothing is placed yet. The point goes where the
     // finger LIFTS (slide to aim with the loupe); a second finger turns the
@@ -4244,14 +4256,13 @@ export default function PlanViewer({
             {/* Layer picker: the layer new runs record into. One tap shows
                 every layer on this sheet (continue one) or a field for a new
                 name. Sticks across tool switches. */}
-            <div className="relative flex min-w-0 flex-1 basis-40 items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Layer</span>
+            <div className="relative flex min-w-0 flex-1 basis-24 items-center gap-1.5 md:basis-40">
+              <span className="hidden text-[10px] uppercase tracking-wider text-muted md:inline md:text-xs">Layer</span>
               <button
                 ref={layerChipRef}
                 type="button"
                 onClick={(e) => {
                   layerAnchorRef.current = e.currentTarget.getBoundingClientRect();
-                  setLayerWizard(false);
                   setLayerOpen((o) => !o);
                 }}
                 aria-haspopup="listbox"
@@ -4264,18 +4275,15 @@ export default function PlanViewer({
                   {layer.trim() ||
                     (layerGroups.some((g) => g.layer === "Unlabeled") ? "Unlabeled" : "New layer…")}
                 </span>
-                {layerGroups.some((g) => g.layer === layerKeyOf(layer)) ? (
-                  <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" title="Recording into this layer" />
-                ) : null}
                 <span className="text-muted" aria-hidden>▾</span>
               </button>
               {layerOpen
                 ? popover(
                     () => setLayerOpen(false),
                     <div className="p-1.5 text-sm">
-                      {layerWizard ? (
+                      {isDefaultLayerName(layer) ? (
                         <p className="px-1 pb-1 text-[11px] text-foreground">
-                          New layer for {TYPE_NOUN[tool] ?? "this tool"}. Name it, or keep the number.
+                          A new layer for {TYPE_NOUN[tool] ?? "this tool"} — give it a name, or keep the number.
                         </p>
                       ) : null}
                       <LayerNameField
@@ -4284,7 +4292,7 @@ export default function PlanViewer({
                         existing={layerNames}
                         blocked={blockedLayers(measurements, tool)}
                         toolNoun={TYPE_NOUN[tool] ?? "runs"}
-                        selectOnMount={layerWizard}
+                        selectOnMount={isDefaultLayerName(layer)}
                         skipCommitRef={skipLayerCommitRef}
                         onCommit={setLayer}
                         onDone={() => setLayerOpen(false)}
@@ -4356,8 +4364,36 @@ export default function PlanViewer({
                   )
                 : null}
             </div>
+            {/* Record / pause — the one control that says whether taps add to the layer. */}
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setRecording((r) => !r);
+              }}
+              aria-pressed={recording}
+              aria-label={recording ? "Recording — tap to pause" : "Paused — tap to record"}
+              title={recording ? "Recording: new runs go into this layer. Tap to pause." : "Paused: taps draw nothing. Tap to record."}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-md border px-0 text-xs font-semibold tracking-wide md:h-8 md:w-auto md:px-2.5 ${
+                recording
+                  ? "border-red-500/60 bg-red-500/10 text-red-400"
+                  : "border-border bg-background text-muted"
+              }`}
+            >
+              {recording ? (
+                <>
+                  <span className="h-3 w-3 animate-pulse rounded-full bg-red-500 md:h-2.5 md:w-2.5" aria-hidden />
+                  <span className="hidden md:inline">REC</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-[13px] leading-none md:text-[11px]" aria-hidden>▮▮</span>
+                  <span className="hidden md:inline">PAUSED</span>
+                </>
+              )}
+            </button>
             <div className="relative flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted md:text-xs">Color</span>
+              <span className="hidden text-[10px] uppercase tracking-wider text-muted md:inline md:text-xs">Color</span>
               {/* Phone: one swatch → popover */}
               <button
                 type="button"
@@ -4409,6 +4445,10 @@ export default function PlanViewer({
                 </>
               ) : null}
             </div>
+            {tool === "wall" || tool === "volume" ? (
+              <>
+                {/* md+: the options inline, as always */}
+                <div className="hidden items-center gap-3 md:flex">
             {tool === "wall" ? (
               <>
                 <span className="text-xs uppercase tracking-wider text-muted">Height</span>
@@ -4491,6 +4531,131 @@ export default function PlanViewer({
                     className="w-16 rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none"
                   />
                   <span className="text-xs text-muted">ft</span>
+                </div>
+              </>
+            ) : null}
+                </div>
+                {/* Phone: one chip with the settings; tap for the fields. Two
+                    rows of inputs under the layer chip were most of the screen. */}
+                <div className="relative md:hidden">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      optAnchorRef.current = e.currentTarget.getBoundingClientRect();
+                      setOptOpen((o) => !o);
+                    }}
+                    aria-haspopup="dialog"
+                    aria-expanded={optOpen}
+                    className="flex h-10 max-w-[44vw] items-center gap-1 rounded-md border border-border bg-background px-2.5 text-xs text-foreground"
+                  >
+                    <span className="truncate">{tool === "wall"
+                  ? `${wallHeight || "?"} ft · ${wallSided}-sided`
+                  : volMode === "linear"
+                    ? `Linear · ${volWidth || "?"} × ${volDepth || "?"} ft`
+                    : `Area × ${volDepth || "?"} ft`}</span>
+                    <span className="text-muted" aria-hidden>▾</span>
+                  </button>
+                  {optOpen
+                    ? popover(
+                        () => setOptOpen(false),
+                        <div className="flex flex-wrap items-center gap-3 p-3 text-sm">
+            {tool === "wall" ? (
+              <>
+                <span className="text-xs uppercase tracking-wider text-muted">Height</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    value={wallHeight}
+                    onChange={(e) => setWallHeight(e.target.value)}
+                    inputMode="decimal"
+                    className="w-16 rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none"
+                  />
+                  <span className="text-xs text-muted">ft</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {(["single", "double"] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setWallSided(s)}
+                      className={`rounded-md border px-2 py-1 text-xs capitalize transition-colors ${
+                        wallSided === s
+                          ? "border-brand bg-brand/15 text-foreground"
+                          : "border-border text-muted hover:border-brand"
+                      }`}
+                    >
+                      {s}-sided
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            {tool === "volume" ? (
+              <>
+                <div className="flex items-center gap-1">
+                  {(
+                    [
+                      ["linear", "Linear run"],
+                      ["area", "Area × depth"],
+                    ] as const
+                  ).map(([m, lbl]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        setVolMode(m);
+                        setDraft([]);
+                        setHover(null);
+                      }}
+                      className={`rounded-md border px-2 py-1 text-xs transition-colors ${
+                        volMode === m
+                          ? "border-brand bg-brand/15 text-foreground"
+                          : "border-border text-muted hover:border-brand"
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+                {volMode === "linear" ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs uppercase tracking-wider text-muted">
+                      Width
+                    </span>
+                    <input
+                      value={volWidth}
+                      onChange={(e) => setVolWidth(e.target.value)}
+                      inputMode="decimal"
+                      className="w-16 rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none"
+                    />
+                    <span className="text-xs text-muted">ft</span>
+                  </div>
+                ) : null}
+                <div className="flex items-center gap-1">
+                  <span className="text-xs uppercase tracking-wider text-muted">
+                    Depth
+                  </span>
+                  <input
+                    value={volDepth}
+                    onChange={(e) => setVolDepth(e.target.value)}
+                    inputMode="decimal"
+                    className="w-16 rounded-md border border-border bg-background px-2 py-1 text-foreground focus:border-brand focus:outline-none"
+                  />
+                  <span className="text-xs text-muted">ft</span>
+                </div>
+              </>
+            ) : null}
+                          <button
+                            type="button"
+                            onClick={() => setOptOpen(false)}
+                            className="glass-brand ml-auto min-h-10 rounded-md px-3 font-medium text-foreground"
+                          >
+                            Done
+                          </button>
+                        </div>,
+                        "w-72",
+                        optAnchorRef.current,
+                      )
+                    : null}
                 </div>
               </>
             ) : null}
