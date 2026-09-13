@@ -15,7 +15,11 @@ one once in Supabase, then it moves to **Already run**.
 
 ## To run
 
-_Nothing pending. Everything through 0042 has been run._
+- [ ] 0043_proposal_contract.sql — adds a `contract` column to `proposals` for the
+  California home improvement contract answers (dates, down payment, progress
+  payments, subcontractors, senior buyer). Until it runs, the proposal page still
+  works; the contract section shows the defaults and can't be saved.
+
 
 ---
 

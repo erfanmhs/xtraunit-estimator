@@ -407,6 +407,59 @@ function ProposalProfileSection({
           />
         </div>
 
+        {/* Insurance statements the California contract must carry, word for word */}
+        <div>
+          <span className="text-[11px] uppercase tracking-wider text-muted">Insurance statements (home improvement contracts)</span>
+          <p className="text-xs text-muted/70">
+            California requires the contract to state, in its own words, whether you carry general liability and
+            workers&apos; compensation. Your answers pick the sentence; the client sees the carrier and phone number.
+          </p>
+          <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+            <label className="text-xs text-muted">
+              General liability
+              <select
+                value={p.compliance.cgl}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, cgl: e.target.value as ProposalProfile["compliance"]["cgl"] } }))}
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              >
+                <option value="carried">Carried — insured by a carrier</option>
+                <option value="llc">LLC — liability insurance or other security as required by law</option>
+                <option value="self">Self-insured</option>
+                <option value="none">Not carried</option>
+              </select>
+            </label>
+            <label className="text-xs text-muted">
+              Workers&apos; compensation
+              <select
+                value={p.compliance.workers_comp}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, workers_comp: e.target.value as ProposalProfile["compliance"]["workers_comp"] } }))}
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              >
+                <option value="employees">Carried for all employees</option>
+                <option value="exempt">No employees — exempt</option>
+              </select>
+            </label>
+            <label className="text-xs text-muted">
+              Liability carrier (as on the policy)
+              <input
+                value={p.compliance.cgl_carrier}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, cgl_carrier: e.target.value } }))}
+                placeholder="e.g. State Compensation Insurance Fund"
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              />
+            </label>
+            <label className="text-xs text-muted">
+              Carrier phone (the client may call to verify)
+              <input
+                value={p.compliance.cgl_phone}
+                onChange={(e) => setP((s) => ({ ...s, compliance: { ...s.compliance, cgl_phone: e.target.value } }))}
+                placeholder="800-555-0100"
+                className="mt-1 w-full rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
+              />
+            </label>
+          </div>
+        </div>
+
         {/* Terms & conditions */}
         <div>
           <span className="text-[11px] uppercase tracking-wider text-muted">Terms &amp; conditions</span>

@@ -25,6 +25,7 @@ import {
   type ProposalDoc,
 } from "@/lib/proposal/model";
 import { TERM_LABELS, type ProposalTerms } from "@/lib/proposal/profile";
+import ContractTerms from "./ContractTerms";
 
 const BRAND = "#A01C2D";
 const usd = new Intl.NumberFormat("en-US", {
@@ -41,6 +42,7 @@ const NAV = [
   ["pricing", "Pricing"],
   ["timeline", "Timeline"],
   ["terms", "Terms"],
+  ["contract", "Contract"],
   ["about", "About us"],
   ["accept", "Accept"],
 ] as const;
@@ -91,7 +93,7 @@ export default function ProposalDocument({
         <span className="mr-2 hidden shrink-0 text-xs font-bold uppercase tracking-widest sm:inline" style={{ color: BRAND }}>
           {companyName}
         </span>
-        {NAV.map(([id, label]) => (
+        {NAV.filter(([id]) => id !== "contract" || doc.contract?.home_improvement).map(([id, label]) => (
           <a
             key={id}
             href={`#${id}`}
@@ -424,8 +426,15 @@ export default function ProposalDocument({
           </div>
         </Section>
 
-        {/* 06 About + references */}
-        <Section id="about" n="06" title={`About ${companyName}`}>
+        {/* 06 The California home improvement contract block — only for owner-occupied residential work */}
+        {doc.contract?.home_improvement ? (
+          <Section id="contract" n="06" title="Home improvement contract">
+            <ContractTerms doc={doc} contractPrice={total} />
+          </Section>
+        ) : null}
+
+        {/* 07 About + references */}
+        <Section id="about" n={doc.contract?.home_improvement ? "07" : "06"} title={`About ${companyName}`}>
           <p className="text-sm text-neutral-700">{doc.profile.who_we_are}</p>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2">
             {doc.profile.why_fit.map((b, i) => (
@@ -467,8 +476,8 @@ export default function ProposalDocument({
           ) : null}
         </Section>
 
-        {/* 07 Accept */}
-        <Section id="accept" n="07" title="Accept this proposal">
+        {/* 08 Accept */}
+        <Section id="accept" n={doc.contract?.home_improvement ? "08" : "07"} title="Accept this proposal">
           <AcceptBlock
             doc={doc}
             mode={mode}
@@ -748,8 +757,9 @@ function AcceptBlock({
               disabled={mode !== "public" || expired || !identified}
               className="mt-0.5 accent-[#A01C2D]"
             />
-            I have read the scope, pricing, timeline, and terms above and accept this proposal on behalf
-            of the owner. Typing my name serves as my electronic signature.
+            I have read the scope, pricing, timeline{doc.contract?.home_improvement ? ", terms and the home improvement contract section" : " and terms"} above
+            and accept this proposal on behalf of the owner, and I have received a copy of it. Typing my name
+            serves as my electronic signature{doc.contract?.home_improvement ? ", and today's date is the date of the contract" : ""}.
           </label>
           {mode === "public" && !expired && !identified ? (
             <p className="print-hide mt-1 text-xs text-neutral-500">

@@ -14,6 +14,7 @@ import {
   DEFAULT_PROFILE,
   type ProposalProfile,
 } from "@/lib/proposal/profile";
+import { DEFAULT_COMPLIANCE } from "@/lib/proposal/contract";
 import { companySettingsInput, firstIssue } from "@/lib/validation";
 
 // Note: $/SF benchmarks and standard unit prices also live on company_settings
@@ -194,6 +195,7 @@ Return JSON with exactly these fields:
         terms: DEFAULT_PROFILE.terms,
         standard_exclusions: DEFAULT_PROFILE.standard_exclusions,
         references: [],
+      compliance: DEFAULT_COMPLIANCE,
       },
     };
   } catch (e) {
