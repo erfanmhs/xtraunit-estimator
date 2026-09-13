@@ -10,6 +10,7 @@ import "server-only";
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveProfile } from "./profile";
+import { resolveBranding } from "../branding";
 import { buildProposalDoc, type LineInput, type ProposalDoc } from "./model";
 
 export type ProposalMeta = {
@@ -105,6 +106,10 @@ export async function loadProposal(
       company_license: cs?.company_license ?? null,
       signer_name: cs?.signer_name ?? null,
       signer_title: cs?.signer_title ?? null,
+      branding: (() => {
+        const b = resolveBranding(cs?.branding);
+        return { logo: b.logo, primary: b.primary, slogan: b.slogan, tagline: b.tagline };
+      })(),
     },
     profile: resolveProfile(cs?.proposal_profile),
     project: {

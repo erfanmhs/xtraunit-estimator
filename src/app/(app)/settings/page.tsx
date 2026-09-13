@@ -4,6 +4,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import SettingsForm from "./SettingsForm";
 import type { CompanySettings } from "./actions";
 import { resolveProfile } from "@/lib/proposal/profile";
+import { resolveBranding } from "@/lib/branding";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -30,6 +31,7 @@ export default async function SettingsPage() {
   };
   const profile = resolveProfile(data?.proposal_profile);
   const profileWasSet = data?.proposal_profile != null;
+  const branding = resolveBranding(data?.branding);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -46,11 +48,7 @@ export default async function SettingsPage() {
           <ThemeToggle />
         </section>
 
-        <SettingsForm
-          initial={initial}
-          profile={profile}
-          profileWasSet={profileWasSet}
-        />
+        <SettingsForm initial={initial} profile={profile} profileWasSet={profileWasSet} branding={branding} />
       </div>
     </div>
   );
