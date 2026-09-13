@@ -42,7 +42,7 @@ import {
   withTimeout,
 } from "@/lib/plans/uploadGuards";
 import type { PDFDocument as PdfLibDocument } from "pdf-lib";
-import { PREVIEW_MAX_IMAGE_PIXELS, largestPageJpeg, thumbnailFromJpeg } from "@/lib/plans/previews";
+import { PHONE_MAX_CONTENT_BYTES, PREVIEW_MAX_IMAGE_PIXELS, largestPageJpeg, pageContentBytes, thumbnailFromJpeg } from "@/lib/plans/previews";
 
 /** `url` is null when the preview failed — the page itself is still intact and can be kept. */
 type Thumb = { page: number; url: string | null };
@@ -122,6 +122,7 @@ export default function PlanTriage({
   const [upload, setUpload] = useState<Upload>({ state: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [failedPages, setFailedPages] = useState<number[]>([]);
+  const [heavyPages, setHeavyPages] = useState<number[]>([]);
   const [progress, setProgress] = useState<string | null>(null);
 
   // Cloud-first when the original fits the upload limit; otherwise trim here.
@@ -244,6 +245,8 @@ export default function PlanTriage({
         setTotal(pdf.numPages);
 
         const failed: number[] = [];
+        const heavy: number[] = [];
+        const phone = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
         for (let n = 1; n <= pdf.numPages; n++) {
           if (cancelled) return;
           let url: string | null = null;
@@ -255,6 +258,13 @@ export default function PlanTriage({
               url = await withTimeout(thumbnailFromJpeg(jpeg, 180), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`);
               if (cancelled) return;
               setThumbs((prev) => [...prev, { page: n, url }]);
+              continue;
+            }
+            // A drawn page too heavy for a phone to parse: no preview, still
+            // keepable. The viewer opens it alone, with the whole tab to itself.
+            if (phone && lib && n <= pageCount && pageContentBytes(lib, n - 1) > PHONE_MAX_CONTENT_BYTES) {
+              heavy.push(n);
+              setThumbs((prev) => [...prev, { page: n, url: null }]);
               continue;
             }
             page = await withTimeout(pdf.getPage(n), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`);
@@ -283,6 +293,7 @@ export default function PlanTriage({
           setThumbs((prev) => [...prev, { page: n, url }]);
         }
         setFailedPages(failed);
+        setHeavyPages(heavy);
       } catch (e) {
         if (cancelled) return;
         setError(explainOpenFailure(e));
@@ -474,6 +485,13 @@ export default function PlanTriage({
       ) : null}
       {notice ? (
         <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">{notice}</p>
+      ) : null}
+      {heavyPages.length > 0 ? (
+        <p className="rounded-md border border-border bg-background/60 px-3 py-2 text-sm text-muted">
+          {heavyPages.length === 1 ? `Page ${heavyPages[0]} is` : `${heavyPages.length} pages are`} too detailed to preview on a phone
+          ({heavyPages.slice(0, 8).join(", ")}{heavyPages.length > 8 ? "…" : ""}). Keep {heavyPages.length === 1 ? "it" : "them"} anyway — the
+          viewer opens one sheet at a time.
+        </p>
       ) : null}
       {failedPages.length > 0 ? (
         <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">

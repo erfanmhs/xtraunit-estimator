@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { largestPageJpeg } from "./previews";
+import { largestPageJpeg, pageContentBytes } from "./previews";
 
 // A real, tiny baseline JPEG (1×1, white) — enough for pdf-lib to embed.
 const TINY_JPEG = Uint8Array.from(
@@ -43,5 +43,16 @@ describe("largestPageJpeg — the raw JPEG behind a scanned page", () => {
     // Default coverage rule: a 1×1 image neither matches the page shape
     // nor covers it, so it must not be treated as the page.
     expect(largestPageJpeg(doc, 0)).toBeNull();
+  });
+});
+
+describe("pageContentBytes — how heavy a page is to draw", () => {
+  it("measures the content streams, so a drawn page weighs more than an image page", async () => {
+    const doc = await scanLikePdf(1, true);
+    const scan = pageContentBytes(doc, 0); // one "Do" operator
+    const drawn = pageContentBytes(doc, 1); // a line
+    expect(scan).toBeGreaterThan(0);
+    expect(drawn).toBeGreaterThan(0);
+    expect(scan).toBeLessThan(200);
   });
 });

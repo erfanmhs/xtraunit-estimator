@@ -11,7 +11,7 @@
  * make the thumbnail. pdf.js is used only for pages that are drawn, and
  * then with a cap on image size so it never decodes a scan by accident.
  */
-import { PDFDict, PDFName, PDFNumber, PDFRawStream, type PDFDocument } from "pdf-lib";
+import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFStream, type PDFDocument } from "pdf-lib";
 
 export type PageJpeg = { bytes: Uint8Array; width: number; height: number };
 
@@ -97,3 +97,27 @@ export async function thumbnailFromJpeg(jpeg: PageJpeg, targetWidth = 180): Prom
 
 /** pdf.js will not decode an image bigger than this (pixels) while making previews. */
 export const PREVIEW_MAX_IMAGE_PIXELS = 4_000_000;
+
+/**
+ * How much drawing a page carries: the compressed size of its content
+ * streams, in bytes. A CAD export with hatch patterns can pack 100 MB of
+ * operators into a few MB of stream; pdf.js inflates and parses all of it
+ * to draw even a thumbnail, and that — not the file size — is what a phone
+ * cannot hold. Above `PHONE_MAX_CONTENT_BYTES` the preview is skipped on a
+ * phone (the page is still kept and opened one at a time in the viewer).
+ */
+export function pageContentBytes(doc: PDFDocument, pageIndex: number): number {
+  const contents = doc.getPage(pageIndex).node.Contents();
+  if (!contents) return 0;
+  const refs = contents instanceof PDFArray ? contents.asArray() : [contents];
+  let total = 0;
+  for (const r of refs) {
+    const obj = doc.context.lookup(r);
+    if (obj instanceof PDFRawStream) total += obj.contents.length;
+    else if (obj instanceof PDFStream) total += obj.sizeInBytes();
+  }
+  return total;
+}
+
+/** Compressed content above this is not previewed on a phone (≈ 30–60 MB once inflated). */
+export const PHONE_MAX_CONTENT_BYTES = 3 * 1024 * 1024;
