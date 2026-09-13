@@ -20,7 +20,7 @@ number.
 | Layer | Tech |
 |---|---|
 | Frontend | React 19, Next.js 16 (App Router), Tailwind v4 |
-| PDF in the browser | `pdfjs-dist` (render), `pdf-lib` (trim / export) |
+| PDF in the browser | `pdfjs-dist` (viewer render), `@hyzyla/pdfium` (PDFium as WebAssembly — page previews at upload; pdf.js spiked the browser to 900 MB on CAD sets and iPhones killed the tab), `pdf-lib` (scan detection, trim / export) |
 | Backend | Next.js Server Components + Server Actions (Node runtime) |
 | Database / auth / files | Supabase — Postgres + Row-Level Security, Auth, Storage |
 | AI | Anthropic Claude — Messages API + Files API |
@@ -53,7 +53,7 @@ Supabase                                   Anthropic Claude
 
 | Stage | What happens | Key files |
 |---|---|---|
-| Plans | Trim a PDF to the kept pages **client-side** (`pdf-lib`), upload only the trimmed file to Storage | `projects/[id]/PlanTriage.tsx` |
+| Plans | Upload the original as-is with progress while previews render **client-side** (scans → browser JPEG decoder, drawn pages → PDFium worker; `lib/plans/previews.ts`, `lib/plans/thumbnailers.ts`); Save writes sheet rows only. Over the upload limit: trim to the kept pages (`pdf-lib`) first | `projects/[id]/PlanTriage.tsx` |
 | Prepare | Extract each sheet's text **client-side** (`PDF.js`) and cache it; flag image-only sheets for vision | `projects/[id]/scope/PreparePlans.tsx` |
 | Takeoff | Measure on an SVG overlay over the PDF canvas (line/area/wall/volume/count/leader); undo/redo; on-sheet legend; multi-page marked-up PDF export | `plans/[planId]/PlanViewer.tsx` |
 | AI Scope | Background job: gather context → upload plans (Files API) → draft (Opus, chunked) → gap-review (Sonnet) → write `line_items` + `scope_findings` | `lib/scope/{bundle,generate,run}.ts` |

@@ -32,13 +32,16 @@ function buildCsp(nonce: string): string {
   const directives = [
     "default-src 'self'",
     // 'strict-dynamic': scripts loaded BY a nonced script are trusted too
-    // (how Next.js loads its chunks). Dev needs eval for React's debug stacks.
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
+    // (how Next.js loads its chunks). 'wasm-unsafe-eval' lets the page
+    // compile WebAssembly — PDFium, which draws the plan previews — and
+    // nothing else. Dev needs eval for React's debug stacks.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     // Plan renders (blob:), thumbnails (data:), proposal reference photos (https:).
     "img-src 'self' blob: data: https:",
     "font-src 'self' data:",
-    // pdf.js runs its parser in a module Worker.
+    // pdf.js runs its parser in a module Worker ('self'); PDFium spawns its
+    // worker from a blob: URL.
     "worker-src 'self' blob:",
     `connect-src 'self' ${supabase} ${supabaseWs}${isDev ? " ws://localhost:* http://localhost:*" : ""}`.trim(),
     "media-src 'self' blob:",

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
+    "@hyzyla/pdfium": "^2.1.13",
     "@sentry/nextjs": "^10.73.0",
     "@supabase/ssr": "^0.12.6",
     "@supabase/supabase-js": "^2.107.0",
