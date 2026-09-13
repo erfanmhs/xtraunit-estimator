@@ -15,8 +15,7 @@ import PlanTriage from "./PlanTriage";
 import type { PlanFile } from "@/types";
 import Caret from "@/components/Caret";
 import { sizeVerdict } from "@/lib/plans/uploadGuards";
-import CameraButton from "@/components/CameraButton";
-import { SHEET_MAX_EDGE, normalizePhoto, photoFileName, photoToPdf } from "@/lib/photo";
+import { SHEET_MAX_EDGE, normalizePhoto, photoFileName, photosToPdf } from "@/lib/photo";
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return "";
@@ -44,26 +43,39 @@ export default function PlanManager({
 
   const [preparing, setPreparing] = useState(false);
 
-  // A photo of a sheet, taken on site, becomes a one-page PDF and goes
-  // through the same triage as an uploaded set. Scale is set in the viewer
-  // with Calibrate, like any scan.
-  async function onSheetPhoto(raw: File) {
+  // Photos of sheets — from the phone's library, the camera roll (HEIC
+  // included) or a scan — become one PDF, a page per photo, and go through
+  // the same triage as an uploaded set. Scale is set in the viewer with
+  // Calibrate, like any scan.
+  const isImage = (f: File) => f.type.startsWith("image/") || /\.(heic|heif|jpe?g|png|webp)$/i.test(f.name);
+  const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+
+  async function onSheetPhotos(raws: File[]) {
     setError(null);
     setPreparing(true);
     try {
-      const jpeg = await normalizePhoto(raw, SHEET_MAX_EDGE, "sheet.jpg");
-      const pdf = await photoToPdf(jpeg, photoFileName("sheet-photo", "pdf"));
+      const jpegs: File[] = [];
+      for (const [i, raw] of raws.entries()) jpegs.push(await normalizePhoto(raw, SHEET_MAX_EDGE, `sheet-${i + 1}.jpg`));
+      const pdf = await photosToPdf(jpegs, photoFileName(raws.length === 1 ? "sheet-photo" : "sheet-photos", "pdf"));
       pickFile(pdf);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't read that photo.");
+      setError(e instanceof Error ? e.message : "Couldn't read those photos.");
     } finally {
       setPreparing(false);
     }
   }
 
+  // One control takes everything: a PDF plan set, or one or more photos.
   function pick(fileList: FileList | null) {
-    const file = fileList?.[0];
-    if (file) pickFile(file);
+    const files = fileList ? Array.from(fileList) : [];
+    if (!files.length) return;
+    setError(null);
+    const pdfs = files.filter(isPdf);
+    const images = files.filter(isImage);
+    if (pdfs.length === 1 && files.length === 1) return pickFile(pdfs[0]);
+    if (images.length === files.length) return void onSheetPhotos(images);
+    if (pdfs.length > 1) return setError("One PDF at a time — pick the plan set, then add photos separately.");
+    setError("Upload a PDF plan set, or photos of sheets (JPG, PNG, HEIC). Other files can't be measured.");
   }
 
   function pickFile(file: File) {
@@ -171,23 +183,20 @@ export default function PlanManager({
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,.pdf"
+          // PDF plan sets, and photos of sheets — the phone offers its library
+          // and camera for image/*; HEIC is what an iPhone shoots.
+          accept="application/pdf,.pdf,image/*,.heic,.heif"
+          multiple
           hidden
           onChange={(e) => pick(e.target.files)}
         />
-        <span className="text-sm text-foreground">＋ Upload or drop a plan PDF</span>
-        <span className="text-xs text-muted">you&apos;ll pick which sheets to keep next</span>
-      </label>
-
-      {/* On site with only a phone: photograph a sheet and measure it. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <CameraButton onPhoto={onSheetPhoto} disabled={preparing}>
-          {preparing ? "Preparing…" : "Photograph a sheet"}
-        </CameraButton>
-        <span className="text-xs text-muted">
-          One shot per sheet; it becomes a plan you can measure once you set its scale.
+        <span className="text-sm text-foreground">
+          {preparing ? "Preparing your photos…" : "＋ Upload a plan PDF, or photos of sheets"}
         </span>
-      </div>
+        <span className="text-xs text-muted">
+          from Files, Drive or your photo library · you&apos;ll pick which sheets to keep next
+        </span>
+      </label>
 
       {error ? (
         <p
