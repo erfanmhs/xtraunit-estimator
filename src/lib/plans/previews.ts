@@ -8,8 +8,13 @@
  * scale while it decodes and works in native memory, so for a page that is
  * essentially one JPEG we hand that JPEG — the raw, still-compressed bytes,
  * pulled straight out of the PDF with pdf-lib — to the browser and let it
- * make the thumbnail. pdf.js is used only for pages that are drawn, and
- * then with a cap on image size so it never decodes a scan by accident.
+ * make the thumbnail. Drawn pages go to lib/plans/thumbnailers.ts.
+ *
+ * "One JPEG" means exactly that: the page's drawing is a single Do of the
+ * image and nothing else. A rendering photo or a designer's logo is also a
+ * big JPEG, on a page full of other drawing — the Santa Clara set showed a
+ * 2,000 px "DO Design" logo as the preview of three sheets. So a page counts
+ * as a scan only when its content stream is tiny (see `scanPageJpeg`).
  */
 import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFStream, type PDFDocument } from "pdf-lib";
 
@@ -100,11 +105,9 @@ export const PREVIEW_MAX_IMAGE_PIXELS = 4_000_000;
 
 /**
  * How much drawing a page carries: the compressed size of its content
- * streams, in bytes. A CAD export with hatch patterns can pack 100 MB of
- * operators into a few MB of stream; pdf.js inflates and parses all of it
- * to draw even a thumbnail, and that — not the file size — is what a phone
- * cannot hold. Above `PHONE_MAX_CONTENT_BYTES` the preview is skipped on a
- * phone (the page is still kept and opened one at a time in the viewer).
+ * streams, in bytes. A scan's content is a few dozen bytes (`q cm /Im0 Do Q`);
+ * an OCR text layer or a title block on top of the image runs to kilobytes;
+ * a CAD export to megabytes.
  */
 export function pageContentBytes(doc: PDFDocument, pageIndex: number): number {
   const contents = doc.getPage(pageIndex).node.Contents();
@@ -119,5 +122,16 @@ export function pageContentBytes(doc: PDFDocument, pageIndex: number): number {
   return total;
 }
 
-/** Compressed content above this is not previewed on a phone (≈ 30–60 MB once inflated). */
-export const PHONE_MAX_CONTENT_BYTES = 3 * 1024 * 1024;
+/** A page whose drawing is bigger than this is not "just a scan", whatever images it holds. */
+export const SCAN_MAX_CONTENT_BYTES = 16 * 1024;
+
+/**
+ * The raw JPEG of a page that IS a scan — one big image, next to nothing
+ * else drawn — or null. Pages with more on them are rendered instead; the
+ * renderer decodes a scan scaled-down, so the cost of a miss is time, not
+ * memory.
+ */
+export function scanPageJpeg(doc: PDFDocument, pageIndex: number): PageJpeg | null {
+  if (pageContentBytes(doc, pageIndex) > SCAN_MAX_CONTENT_BYTES) return null;
+  return largestPageJpeg(doc, pageIndex);
+}

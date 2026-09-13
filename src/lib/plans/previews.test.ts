@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { largestPageJpeg, pageContentBytes } from "./previews";
+import { largestPageJpeg, pageContentBytes, scanPageJpeg } from "./previews";
 
 // A real, tiny baseline JPEG (1×1, white) — enough for pdf-lib to embed.
 const TINY_JPEG = Uint8Array.from(
@@ -10,7 +10,7 @@ const TINY_JPEG = Uint8Array.from(
   (c) => c.charCodeAt(0),
 );
 
-async function scanLikePdf(scale: number, addVectorPage: boolean) {
+async function scanLikePdf(scale: number, addVectorPage: boolean, busyImagePage = false) {
   const pdf = await PDFDocument.create();
   const img = await pdf.embedJpg(TINY_JPEG);
   // Page 1: the image drawn across the whole page — a scan.
@@ -21,7 +21,16 @@ async function scanLikePdf(scale: number, addVectorPage: boolean) {
     const p2 = pdf.addPage([612, 792]);
     p2.drawLine({ start: { x: 10, y: 10 }, end: { x: 600, y: 780 } });
   }
-  const bytes = await pdf.save();
+  if (busyImagePage) {
+    // Last page: the same image on a page with a lot of drawing — a photo on a sheet.
+    const p3 = pdf.addPage([612, 792]);
+    p3.drawImage(img, { x: 0, y: 0, width: 612, height: 792 });
+    // Distinct coordinates so the deflated stream stays well over the scan gate.
+    for (let i = 0; i < 4000; i++) {
+      p3.drawLine({ start: { x: (i * 7.13) % 600, y: (i * 3.71) % 780 }, end: { x: (i * 11.37) % 600, y: (i * 5.19) % 780 } });
+    }
+  }
+  const bytes = await pdf.save({ useObjectStreams: false });
   return PDFDocument.load(bytes);
 }
 
@@ -46,7 +55,7 @@ describe("largestPageJpeg — the raw JPEG behind a scanned page", () => {
   });
 });
 
-describe("pageContentBytes — how heavy a page is to draw", () => {
+describe("pageContentBytes — how much drawing a page carries", () => {
   it("measures the content streams, so a drawn page weighs more than an image page", async () => {
     const doc = await scanLikePdf(1, true);
     const scan = pageContentBytes(doc, 0); // one "Do" operator
@@ -54,5 +63,17 @@ describe("pageContentBytes — how heavy a page is to draw", () => {
     expect(scan).toBeGreaterThan(0);
     expect(drawn).toBeGreaterThan(0);
     expect(scan).toBeLessThan(200);
+  });
+});
+
+describe("scanPageJpeg — only a page that IS its image", () => {
+  it("takes the JPEG of a bare scan and refuses a busy page that merely holds one", async () => {
+    const doc = await scanLikePdf(1, false, true);
+    // Coverage check off: the fixture image is 1×1. What matters is the drawing around it.
+    expect(scanPageJpeg(doc, 0)).toBeNull(); // 1×1 fails the coverage rule…
+    expect(largestPageJpeg(doc, 0, 0)).not.toBeNull(); // …but the image is there
+    expect(pageContentBytes(doc, 1)).toBeGreaterThan(16 * 1024);
+    expect(largestPageJpeg(doc, 1, 0)).not.toBeNull(); // the busy page holds the same JPEG
+    expect(scanPageJpeg(doc, 1)).toBeNull(); // and is still not a scan
   });
 });

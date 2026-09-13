@@ -11,10 +11,12 @@
  *   gives no progress events). Nothing is rebuilt; what you dropped is what
  *   is stored.
  *
- *   THE PREVIEWS — pdf.js reads the same File (one copy, handed to its
- *   worker) and draws a thumbnail per page, releasing each page as it goes.
- *   Previews appear while the upload is still running, so a 30 MB set over
- *   cellular is never a blank box with a spinner (Erfan, 2026-09-13).
+ *   THE PREVIEWS — from the same File, cheapest reader first: a scanned
+ *   page is one JPEG, handed straight to the browser's decoder; a drawn page
+ *   is rendered by PDFium in a worker (see lib/plans/thumbnailers.ts for why
+ *   not pdf.js — it was the iPhone crash). Previews appear while the upload
+ *   is still running, so a 30 MB set over cellular is never a blank box
+ *   with a spinner (Erfan, 2026-09-13).
  *
  * Saving writes rows only: each kept sheet points at its own page number in
  * the stored file (page_number = original_page_number), so the viewer, the
@@ -31,7 +33,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { getPdfjs } from "@/lib/pdfClient";
 import {
   OPEN_TIMEOUT_MS,
   PAGE_RENDER_TIMEOUT_MS,
@@ -42,7 +43,8 @@ import {
   withTimeout,
 } from "@/lib/plans/uploadGuards";
 import type { PDFDocument as PdfLibDocument } from "pdf-lib";
-import { PHONE_MAX_CONTENT_BYTES, PREVIEW_MAX_IMAGE_PIXELS, largestPageJpeg, pageContentBytes, thumbnailFromJpeg } from "@/lib/plans/previews";
+import { scanPageJpeg, thumbnailFromJpeg } from "@/lib/plans/previews";
+import { openThumbnailer, type Thumbnailer } from "@/lib/plans/thumbnailers";
 
 /** `url` is null when the preview failed — the page itself is still intact and can be kept. */
 type Thumb = { page: number; url: string | null };
@@ -122,7 +124,6 @@ export default function PlanTriage({
   const [upload, setUpload] = useState<Upload>({ state: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [failedPages, setFailedPages] = useState<number[]>([]);
-  const [heavyPages, setHeavyPages] = useState<number[]>([]);
   const [progress, setProgress] = useState<string | null>(null);
 
   // Cloud-first when the original fits the upload limit; otherwise trim here.
@@ -199,22 +200,19 @@ export default function PlanTriage({
   }, [file, cloudFirst, projectId, supabase]);
 
   // ── The previews, from the same File ──────────────────────────────────────
-  // Two readers, cheapest first. pdf-lib opens the file on the main thread
-  // and, for a page that is one big JPEG (a scan), hands the still-compressed
-  // bytes to the browser's own decoder, which scales as it decodes. pdf.js
-  // draws only the pages that are actually drawn, with a cap on image size
-  // so it never decodes a 300 MB scan for a 180 px thumbnail — the thing
-  // that killed the tab on an iPhone.
+  // pdf-lib opens the file on the main thread (structure only, no decoding)
+  // to find the scans: a page that is one big JPEG goes to the browser's own
+  // decoder, which scales as it decodes. Every other page is drawn by the
+  // thumbnailer (PDFium in a worker; pdf.js only as a fallback).
   useEffect(() => {
     if (verdict.kind === "refuse") return;
     // Can run twice for one file (React's development double mount). Each
-    // run owns its own document and stands down when cleaned up.
+    // run owns its own engine and stands down when cleaned up.
     let cancelled = false;
-    let doc: { destroy: () => Promise<void> } | null = null;
+    let engine: Thumbnailer | null = null;
     (async () => {
       try {
         const bytes = await file.arrayBuffer();
-        // Which pages are scans? pdf-lib parses structure only — no decoding.
         const { PDFDocument } = await import("pdf-lib");
         let lib: PdfLibDocument | null = null;
         try {
@@ -224,89 +222,48 @@ export default function PlanTriage({
             "Reading the PDF",
           );
         } catch {
-          lib = null; // a file pdf-lib can't parse still gets the pdf.js path
+          lib = null; // a file pdf-lib can't parse still gets drawn previews
         }
         if (cancelled) return;
         const pageCount = lib?.getPageCount() ?? 0;
         if (pageCount) setTotal(pageCount);
 
-        const pdfjs = await withTimeout(getPdfjs(), OPEN_TIMEOUT_MS, "Loading the PDF reader");
-        // pdf.js takes a copy so pdf-lib keeps its own; the worker frees it on destroy.
-        const task = pdfjs.getDocument({
-          data: bytes.slice(0),
-          maxImageSize: PREVIEW_MAX_IMAGE_PIXELS,
-          standardFontDataUrl: "/standard_fonts/",
-        });
-        const pdf = await withTimeout(task.promise, OPEN_TIMEOUT_MS, "Opening the PDF", () => {
-          void task.destroy();
-        });
-        doc = pdf;
+        engine = await withTimeout(openThumbnailer(bytes), OPEN_TIMEOUT_MS, "Opening the PDF");
         if (cancelled) return;
-        setTotal(pdf.numPages);
+        setTotal(engine.numPages);
 
         const failed: number[] = [];
-        const heavy: number[] = [];
-        const phone = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
-        for (let n = 1; n <= pdf.numPages; n++) {
+        for (let n = 1; n <= engine.numPages; n++) {
           if (cancelled) return;
           let url: string | null = null;
-          let page: Awaited<ReturnType<typeof pdf.getPage>> | null = null;
           try {
             // A scan: the browser makes the thumbnail from the raw JPEG.
-            const jpeg = lib && n <= pageCount ? largestPageJpeg(lib, n - 1) : null;
-            if (jpeg) {
-              url = await withTimeout(thumbnailFromJpeg(jpeg, 180), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`);
-              if (cancelled) return;
-              setThumbs((prev) => [...prev, { page: n, url }]);
-              continue;
-            }
-            // A drawn page too heavy for a phone to parse: no preview, still
-            // keepable. The viewer opens it alone, with the whole tab to itself.
-            if (phone && lib && n <= pageCount && pageContentBytes(lib, n - 1) > PHONE_MAX_CONTENT_BYTES) {
-              heavy.push(n);
-              setThumbs((prev) => [...prev, { page: n, url: null }]);
-              continue;
-            }
-            page = await withTimeout(pdf.getPage(n), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`);
-            const base = page.getViewport({ scale: 1 });
-            const scale = 180 / base.width;
-            const viewport = page.getViewport({ scale });
-            const canvas = document.createElement("canvas");
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            const ctx = canvas.getContext("2d")!;
-            const render = page.render({ canvasContext: ctx, viewport });
-            await withTimeout(render.promise, PAGE_RENDER_TIMEOUT_MS, `Page ${n}`, () => {
-              render.cancel();
-            });
-            url = canvas.toDataURL("image/jpeg", 0.7);
-            canvas.width = 0; // release the bitmap now, not at the next GC
-            canvas.height = 0;
+            const jpeg = lib && n <= pageCount ? scanPageJpeg(lib, n - 1) : null;
+            url = jpeg
+              ? await withTimeout(thumbnailFromJpeg(jpeg, 180), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`)
+              : await withTimeout(engine.render(n, 180), PAGE_RENDER_TIMEOUT_MS, `Page ${n}`, () => {
+                  void engine?.reset(); // a stuck page must not hold the next ones hostage
+                });
           } catch {
             failed.push(n);
-          } finally {
-            // Drop this page's decoded images before moving on — on a scanned
-            // set that cache IS the memory problem.
-            page?.cleanup();
           }
           if (cancelled) return;
           setThumbs((prev) => [...prev, { page: n, url }]);
         }
         setFailedPages(failed);
-        setHeavyPages(heavy);
       } catch (e) {
         if (cancelled) return;
         setError(explainOpenFailure(e));
       } finally {
         setRendering(false);
-        // Free the worker's copy as soon as the previews exist.
-        void doc?.destroy();
-        doc = null;
+        // Free the engine's copy of the file as soon as the previews exist.
+        engine?.close();
+        engine = null;
       }
     })();
     return () => {
       cancelled = true;
-      void doc?.destroy();
+      engine?.close();
     };
   }, [file, verdict]);
 
@@ -485,13 +442,6 @@ export default function PlanTriage({
       ) : null}
       {notice ? (
         <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">{notice}</p>
-      ) : null}
-      {heavyPages.length > 0 ? (
-        <p className="rounded-md border border-border bg-background/60 px-3 py-2 text-sm text-muted">
-          {heavyPages.length === 1 ? `Page ${heavyPages[0]} is` : `${heavyPages.length} pages are`} too detailed to preview on a phone
-          ({heavyPages.slice(0, 8).join(", ")}{heavyPages.length > 8 ? "…" : ""}). Keep {heavyPages.length === 1 ? "it" : "them"} anyway — the
-          viewer opens one sheet at a time.
-        </p>
       ) : null}
       {failedPages.length > 0 ? (
         <p className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-foreground">
