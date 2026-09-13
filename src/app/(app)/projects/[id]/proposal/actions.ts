@@ -43,6 +43,24 @@ const timelineInput = z.object({
   assumptions: z.array(z.string().trim().max(300)).max(40),
 });
 
+const contractInput = z.object({
+  home_improvement: z.boolean(),
+  senior: z.boolean(),
+  uses_subcontractors: z.boolean(),
+  start_date: z.string().trim().max(120),
+  completion_date: z.string().trim().max(120),
+  downpayment: z.number().min(0).max(10_000_000),
+  progress_payments: z
+    .array(
+      z.object({
+        phase: z.string().trim().max(120),
+        work: z.string().trim().max(400),
+        amount: z.number().min(0).max(100_000_000),
+      }),
+    )
+    .max(40),
+});
+
 // Not exported: a "use server" file may only export async functions.
 const proposalPatch = z.object({
   client_name: z.string().trim().max(200).nullable().optional(),
@@ -54,6 +72,7 @@ const proposalPatch = z.object({
   understanding: z.string().trim().max(5000).nullable().optional(),
   options: z.array(optionInput).max(30).optional(),
   timeline: timelineInput.optional(),
+  contract: contractInput.optional(),
 });
 export type ProposalPatch = z.infer<typeof proposalPatch>;
 

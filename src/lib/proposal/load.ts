@@ -88,7 +88,10 @@ export async function loadProposal(
     published_at: str("published_at"),
     accepted_at: str("accepted_at"),
     accepted_by: (row.accepted_by as ProposalMeta["accepted_by"]) ?? null,
-    hasShareColumns: !prop.error && !!prop.data && "share_token" in row,
+    // No row yet reads as "columns present": the page used to tell a new
+    // project that migration 0033 was missing when the proposal simply had
+    // not been saved once. The first save is the real test.
+    hasShareColumns: !prop.error && (!prop.data || "share_token" in row),
   };
 
   if (!project) return { doc: null, meta, lineCount: lines.length };
@@ -123,6 +126,7 @@ export async function loadProposal(
       understanding: str("understanding"),
       options: row.options,
       timeline: row.timeline,
+      contract: row.contract,
       published_at: str("published_at"),
     },
   });
