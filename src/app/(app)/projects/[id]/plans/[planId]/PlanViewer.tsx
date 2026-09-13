@@ -245,12 +245,9 @@ export default function PlanViewer({
   // name selected so typing replaces it.
   const lastMeasureToolRef = useRef<Tool | null>(null);
   const projectLayerNamesRef = useRef<Set<string>>(new Set());
-  // Record / pause: while paused the measure tools draw nothing, so a layer
-  // can be "left open" without every tap adding to it (PlanSwift's record
-  // button). Picking a tool or a layer resumes.
-  const [recording, setRecording] = useState(true);
   const [optOpen, setOptOpen] = useState(false); // phone: the wall / volume options popover
   const optAnchorRef = useRef<DOMRect | null>(null);
+  const colorAnchorRef = useRef<DOMRect | null>(null); // phone: the colour swatch's box when opened
   function popover(close: () => void, body: React.ReactNode, width = "w-80", anchor?: DOMRect | null) {
     if (phone) {
       // Small popover pinned under its control (portaled so the backdrop is
@@ -1243,13 +1240,33 @@ export default function PlanViewer({
     return name;
   }
 
-  /** Start a new layer for `t` and open the wizard with its name selected. */
-  function startNewLayer() {
+  /**
+   * Start a fresh "Layer N" for the current tool. A tool switch does this
+   * silently (draw straight away; tap the chip to rename); the picker's
+   * "＋ New layer" keeps the picker open with the number selected, so a
+   * second layer of the same kind — east walls, then west walls — is one
+   * tap and a name.
+   */
+  function startNewLayer(keepOpen = false) {
     skipLayerCommitRef.current = true; // an open picker must not commit the old text over the new name
     setLayer(freshLayerName());
     setColor(pickNextColor());
-    setLayerOpen(false); // no popup: draw straight away; tap the chip to rename
-    setRecording(true);
+    setLayerOpen(keepOpen);
+  }
+
+  /**
+   * The chip's name field. A fresh layer (no runs yet) simply takes the
+   * name; a layer that already holds runs on this sheet is RENAMED — its
+   * runs follow — unless the name is another layer's, which means "continue
+   * that one". "Unlabeled" runs are never swept up by a typed name.
+   */
+  function commitLayerName(name: string) {
+    const next = name.trim();
+    const cur = layerKeyOf(layer);
+    const group = cur !== "Unlabeled" ? layerGroups.find((g) => g.layer === cur) : undefined;
+    const other = next && layerGroups.some((g) => g.layer === layerKeyOf(next));
+    if (group && next && next !== cur && !other) void renameLayer(group.rows, next);
+    setLayer(name);
   }
 
   /** The layer a run of `type` may be saved into: the current one if it fits, else a fresh one. */
@@ -1274,7 +1291,6 @@ export default function PlanViewer({
     finishCount();
     setAiCount(null);
     if (!MEASURE_TOOLS.includes(t)) return;
-    setRecording(true);
     const prev = lastMeasureToolRef.current;
     lastMeasureToolRef.current = t;
     const switched = prev !== null && prev !== t;
@@ -1285,7 +1301,6 @@ export default function PlanViewer({
   function continueLayer(g: { layer: string; color: string; rows: Measurement[] }) {
     const first = g.rows[0];
     finishCount();
-    setRecording(true);
     if (MEASURE_TOOLS.includes(first.type as Tool)) lastMeasureToolRef.current = first.type as Tool;
     setLayer(g.layer === "Unlabeled" ? "" : g.layer);
     setColor(g.color);
@@ -2143,8 +2158,13 @@ export default function PlanViewer({
       // shapes; Select keeps the full hold behaviour.
       const drawing = tool !== "select" && tool !== "browse" && tool !== "crop";
       if (drawing && draft.length > 0) return;
+      // The shape may sit under the crosshair or under the finger itself: a
+      // hold on a line you can see beneath your thumb opens its menu either
+      // way (Erfan, 2026-09-13: held a wall to delete it, "nothing happens").
+      const under = { x: (cx - rect.left) / scale, y: (cy - rect.top) / scale };
       const v = pointerId != null && tool !== "crop" ? vertexAt(pt) : null;
-      if (drawing && !v && !pickMeasurementAt(pt)) return;
+      const shape = pickMeasurementAt(pt) ?? pickMeasurementAt(under);
+      if (drawing && !v && !shape) return;
       longPressFiredRef.current = true;
       if (v && pointerId != null) {
         const m = measurements.find((x) => x.id === v.id);
@@ -2169,7 +2189,7 @@ export default function PlanViewer({
           return;
         }
       }
-      const id = pickMeasurementAt(pt);
+      const id = shape;
       if (id) {
         // Holding a shape makes it editable right away (handles on), and
         // offers its menu on top.
@@ -2558,12 +2578,6 @@ export default function PlanViewer({
     // and what the lens magnifies is always what sits under it (Erfan,
     // 2026-09-10: "same issue with the magnifier on the other tools").
     const pt = touch ? evtToAim(e) : evtToPoint(e);
-
-    // Paused: the measure tools draw nothing until ● is tapped again.
-    if (!recording && MEASURE_TOOLS.includes(tool)) {
-      setError(`Paused — tap ● to record into "${layer.trim() || "this layer"}".`);
-      return;
-    }
 
     // Finger on a draw tool: nothing is placed yet. The point goes where the
     // finger LIFTS (slide to aim with the loupe); a second finger turns the
@@ -4293,10 +4307,20 @@ export default function PlanViewer({
                         blocked={blockedLayers(measurements, tool)}
                         toolNoun={TYPE_NOUN[tool] ?? "runs"}
                         selectOnMount={isDefaultLayerName(layer)}
+                        renames={layerKeyOf(layer) === "Unlabeled" ? 0 : (layerGroups.find((g) => g.layer === layerKeyOf(layer))?.rows.length ?? 0)}
                         skipCommitRef={skipLayerCommitRef}
-                        onCommit={setLayer}
+                        onCommit={commitLayerName}
                         onDone={() => setLayerOpen(false)}
                       />
+                      {/* A second layer of the same kind: east walls done, now west walls. */}
+                      <button
+                        type="button"
+                        onClick={() => startNewLayer(true)}
+                        className="mt-1 flex min-h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-xs text-foreground hover:bg-foreground/10"
+                      >
+                        <span aria-hidden className="w-2.5 text-center text-sm leading-none">＋</span>
+                        <span className="flex-1">New layer of {TYPE_NOUN[tool] ?? "runs"}</span>
+                      </button>
                       {layerGroups.some((g) => g.rows[0]?.type === tool) ? (
                         <>
                           <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-muted">
@@ -4322,7 +4346,12 @@ export default function PlanViewer({
                                     active ? "bg-brand/15" : ""
                                   }`}
                                 >
-                                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: g.color }} />
+                                  {active ? (
+                                    // Red and pulsing: runs are recording into this one right now.
+                                    <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" aria-label="Recording into this layer" />
+                                  ) : (
+                                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: g.color }} />
+                                  )}
                                   <span className="min-w-0 flex-1 truncate">{g.layer}</span>
                                   <span className="shrink-0 text-[10px] text-muted">
                                     {g.lines.length ? g.lines.join(" · ") : `${g.rows.length}`}
@@ -4358,46 +4387,34 @@ export default function PlanViewer({
                           </div>
                         </>
                       ) : null}
+                      {/* Stop = leave the drawing tool. There is no separate pause: a
+                          measure tool with a layer on the chip IS recording. */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLayerOpen(false);
+                          selectTool("select");
+                        }}
+                        className="mt-1 flex min-h-10 w-full items-center gap-2 rounded-lg border-t border-border px-2 text-left text-xs text-muted hover:text-foreground"
+                      >
+                        <span aria-hidden className="ml-0.5 inline-block h-2 w-2 rounded-[2px] bg-current" />
+                        <span>Stop drawing — back to Select</span>
+                      </button>
                     </div>,
                     "w-72",
                     layerAnchorRef.current,
                   )
                 : null}
             </div>
-            {/* Record / pause — the one control that says whether taps add to the layer. */}
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setRecording((r) => !r);
-              }}
-              aria-pressed={recording}
-              aria-label={recording ? "Recording — tap to pause" : "Paused — tap to record"}
-              title={recording ? "Recording: new runs go into this layer. Tap to pause." : "Paused: taps draw nothing. Tap to record."}
-              className={`flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-md border px-0 text-xs font-semibold tracking-wide md:h-8 md:w-auto md:px-2.5 ${
-                recording
-                  ? "border-red-500/60 bg-red-500/10 text-red-400"
-                  : "border-border bg-background text-muted"
-              }`}
-            >
-              {recording ? (
-                <>
-                  <span className="h-3 w-3 animate-pulse rounded-full bg-red-500 md:h-2.5 md:w-2.5" aria-hidden />
-                  <span className="hidden md:inline">REC</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-[13px] leading-none md:text-[11px]" aria-hidden>▮▮</span>
-                  <span className="hidden md:inline">PAUSED</span>
-                </>
-              )}
-            </button>
             <div className="relative flex items-center gap-1.5">
               <span className="hidden text-[10px] uppercase tracking-wider text-muted md:inline md:text-xs">Color</span>
               {/* Phone: one swatch → popover */}
               <button
                 type="button"
-                onClick={() => setColorOpen((o) => !o)}
+                onClick={(e) => {
+                  colorAnchorRef.current = e.currentTarget.getBoundingClientRect();
+                  setColorOpen((o) => !o);
+                }}
                 aria-label="Pick a color"
                 aria-haspopup="true"
                 aria-expanded={colorOpen}
@@ -4419,31 +4436,37 @@ export default function PlanViewer({
                   />
                 ))}
               </div>
-              {colorOpen ? (
-                <>
-                  <div className="fixed inset-0 z-20 md:hidden" onClick={() => setColorOpen(false)} />
-                  <div className="glass-strong absolute right-0 top-full z-30 mt-1 grid grid-cols-6 gap-0.5 rounded-xl p-1.5 md:hidden" data-popover="color">
-                    {COLORS.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => {
-                          setColor(c);
-                          setColorOpen(false);
-                        }}
-                        aria-label={`Color ${c}`}
-                        aria-pressed={color === c}
-                        className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-foreground/10"
-                      >
-                        <span
-                          className={`h-6 w-6 rounded-full ${color === c ? "ring-2 ring-foreground" : ""}`}
-                          style={{ background: c }}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
+              {/* Portaled like the layer picker: an absolute grid inside this
+                  40 px box shrank to its parent's width and the swatches piled
+                  onto each other (Erfan, 2026-09-13: "very hard to choose a color"). */}
+              {colorOpen
+                ? popover(
+                    () => setColorOpen(false),
+                    <div className="grid grid-cols-6 gap-1 p-2" data-popover="color" role="listbox" aria-label="Layer color">
+                      {COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          role="option"
+                          onClick={() => {
+                            setColor(c);
+                            setColorOpen(false);
+                          }}
+                          aria-label={`Color ${c}`}
+                          aria-selected={color === c}
+                          className="flex h-11 w-11 min-h-0 items-center justify-center rounded-lg hover:bg-foreground/10"
+                        >
+                          <span
+                            className={`h-7 w-7 rounded-full ${color === c ? "ring-2 ring-foreground ring-offset-2 ring-offset-background" : ""}`}
+                            style={{ background: c }}
+                          />
+                        </button>
+                      ))}
+                    </div>,
+                    "w-72",
+                    colorAnchorRef.current,
+                  )
+                : null}
             </div>
             {tool === "wall" || tool === "volume" ? (
               <>

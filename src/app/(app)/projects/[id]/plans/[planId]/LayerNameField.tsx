@@ -21,6 +21,7 @@ export default function LayerNameField({
   blocked = {},
   toolNoun = "runs",
   selectOnMount = false,
+  renames = 0,
   skipCommitRef,
   onCommit,
   onDone,
@@ -33,6 +34,8 @@ export default function LayerNameField({
   toolNoun?: string;
   /** Open with the whole name selected, so typing replaces "Layer 3". */
   selectOnMount?: boolean;
+  /** How many runs the current layer already holds — a new name renames them all. */
+  renames?: number;
   /** Set by the parent when a layer was picked from the list instead. */
   skipCommitRef: { current: boolean };
   onCommit: (name: string) => void;
@@ -117,8 +120,12 @@ export default function LayerNameField({
           ? `"${trimmed}" already holds ${holds} — ${toolNoun} need a layer of their own. Pick another name.`
           : trimmed
             ? existing.includes(trimmed)
-              ? `Continuing "${trimmed}" — new runs add to it.`
-              : `New layer "${trimmed}" — saved with the first run you draw.`
+              ? trimmed === initial.trim()
+                ? `Recording into "${trimmed}" — every run you draw goes here.`
+                : `Continuing "${trimmed}" — new runs add to it.`
+              : renames > 0
+                ? `Renames "${initial.trim()}" — its ${renames} ${renames === 1 ? "run takes" : "runs take"} the new name.`
+                : `New layer "${trimmed}" — saved with the first run you draw.`
             : "Type a name for the runs you're about to draw, or pick a layer below."}
       </p>
     </>
