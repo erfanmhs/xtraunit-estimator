@@ -79,12 +79,24 @@ export async function normalizePhoto(
  * the same as any scanned sheet.
  */
 export async function photoToPdf(jpeg: File, name = "sheet-photo.pdf"): Promise<File> {
+  return photosToPdf([jpeg], name);
+}
+
+/**
+ * Several photos → one PDF, a page per photo in the order given — a set of
+ * sheets picked from the phone's library becomes one plan set and goes
+ * through the same triage as an uploaded PDF.
+ */
+export async function photosToPdf(jpegs: File[], name = "sheet-photos.pdf"): Promise<File> {
+  if (!jpegs.length) throw new Error("No photos to add.");
   const pdf = await PDFDocument.create();
-  const img = await pdf.embedJpg(await jpeg.arrayBuffer());
   // 72 pt per "inch" of pixels at 200 dpi keeps a phone photo near letter size.
   const pts = 72 / 200;
-  const page = pdf.addPage([img.width * pts, img.height * pts]);
-  page.drawImage(img, { x: 0, y: 0, width: img.width * pts, height: img.height * pts });
+  for (const jpeg of jpegs) {
+    const img = await pdf.embedJpg(await jpeg.arrayBuffer());
+    const page = pdf.addPage([img.width * pts, img.height * pts]);
+    page.drawImage(img, { x: 0, y: 0, width: img.width * pts, height: img.height * pts });
+  }
   const bytes = await pdf.save();
   return new File([new Uint8Array(bytes)], name, { type: "application/pdf" });
 }

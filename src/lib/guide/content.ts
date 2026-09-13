@@ -84,7 +84,7 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
     title: "Project home · Plans",
     purpose: "Plans in first. Then the six stages run left to right — Takeoff, Scope, Pricing, Estimate, Proposal.",
     steps: [
-      { do: "Click “＋ Upload or drop a plan PDF” and pick the plan set.", note: "On a phone you can also “Photograph a sheet” — the camera opens, the photo becomes a one-page plan." },
+      { do: "Tap “＋ Upload a plan PDF, or photos of sheets” and pick the plan set — or several photos of sheets from your photo library.", note: "Photos (JPG, PNG, or what an iPhone shoots) become one plan set, a page per photo. The phone asks for permission to open the library the first time." },
       { do: "Sort the pages when asked: floor plans, elevations, sections, site plan.", note: "The app names each sheet. Keep the ones that carry quantities; skip title sheets and details." },
       { do: "Open the takeoff: “Takeoff” in the sidebar (bottom bar on a phone), or the sheet itself.", note: "That's where you set the scale and measure." },
       { do: "Come back here any time — the “Next up” box says what to do next.", note: "A green dot on a stage tab means that stage is done; amber means started." },
