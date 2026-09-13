@@ -7,8 +7,7 @@ import {
   explainOpenFailure,
   formatMb,
   sizeVerdict,
-  withTimeout,
-} from "./uploadGuards";
+  withTimeout, UPLOAD_LIMIT_BYTES } from "./uploadGuards";
 
 describe("sizeVerdict", () => {
   it("lets a normal set through on every device", () => {
@@ -58,5 +57,11 @@ describe("explainOpenFailure", () => {
     expect(explainOpenFailure(new Error("Invalid PDF structure"))).toMatch(/isn't a readable PDF/);
     expect(explainOpenFailure(new Error("Array buffer allocation failed"))).toMatch(/out of memory/);
     expect(explainOpenFailure("weird")).toBe("Couldn't read this PDF: weird");
+  });
+});
+
+describe("upload limit", () => {
+  it("defaults to Supabase's free-plan 50 MB", () => {
+    expect(UPLOAD_LIMIT_BYTES).toBe(50 * 1024 * 1024);
   });
 });

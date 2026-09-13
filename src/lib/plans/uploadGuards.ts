@@ -21,6 +21,16 @@ export const PHONE_WARN_BYTES = 120 * MB;
 /** On a laptop, warn above this. */
 export const DESKTOP_WARN_BYTES = 300 * MB;
 
+/**
+ * The storage upload limit per file. Supabase's free plan caps uploads at
+ * 50 MB (project-wide, Storage → Settings); Pro lifts it. A file within it is
+ * uploaded as-is and triaged from the cloud copy — the phone never holds it.
+ * Over it, the old trim-in-browser path runs. Override per deployment with
+ * NEXT_PUBLIC_PLAN_UPLOAD_LIMIT_MB once the plan changes.
+ */
+export const UPLOAD_LIMIT_BYTES =
+  (Number(process.env.NEXT_PUBLIC_PLAN_UPLOAD_LIMIT_MB) || 50) * MB;
+
 /** How long one page may take to render a thumbnail before we give up on that page (not the file). */
 export const PAGE_RENDER_TIMEOUT_MS = 30_000;
 /** How long the whole "read the PDF and open it" step may take. */
