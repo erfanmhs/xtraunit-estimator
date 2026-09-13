@@ -622,15 +622,30 @@ export default function PlanViewer({
     ranRef.current = true;
     (async () => {
       try {
-        const { data, error: dErr } = await supabase.storage
-          .from("plans")
-          .download(planFile.storage_path);
-        if (dErr || !data) throw dErr ?? new Error("Could not download file.");
         const pdfjs = await getPdfjs();
-        const pdf = await pdfjs.getDocument({
-          data: await data.arrayBuffer(),
-          standardFontDataUrl: "/standard_fonts/",
-        }).promise;
+        // Open by range requests from a signed URL: pdf.js pulls the bytes
+        // each page needs instead of the whole file into the phone's memory
+        // (a full set is what used to reload the tab on an iPhone). If the
+        // signed URL can't be made, fall back to the old full download.
+        const { data: signed } = await supabase.storage
+          .from("plans")
+          .createSignedUrl(planFile.storage_path, 60 * 60 * 6);
+        let source: Parameters<typeof pdfjs.getDocument>[0];
+        if (signed?.signedUrl) {
+          source = {
+            url: signed.signedUrl,
+            rangeChunkSize: 1024 * 1024,
+            disableAutoFetch: true,
+            standardFontDataUrl: "/standard_fonts/",
+          };
+        } else {
+          const { data, error: dErr } = await supabase.storage
+            .from("plans")
+            .download(planFile.storage_path);
+          if (dErr || !data) throw dErr ?? new Error("Could not download file.");
+          source = { data: await data.arrayBuffer(), standardFontDataUrl: "/standard_fonts/" };
+        }
+        const pdf = await pdfjs.getDocument(source).promise;
         pdfRef.current = pdf;
         setNumPages(pdf.numPages);
         setStatus("ready");
