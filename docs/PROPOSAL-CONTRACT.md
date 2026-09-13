@@ -47,16 +47,49 @@ implemented; if the company ever takes that work, add it before signing.
 
 ## What is ours (Settings → Proposal profile → Terms & conditions)
 
-Fourteen plain-language clauses, defaults in `src/lib/proposal/profile.ts`:
-agreement · change orders · concealed conditions · allowances & selections ·
-payment · schedule · owner responsibilities · permits, inspections & code ·
-hazardous materials · delays beyond either party's control · insurance &
-liability · warranty · termination · dispute resolution.
+Nineteen plain-language clauses, defaults in `src/lib/proposal/profile.ts`:
+agreement · the work & supervision · change orders · concealed conditions ·
+allowances & selections · payment · completion & final payment · schedule ·
+owner responsibilities · permits, inspections & code · site, safety & clean-up ·
+hazardous materials · delays beyond either party's control · insurance ·
+responsibility for claims · warranty & correction of work · termination ·
+dispute resolution · general.
 
 Numbers the company usually tunes are in the text on purpose so they are
 visible: 10-day payment terms, 1.5 %/month late interest, 7-day suspension
 notice, 10-day cure period, 10 % on termination for convenience, one-year
 workmanship warranty, Los Angeles County mediation / arbitration.
+
+## Cross-reference with AIA A105-2017
+
+Read article by article against the AIA short-form owner–contractor agreement.
+
+| AIA A105 article | Ours | Where |
+|---|---|---|
+| 1 Contract documents, hierarchy | yes | The agreement |
+| 2 Commencement, substantial completion | yes | Completion & final payment; contract section dates |
+| 3 Contract sum, adjusted only by change order | yes | The agreement, Change orders |
+| 4 Progress payments, final payment, interest | yes (no retainage — see note) | Payment terms, Completion |
+| 5 Contractor's and owner's insurance, waiver of subrogation | yes | Insurance; statutory CGL / WC sentences |
+| 6 The work, intent, ownership of documents, notices by email | yes | The work & supervision, The agreement, General |
+| 7 Owner: information, right to stop work, right to carry out work | yes | Owner responsibilities, Termination |
+| 8 Contractor: review, supervision, labour/materials, warranty, taxes, permits, site, cutting/patching, clean-up, indemnity | yes | The work & supervision, Permits, Site safety & clean-up, Warranty, Responsibility for claims |
+| 9 Architect as certifier and decider | left out on purpose | design-build: no third-party certifier |
+| 10 Change orders, concealed conditions | yes | Change orders, Concealed conditions |
+| 11 Time of the essence, delay notice, extensions | yes | Completion, Schedule, Delays |
+| 12 Applications, certificates, substantial and final completion | yes (no certificates) | Completion & final payment |
+| 13 Safety, hazardous materials | yes | Site safety & clean-up, Hazardous materials |
+| 14 Correction of work, one year | yes | Warranty & correction of work |
+| 15 Assignment, governing law, tests | yes | General |
+| 16–17 Termination by contractor / by owner for cause / for convenience | yes | Termination |
+
+Left out on purpose: the architect's role (A105 assumes one; a design-build
+contractor is its own), **retainage** (A105 holds 5 %; on a California home
+improvement contract, holding back money for work already done sits badly
+with §7159's "may not collect for work not yet completed" logic — the
+schedule of progress payments does the job instead), and the contractor's
+right to demand proof of the owner's financing (art. 7.1.3 — reasonable on a
+$150k+ job; heavy-handed on a kitchen).
 
 ## Attorney checklist (one sitting)
 
