@@ -22,10 +22,13 @@ function deviceGuess(h: Headers): { phone: boolean; coarse: boolean } {
 
 export default async function PlanViewerPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; planId: string }>;
+  searchParams: Promise<{ sheet?: string }>;
 }) {
   const { id, planId } = await params;
+  const { sheet } = await searchParams;
   const device = deviceGuess(await headers());
 
   const supabase = await createClient();
@@ -79,11 +82,34 @@ export default async function PlanViewerPage({
     }
   }
 
+  // Every plan set in the project, oldest first (the order the project page's
+  // Takeoff tab uses), so the viewer can roll from the last sheet of one set
+  // into the first of the next without a trip back to the project page
+  // (Erfan, 2026-09-13 — a set uploaded as one PDF per sheet is many sets).
+  const { data: siblingRows } = await supabase
+    .from("plan_files")
+    .select("id,file_name,created_at")
+    .eq("project_id", id)
+    .order("created_at", { ascending: true });
+  const siblingIds = (siblingRows ?? []).map((r) => r.id as string);
+  const { data: countRows } = siblingIds.length
+    ? await supabase.from("sheets").select("plan_file_id").in("plan_file_id", siblingIds)
+    : { data: [] as { plan_file_id: string }[] };
+  const counts = new Map<string, number>();
+  for (const r of countRows ?? []) counts.set(r.plan_file_id, (counts.get(r.plan_file_id) ?? 0) + 1);
+  const siblings = (siblingRows ?? []).map((r) => ({
+    id: r.id as string,
+    file_name: r.file_name as string,
+    sheets: counts.get(r.id as string) ?? 0,
+  }));
+
   return (
     <PlanViewer
       projectId={id}
       planFile={pf as PlanFile}
       sheets={sheetsData ?? []}
+      siblings={siblings}
+      initialSheet={sheet === "last" ? "last" : "first"}
       initialPhone={device.phone}
       initialCoarse={device.coarse}
     />
