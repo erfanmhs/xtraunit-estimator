@@ -84,13 +84,13 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
     title: "Project home · Plans",
     purpose: "Plans in first. Then the six stages run left to right — Takeoff, Scope, Pricing, Estimate, Proposal.",
     steps: [
-      { do: "Tap “＋ Upload a plan PDF, or photos of sheets” and pick the plan set — or several photos of sheets from your photo library.", note: "Photos (JPG, PNG, or what an iPhone shoots) become one plan set, a page per photo. The phone asks for permission to open the library the first time." },
+      { do: "Tap “＋ Upload plan PDFs, or photos of sheets” and pick the plan set — one PDF, several PDFs at once (a set that came as one file per sheet), or photos of sheets from your photo library.", note: "Several files become one plan set, in file-name order — A1, A2, A10. On a computer you can pick a whole folder. Photos (JPG, PNG, or what an iPhone shoots) become a page each. The phone asks for permission to open the library the first time." },
       { do: "Sort the pages when asked: floor plans, elevations, sections, site plan.", note: "The app names each sheet. Keep the ones that carry quantities; skip title sheets and details." },
       { do: "Open the takeoff: “Takeoff” in the sidebar (bottom bar on a phone), or the sheet itself.", note: "That's where you set the scale and measure." },
       { do: "Come back here any time — the “Next up” box says what to do next.", note: "A green dot on a stage tab means that stage is done; amber means started." },
     ],
     done: "At least one plan uploaded and its pages sorted. The Takeoff tab is live.",
-    tip: "One PDF with all the sheets is fine. Up to 50 MB per file.",
+    tip: "One PDF with all the sheets is fine, and so is a folder of one-sheet PDFs. Up to 50 MB per set.",
     next: { key: "takeoff", label: "Set the scale and measure" },
   },
 
