@@ -16,6 +16,7 @@ import type { PlanFile } from "@/types";
 import Caret from "@/components/Caret";
 import { sizeVerdict } from "@/lib/plans/uploadGuards";
 import { SHEET_MAX_EDGE, normalizePhoto, photoFileName, photosToPdf } from "@/lib/photo";
+import { mergePdfs, orderForMerge } from "@/lib/plans/mergePdfs";
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return "";
@@ -34,6 +35,7 @@ export default function PlanManager({
   const router = useRouter();
   const [supabase] = useState(() => createClient());
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
 
   const [triageFile, setTriageFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -41,7 +43,7 @@ export default function PlanManager({
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const [preparing, setPreparing] = useState(false);
+  const [preparing, setPreparing] = useState<string | null>(null);
 
   // Photos of sheets — from the phone's library, the camera roll (HEIC
   // included) or a scan — become one PDF, a page per photo, and go through
@@ -50,32 +52,53 @@ export default function PlanManager({
   const isImage = (f: File) => f.type.startsWith("image/") || /\.(heic|heif|jpe?g|png|webp)$/i.test(f.name);
   const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
 
-  async function onSheetPhotos(raws: File[]) {
+  async function photosPdf(raws: File[]): Promise<File> {
+    const jpegs: File[] = [];
+    for (const [i, raw] of raws.entries()) jpegs.push(await normalizePhoto(raw, SHEET_MAX_EDGE, `sheet-${i + 1}.jpg`));
+    return photosToPdf(jpegs, photoFileName(raws.length === 1 ? "sheet-photo" : "sheet-photos", "pdf"));
+  }
+
+  // Several files become ONE plan set before triage: PDFs in file-name order
+  // (a folder of one-sheet PDFs — A1, A2, … — is how many sets arrive), then
+  // any photos, a page each. The combined weight is checked first, so a phone
+  // is told before it tries to hold a set it can't.
+  async function combine(pdfs: File[], images: File[]) {
     setError(null);
-    setPreparing(true);
+    const total = [...pdfs, ...images].reduce((n, f) => n + f.size, 0);
+    const phone = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
+    const verdict = sizeVerdict(total, phone);
+    if (verdict.kind === "refuse") return setError(verdict.message);
+    const n = pdfs.length + images.length;
+    setPreparing(
+      pdfs.length && images.length
+        ? `Combining ${n} files into one set…`
+        : pdfs.length
+          ? `Combining ${pdfs.length} PDFs into one set…`
+          : "Preparing your photos…",
+    );
     try {
-      const jpegs: File[] = [];
-      for (const [i, raw] of raws.entries()) jpegs.push(await normalizePhoto(raw, SHEET_MAX_EDGE, `sheet-${i + 1}.jpg`));
-      const pdf = await photosToPdf(jpegs, photoFileName(raws.length === 1 ? "sheet-photo" : "sheet-photos", "pdf"));
-      pickFile(pdf);
+      const parts = orderForMerge(pdfs);
+      if (images.length) parts.push(await photosPdf(orderForMerge(images)));
+      pickFile(await mergePdfs(parts));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't read those photos.");
+      setError(e instanceof Error ? e.message : "Couldn't read those files.");
     } finally {
-      setPreparing(false);
+      setPreparing(null);
     }
   }
 
-  // One control takes everything: a PDF plan set, or one or more photos.
+  // One control takes everything: a PDF plan set, several PDFs, a whole
+  // folder, or one or more photos.
   function pick(fileList: FileList | null) {
     const files = fileList ? Array.from(fileList) : [];
     if (!files.length) return;
     setError(null);
     const pdfs = files.filter(isPdf);
-    const images = files.filter(isImage);
+    const images = files.filter((f) => !isPdf(f) && isImage(f));
     if (pdfs.length === 1 && files.length === 1) return pickFile(pdfs[0]);
-    if (images.length === files.length) return void onSheetPhotos(images);
-    if (pdfs.length > 1) return setError("One PDF at a time — pick the plan set, then add photos separately.");
-    setError("Upload a PDF plan set, or photos of sheets (JPG, PNG, HEIC). Other files can't be measured.");
+    if (!pdfs.length && !images.length)
+      return setError("Upload a PDF plan set, or photos of sheets (JPG, PNG, HEIC). Other files can't be measured.");
+    void combine(pdfs, images);
   }
 
   function pickFile(file: File) {
@@ -94,6 +117,7 @@ export default function PlanManager({
     }
     setTriageFile(file);
     if (inputRef.current) inputRef.current.value = "";
+    if (folderRef.current) folderRef.current.value = "";
   }
 
   async function viewFile(file: PlanFile) {
@@ -191,11 +215,27 @@ export default function PlanManager({
           onChange={(e) => pick(e.target.files)}
         />
         <span className="text-sm text-foreground">
-          {preparing ? "Preparing your photos…" : "＋ Upload a plan PDF, or photos of sheets"}
+          {preparing ?? "＋ Upload plan PDFs, or photos of sheets"}
         </span>
         <span className="text-xs text-muted">
-          from Files, Drive or your photo library · you&apos;ll pick which sheets to keep next
+          one PDF, several at once, or your photo library — they become one set · you&apos;ll pick which sheets to keep next
         </span>
+      </label>
+      {/*
+        A whole folder of one-sheet PDFs in one go. Folder picking is a
+        desktop thing (a phone's Files app multi-selects instead), and the
+        attribute has no React typing, hence the spread.
+      */}
+      <label className="-mt-2 hidden cursor-pointer self-center text-xs text-muted hover:text-brand-soft md:inline">
+        <input
+          ref={folderRef}
+          type="file"
+          hidden
+          multiple
+          {...({ webkitdirectory: "" } as Record<string, string>)}
+          onChange={(e) => pick(e.target.files)}
+        />
+        …or choose a whole folder of sheets
       </label>
 
       {error ? (
