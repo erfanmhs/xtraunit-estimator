@@ -69,3 +69,4 @@ _Nothing pending. Everything through 0044 has been run._
 - [x] 0042_ai_usage_cost.sql — run 2026-09-12
 - [x] 0043_proposal_contract.sql — run 2026-09-12
 - [x] 0044_company_branding.sql — run 2026-09-12
+- [ ] 0045_hidden_exclusions.sql — PENDING (`projects.hidden_exclusions` jsonb: standard exclusions hidden per project from the Scope page; until it runs, "Hide here" on a standard exclusion reports the missing migration and everything else in the exclusions panel works)

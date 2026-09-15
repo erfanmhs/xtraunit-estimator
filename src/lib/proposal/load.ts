@@ -1,3 +1,4 @@
+import { resolveHidden } from "./exclusions";
 import "server-only";
 
 /**
@@ -72,11 +73,22 @@ export async function loadProposal(
         overhead_pct: cs?.default_op_pct ?? 0,
       };
 
-  const { data: findings } = await sb
+  // status (0029) tells a dismissed exclusion from a live one; older DBs
+  // without the column fall back to the narrower select.
+  const fRes = await sb
     .from("scope_findings")
-    .select("kind,text,resolved")
+    .select("id,kind,text,resolved,status")
     .eq("project_id", projectId)
     .in("kind", ["assumption", "exclusion"]);
+  const findings = fRes.error
+    ? (
+        await sb
+          .from("scope_findings")
+          .select("kind,text,resolved")
+          .eq("project_id", projectId)
+          .in("kind", ["assumption", "exclusion"])
+      ).data
+    : fRes.data;
 
   const prop = await sb.from("proposals").select("*").eq("project_id", projectId).maybeSingle();
   const row = (prop.data ?? {}) as Record<string, unknown>;
@@ -121,7 +133,8 @@ export async function loadProposal(
     },
     lines,
     markups,
-    findings: (findings ?? []).filter((f) => !f.resolved),
+    findings: (findings ?? []).filter((f) => !f.resolved && (("status" in f ? f.status : null) ?? "open") !== "dismissed"),
+    hidden_exclusions: resolveHidden((project as { hidden_exclusions?: unknown }).hidden_exclusions),
     fields: {
       client_name: str("client_name"),
       proposal_date: str("proposal_date"),

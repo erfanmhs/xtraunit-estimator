@@ -22,12 +22,19 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import SwipeRow from "@/components/SwipeRow";
 import Caret from "@/components/Caret";
+import { useRouter } from "next/navigation";
 import { groupByTrade, tradeOf } from "@/lib/scope/trades";
+import { exclusionItems, type ExclusionFinding } from "@/lib/proposal/exclusions";
+import ExclusionsPanel from "./ExclusionsPanel";
 import {
   updateLineItem,
   setLineStatus,
   deleteLineItem,
   addLineItem,
+  updateFindingText,
+  setFindingStatus,
+  deleteFinding,
+  setHiddenExclusions,
 } from "./actions";
 
 export type LineItem = {
@@ -84,11 +91,25 @@ function parseQty(s: string): number | null {
 export default function ScopeCanvas({
   projectId,
   initialItems,
+  initialFindings = [],
+  standardExclusions = [],
+  initialHidden = [],
 }: {
   projectId: string;
   initialItems: LineItem[];
+  /** The AI's exclusion findings — they print on the proposal too. */
+  initialFindings?: (ExclusionFinding & { id: string })[];
+  /** The company's standard exclusions (Settings → Proposal profile). */
+  standardExclusions?: string[];
+  /** Standard exclusions hidden on this project. */
+  initialHidden?: string[];
 }) {
+  const router = useRouter();
   const [items, setItems] = useState<LineItem[]>(initialItems);
+  const [findings, setFindings] = useState(initialFindings);
+  const [hidden, setHidden] = useState(initialHidden);
+  useEffect(() => setFindings(initialFindings), [initialFindings]);
+  useEffect(() => setHidden(initialHidden), [initialHidden]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addingIn, setAddingIn] = useState<string | null>(null);
   // Trades start closed. `open` holds the ones the user opened.
@@ -100,6 +121,18 @@ export default function ScopeCanvas({
   useEffect(() => setItems(initialItems), [initialItems]);
 
   const groups = useMemo(() => groupByTrade(items), [items]);
+  // The proposal's "Excluded / by others" list, from the same function the
+  // proposal uses, so what is edited here is exactly what the client reads.
+  const exclusions = useMemo(() => {
+    const tradeOfLine = new Map<string, string>();
+    for (const g of groups) for (const li of g.rows) tradeOfLine.set(li.id, g.trade);
+    return exclusionItems({
+      lines: items.map((li) => ({ ...li, trade: tradeOfLine.get(li.id) ?? "" })),
+      findings,
+      standard: standardExclusions,
+      hidden,
+    });
+  }, [items, groups, findings, standardExclusions, hidden]);
   // A single trade (a trade-only run) is open from the start — there is
   // nothing to skim past.
   const soloTrade = groups.length === 1 ? groups[0].trade : null;
@@ -199,6 +232,33 @@ export default function ScopeCanvas({
   }
 
   const allOpen = groups.every((g) => isOpen(g.trade));
+
+  // Exclusions panel actions — optimistic, reverting on failure like `run`.
+  function runFindings(optimistic: () => void, action: () => Promise<{ ok: boolean; error?: string }>) {
+    const snapshot = findings;
+    setError(null);
+    optimistic();
+    startTransition(async () => {
+      const res = await action();
+      if (!res.ok) {
+        setFindings(snapshot);
+        setError(res.error ?? "Something went wrong.");
+      } else router.refresh(); // the Findings list below reads the same rows
+    });
+  }
+  function onHideStandard(text: string, hide: boolean) {
+    const snapshot = hidden;
+    const next = hide ? Array.from(new Set([...hidden, text])) : hidden.filter((h) => h !== text);
+    setError(null);
+    setHidden(next);
+    startTransition(async () => {
+      const res = await setHiddenExclusions(projectId, next);
+      if (!res.ok) {
+        setHidden(snapshot);
+        setError(res.error ?? "Something went wrong.");
+      }
+    });
+  }
 
   return (
     <div className="mt-6 space-y-3">
@@ -301,6 +361,39 @@ export default function ScopeCanvas({
           </section>
         );
       })}
+
+      <ExclusionsPanel
+        items={exclusions}
+        onEditLine={(id, text) => {
+          const li = items.find((x) => x.id === id);
+          if (!li) return;
+          // The proposal prints the deliverable when there is one, else the description.
+          const patch = li.deliverable?.trim() ? { deliverable: text } : { description: text };
+          run(() => patchLocal(id, patch), () => updateLineItem(id, patch));
+        }}
+        onRestoreLine={(id) => onSetStatus(id, "proposed")}
+        onDeleteLine={onDelete}
+        onEditNote={(id, note) => run(() => patchLocal(id, { excludes: note }), () => updateLineItem(id, { excludes: note }))}
+        onEditFinding={(id, text) =>
+          runFindings(
+            () => setFindings((prev) => prev.map((f) => (f.id === id ? { ...f, text } : f))),
+            () => updateFindingText(id, text),
+          )
+        }
+        onHideFinding={(id, hide) =>
+          runFindings(
+            () => setFindings((prev) => prev.map((f) => (f.id === id ? { ...f, status: hide ? "dismissed" : "accepted" } : f))),
+            () => setFindingStatus(id, hide ? "dismissed" : "accepted"),
+          )
+        }
+        onDeleteFinding={(id) =>
+          runFindings(
+            () => setFindings((prev) => prev.filter((f) => f.id !== id)),
+            () => deleteFinding(id),
+          )
+        }
+        onHideStandard={onHideStandard}
+      />
     </div>
   );
 }
