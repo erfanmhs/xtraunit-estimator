@@ -4,6 +4,7 @@ import {
   cglStatement,
   defaultContract,
   downpaymentCap,
+  hasPaymentSchedule,
   noticeOfCancellationText,
   resolveContract,
   rightToCancelHeading,
@@ -11,6 +12,30 @@ import {
   scheduleGap,
   workersCompStatement,
 } from "./contract";
+
+describe("payment schedule outside home improvement", () => {
+  it("is off by default and reads back from a stored block", () => {
+    expect(defaultContract("commercial").payment_schedule).toBe(false);
+    expect(resolveContract({ payment_schedule: true }, "commercial").payment_schedule).toBe(true);
+    expect(resolveContract({ payment_schedule: "yes" }, "commercial").payment_schedule).toBe(true);
+    expect(resolveContract({}, "commercial").payment_schedule).toBe(false);
+  });
+  it("shows its own section only when ticked and not a home improvement contract", () => {
+    expect(hasPaymentSchedule(resolveContract({ payment_schedule: true }, "commercial"))).toBe(true);
+    expect(hasPaymentSchedule(resolveContract({ payment_schedule: true, home_improvement: true }, "residential"))).toBe(false);
+    expect(hasPaymentSchedule(resolveContract({}, "commercial"))).toBe(false);
+    expect(hasPaymentSchedule(undefined)).toBe(false);
+  });
+});
+
+describe("scheduleGap", () => {
+  it("balances against the whole-dollar price the client sees", () => {
+    const c = resolveContract({ downpayment: 5000, progress_payments: [{ phase: "A", work: "", amount: 22692 }] }, "commercial");
+    expect(scheduleGap(c, 27692.4)).toBe(0);
+    expect(scheduleGap(c, 27700)).toBe(8);
+    expect(scheduleGap(c, 27600)).toBe(-92);
+  });
+});
 
 describe("home improvement contract — the numbers the statute fixes", () => {
   it("caps the down payment at $1,000 or 10 %, whichever is LESS", () => {

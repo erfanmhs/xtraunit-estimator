@@ -170,6 +170,7 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
       { do: "Add timeline milestones and, if you offer choices, price options (“Recommended” / “Enhanced”).", note: "" },
       { do: "Check the preview. Print, or Save as PDF from the print dialog.", note: "Every page prints; the browser's print button works." },
       { do: "For work on someone's home, keep “Home improvement contract” ticked under 05 · Contract and fill it in: start and completion dates, the down payment (the editor shows the legal cap), and the phases of the payment schedule until it adds up.", note: "That section makes the accepted proposal a California home improvement contract — the lien warning, right to cancel and insurance statements print automatically. Turn it off for commercial work." },
+      { do: "For any other job, tick “Payment schedule” under 05 · Contract: a deposit and the progress payments, each with what it covers, until they add up to the price. The client sees it as its own section.", note: "No legal cap on the deposit outside home improvement work." },
       { do: "Click “Publish client link” and send the link.", note: "The client reads it on their phone and can accept in the document. After edits, “Update client link”." },
     ],
     done: "A published link, or a PDF, in the client's hands. Mark the project Sent on the Projects page.",

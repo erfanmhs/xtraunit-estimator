@@ -40,6 +40,13 @@ export type ProgressPayment = {
 export type ProposalContract = {
   /** Treat this as a California home improvement contract (statutory blocks on). */
   home_improvement: boolean;
+  /**
+   * Outside home improvement (commercial, or a job with its own contract):
+   * show a payment schedule section — the deposit and the progress payments
+   * below, without the statutory sentences or the down payment cap. Ignored
+   * when home_improvement is on (the statute makes the schedule mandatory).
+   */
+  payment_schedule: boolean;
   /** Buyer is 65 or older → five-day right to cancel instead of three. */
   senior: boolean;
   /** One or more subcontractors will be used (the 2026 disclosure). */
@@ -58,6 +65,7 @@ export const HOME_IMPROVEMENT_TYPES = new Set(["residential", "adu_addition", "m
 export function defaultContract(projectType: string | null): ProposalContract {
   return {
     home_improvement: HOME_IMPROVEMENT_TYPES.has(projectType ?? ""),
+    payment_schedule: false,
     senior: false,
     uses_subcontractors: true,
     start_date: "",
@@ -83,6 +91,7 @@ export function resolveContract(raw: unknown, projectType: string | null): Propo
     : [];
   return {
     home_improvement: typeof r.home_improvement === "boolean" ? r.home_improvement : d.home_improvement,
+    payment_schedule: !!r.payment_schedule,
     senior: !!r.senior,
     uses_subcontractors: typeof r.uses_subcontractors === "boolean" ? r.uses_subcontractors : true,
     start_date: String(r.start_date ?? "").trim(),
@@ -93,6 +102,11 @@ export function resolveContract(raw: unknown, projectType: string | null): Propo
 }
 
 // ── The numbers the statute fixes ───────────────────────────────────────────
+
+/** Does the document carry its own payment schedule section (the non-statutory one)? */
+export function hasPaymentSchedule(c: ProposalContract | undefined | null): boolean {
+  return !!c && !c.home_improvement && c.payment_schedule;
+}
 
 /** The most a home improvement contract may take up front: $1,000 or 10 %, whichever is LESS. */
 export function downpaymentCap(contractPrice: number): number {
@@ -110,7 +124,10 @@ export function cancelDays(senior: boolean): 3 | 5 {
  */
 export function scheduleGap(c: ProposalContract, contractPrice: number): number {
   const sum = c.downpayment + c.progress_payments.reduce((n, p) => n + p.amount, 0);
-  return Math.round((contractPrice - sum) * 100) / 100;
+  // The price is shown in whole dollars everywhere, so the schedule balances
+  // against the whole-dollar price; otherwise 40 cents of rounding read as
+  // "$0 over — fix before sending".
+  return Math.round((Math.round(contractPrice) - sum) * 100) / 100;
 }
 
 // ── Company-level compliance answers (stored on the proposal profile) ───────

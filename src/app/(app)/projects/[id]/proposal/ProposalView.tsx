@@ -107,6 +107,45 @@ export default function ProposalView({
   function setPay(i: number, patch: Partial<ProgressPayment>) {
     setContract((c) => ({ ...c, progress_payments: c.progress_payments.map((p, j) => (j === i ? { ...p, ...patch } : p)) }));
   }
+  // The deposit + phases editor, shared by the statutory contract and the
+  // plain payment schedule (Erfan, 2026-09-14: a schedule for every kind of
+  // contract, not only home improvement).
+  const scheduleEditor = (
+                <div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-xs text-muted">
+                      Schedule of progress payments — each phase, what it delivers, and the amount. Must add up to the contract price with the down payment.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setContract((c) => ({ ...c, progress_payments: [...c.progress_payments, { phase: "", work: "", amount: 0 }] }))}
+                      className="text-xs text-brand-soft hover:underline"
+                    >
+                      + Add phase
+                    </button>
+                  </div>
+                  {contract.progress_payments.length ? (
+                    <div className="mt-1.5 space-y-1.5">
+                      {contract.progress_payments.map((pp, i) => (
+                        <div key={i} className="grid gap-1.5 sm:grid-cols-[10rem_1fr_8rem_auto]">
+                          <input value={pp.phase} onChange={(e) => setPay(i, { phase: e.target.value })} placeholder="Phase (Rough framing)" spellCheck className={FIELD} />
+                          <input value={pp.work} onChange={(e) => setPay(i, { work: e.target.value })} placeholder="Work or services supplied in this phase" spellCheck className={FIELD} />
+                          <input type="number" min={0} value={pp.amount || ""} onChange={(e) => setPay(i, { amount: Math.max(0, Number(e.target.value) || 0) })} placeholder="Amount" className={FIELD} />
+                          <button type="button" onClick={() => setContract((c) => ({ ...c, progress_payments: c.progress_payments.filter((_, j) => j !== i) }))} className="text-xs text-muted hover:text-brand-soft">
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                      <p className={`text-xs ${gap === 0 ? "text-muted" : "text-brand-soft"}`}>
+                        Down payment + phases = {usd0.format(contractPrice - gap)} of {usd0.format(contractPrice)}
+                        {gap === 0 ? " ✓" : gap > 0 ? ` — ${usd0.format(gap)} still to allocate` : ` — ${usd0.format(-gap)} over`}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted">No phases yet — the contract will say payments follow the milestones in the timeline. Adding phases is what the statute expects.</p>
+                  )}
+                </div>
+  );
 
   function onSave(then?: () => void) {
     setError(null);
@@ -482,42 +521,41 @@ export default function ProposalView({
                     <p className="mt-1 text-xs text-brand-soft">Over the legal cap — the client will see a warning until this is {usd0.format(capUsd)} or less.</p>
                   ) : null}
                 </div>
-                <div>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs text-muted">
-                      Schedule of progress payments — each phase, what it delivers, and the amount. Must add up to the contract price with the down payment.
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setContract((c) => ({ ...c, progress_payments: [...c.progress_payments, { phase: "", work: "", amount: 0 }] }))}
-                      className="text-xs text-brand-soft hover:underline"
-                    >
-                      + Add phase
-                    </button>
-                  </div>
-                  {contract.progress_payments.length ? (
-                    <div className="mt-1.5 space-y-1.5">
-                      {contract.progress_payments.map((pp, i) => (
-                        <div key={i} className="grid gap-1.5 sm:grid-cols-[10rem_1fr_8rem_auto]">
-                          <input value={pp.phase} onChange={(e) => setPay(i, { phase: e.target.value })} placeholder="Phase (Rough framing)" spellCheck className={FIELD} />
-                          <input value={pp.work} onChange={(e) => setPay(i, { work: e.target.value })} placeholder="Work or services supplied in this phase" spellCheck className={FIELD} />
-                          <input type="number" min={0} value={pp.amount || ""} onChange={(e) => setPay(i, { amount: Math.max(0, Number(e.target.value) || 0) })} placeholder="Amount" className={FIELD} />
-                          <button type="button" onClick={() => setContract((c) => ({ ...c, progress_payments: c.progress_payments.filter((_, j) => j !== i) }))} className="text-xs text-muted hover:text-brand-soft">
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                      <p className={`text-xs ${gap === 0 ? "text-muted" : "text-brand-soft"}`}>
-                        Down payment + phases = {usd0.format(contractPrice - gap)} of {usd0.format(contractPrice)}
-                        {gap === 0 ? " ✓" : gap > 0 ? ` — ${usd0.format(gap)} still to allocate` : ` — ${usd0.format(-gap)} over`}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted">No phases yet — the contract will say payments follow the milestones in the timeline. Adding phases is what the statute expects.</p>
-                  )}
-                </div>
+                {scheduleEditor}
               </div>
-            ) : null}
+            ) : (
+              <div className="mt-3 space-y-3">
+                <label className="flex items-start gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={contract.payment_schedule}
+                    onChange={(e) => setContract((c) => ({ ...c, payment_schedule: e.target.checked }))}
+                    className="mt-1 accent-brand"
+                  />
+                  <span>
+                    Payment schedule — a deposit and progress payments, in their own section of the proposal.
+                    <span className="block text-xs text-muted">For commercial work or any job that is not a home improvement contract. No statutory cap on the deposit here.</span>
+                  </span>
+                </label>
+                {contract.payment_schedule ? (
+                  <>
+                    <div>
+                      <label className="text-xs text-muted">Deposit due at signing</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={100}
+                        value={contract.downpayment || ""}
+                        onChange={(e) => setContract((c) => ({ ...c, downpayment: Math.max(0, Number(e.target.value) || 0) }))}
+                        placeholder="0"
+                        className={`${FIELD} mt-1 sm:w-48`}
+                      />
+                    </div>
+                    {scheduleEditor}
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <p className="text-xs text-muted">
