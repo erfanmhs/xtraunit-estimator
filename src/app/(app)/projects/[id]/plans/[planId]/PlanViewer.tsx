@@ -102,16 +102,25 @@ import LayerNameField from "./LayerNameField";
 import { TYPE_NOUN, blockedLayers, isDefaultLayerName, layerFits, nextLayerName, layerTypeOf } from "@/lib/takeoff/layers";
 import { findSymbolCopies } from "@/lib/takeoff/templateMatchClient";
 
+/** Another plan set in the same project — the viewer browses across them. */
+export type SiblingFile = { id: string; file_name: string; sheets: number };
+
 export default function PlanViewer({
   projectId,
   planFile,
   sheets,
+  siblings = [],
+  initialSheet = "first",
   initialPhone = false,
   initialCoarse = false,
 }: {
   projectId: string;
   planFile: PlanFile;
   sheets: Sheet[];
+  /** Every plan set in the project, oldest first; this file is one of them. */
+  siblings?: SiblingFile[];
+  /** "last" when arriving from the next set's ‹ — open on the last sheet, not the first. */
+  initialSheet?: "first" | "last";
   /** The server's guess from the request headers, so the first paint is already right. */
   initialPhone?: boolean;
   initialCoarse?: boolean;
@@ -144,7 +153,10 @@ export default function PlanViewer({
   const router = useRouter();
 
   const [numPages, setNumPages] = useState(0);
-  const [pageNum, setPageNum] = useState(1);
+  // Arriving from the following set's ‹ lands on the LAST sheet, so the two
+  // arrows walk the whole project as one run of sheets in both directions.
+  const lastSheet = initialSheet === "last" && sheets.length ? sheets[sheets.length - 1] : null;
+  const [pageNum, setPageNum] = useState(lastSheet?.page_number ?? 1);
   const [scale, setScale] = useState(1); // live display zoom
   const [rasterScale, setRasterScale] = useState(1); // scale the bitmap is drawn at
   const [baseDims, setBaseDims] = useState({ w: 0, h: 0 }); // page size at scale 1
@@ -197,7 +209,7 @@ export default function PlanViewer({
   const [addedSheets, setAddedSheets] = useState<Sheet[]>([]);
   // Which sheet is open. Several sheets can share a page (a page + its crops),
   // so the page number alone isn't enough.
-  const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
+  const [activeSheetId, setActiveSheetId] = useState<string | null>(lastSheet?.id ?? null);
   // Crop tool: the rectangle being dragged (page points, relative to the
   // current canvas), the paper shape it's held to, and its orientation.
   const [cropDraft, setCropDraft] = useState<{ a: Pt; b: Pt } | null>(null);
@@ -598,6 +610,13 @@ export default function PlanViewer({
     setActiveSheetId(s.id);
     setPageNum(s.page_number);
   }
+  // The project's other sets: ‹ on the first sheet goes to the previous set's
+  // last sheet, › on the last sheet to the next set's first.
+  const fileIndex = siblings.findIndex((f) => f.id === planFile.id);
+  const prevFile = fileIndex > 0 ? siblings[fileIndex - 1] : null;
+  const nextFile = fileIndex >= 0 && fileIndex < siblings.length - 1 ? siblings[fileIndex + 1] : null;
+  const setHref = (f: SiblingFile, at: "first" | "last") =>
+    `/projects/${projectId}/plans/${f.id}${at === "last" ? "?sheet=last" : ""}`;
   const currentScale = currentSheet ? scales[currentSheet.id] : null;
   const currentLedger = currentSheet
     ? (ledgers[currentSheet.id] ?? DEFAULT_LEDGER)
@@ -3859,12 +3878,34 @@ export default function PlanViewer({
                 >
                   ← Back to project
                 </Link>
-                <p
-                  className="mt-1 truncate text-sm text-foreground"
-                  title={planFile.file_name}
-                >
-                  {planFile.file_name}
-                </p>
+                {siblings.length > 1 ? (
+                  // Several sets in the project (one PDF per sheet, or a set
+                  // added later): jump between them here, without the trip
+                  // back to the project page.
+                  <select
+                    value={planFile.id}
+                    onChange={(e) => {
+                      const f = siblings.find((x) => x.id === e.target.value);
+                      if (f && f.id !== planFile.id) router.push(setHref(f, "first"));
+                    }}
+                    aria-label="Plan set"
+                    title={planFile.file_name}
+                    className="mt-1 w-full max-w-full truncate rounded-md border border-border bg-transparent px-2 py-1 text-sm text-foreground"
+                  >
+                    {siblings.map((f, i) => (
+                      <option key={f.id} value={f.id}>
+                        {i + 1}/{siblings.length} · {f.file_name} ({f.sheets} sheet{f.sheets === 1 ? "" : "s"})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p
+                    className="mt-1 truncate text-sm text-foreground"
+                    title={planFile.file_name}
+                  >
+                    {planFile.file_name}
+                  </p>
+                )}
                 {/* Categorizing happens here (only here). Uncategorized sheets
                     are still read — by EVERY AI pass — so this is a cost nudge. */}
                 {(() => {
@@ -5898,13 +5939,13 @@ export default function PlanViewer({
           <div className="flex items-center gap-1.5 text-sm text-foreground">
             <button
               type="button"
-              onClick={() =>
-                sheetList.length
-                  ? sheetIndex > 0 && openSheet(sheetList[sheetIndex - 1])
-                  : setPageNum((p) => Math.max(1, p - 1))
-              }
-              disabled={sheetList.length ? sheetIndex <= 0 : pageNum <= 1}
-              title="Previous sheet"
+              onClick={() => {
+                if (!sheetList.length) return setPageNum((p) => Math.max(1, p - 1));
+                if (sheetIndex > 0) openSheet(sheetList[sheetIndex - 1]);
+                else if (prevFile) router.push(setHref(prevFile, "last"));
+              }}
+              disabled={sheetList.length ? sheetIndex <= 0 && !prevFile : pageNum <= 1}
+              title={sheetIndex <= 0 && prevFile ? `Previous set: ${prevFile.file_name}` : "Previous sheet"}
               className="rounded-md border border-border px-2.5 py-0.5 hover:border-brand disabled:opacity-40"
             >
               ‹
@@ -5912,16 +5953,21 @@ export default function PlanViewer({
             <span className="tabular-nums" title={crop ? `Crop of page ${pageNum}` : `Page ${pageNum}`}>
               {sheetList.length ? `${sheetIndex + 1} / ${sheetList.length}` : `${pageNum} / ${numPages || "…"}`}
               {crop ? <span className="ml-1 text-[10px] uppercase text-muted">crop</span> : null}
+              {siblings.length > 1 && fileIndex >= 0 ? (
+                <span className="ml-1 text-[10px] text-muted" title={planFile.file_name}>
+                  set {fileIndex + 1}/{siblings.length}
+                </span>
+              ) : null}
             </span>
             <button
               type="button"
-              onClick={() =>
-                sheetList.length
-                  ? sheetIndex < sheetList.length - 1 && openSheet(sheetList[sheetIndex + 1])
-                  : setPageNum((p) => Math.min(numPages, p + 1))
-              }
-              disabled={sheetList.length ? sheetIndex >= sheetList.length - 1 : pageNum >= numPages}
-              title="Next sheet"
+              onClick={() => {
+                if (!sheetList.length) return setPageNum((p) => Math.min(numPages, p + 1));
+                if (sheetIndex < sheetList.length - 1) openSheet(sheetList[sheetIndex + 1]);
+                else if (nextFile) router.push(setHref(nextFile, "first"));
+              }}
+              disabled={sheetList.length ? sheetIndex >= sheetList.length - 1 && !nextFile : pageNum >= numPages}
+              title={sheetIndex >= sheetList.length - 1 && nextFile ? `Next set: ${nextFile.file_name}` : "Next sheet"}
               className="rounded-md border border-border px-2.5 py-0.5 hover:border-brand disabled:opacity-40"
             >
               ›
