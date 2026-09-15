@@ -45,6 +45,7 @@ const timelineInput = z.object({
 
 const contractInput = z.object({
   home_improvement: z.boolean(),
+  payment_schedule: z.boolean().optional().default(false),
   senior: z.boolean(),
   uses_subcontractors: z.boolean(),
   start_date: z.string().trim().max(120),

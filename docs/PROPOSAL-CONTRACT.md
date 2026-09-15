@@ -45,6 +45,16 @@ In the order the section prints:
 The seven-day right to cancel for disaster-area repair contracts is not
 implemented; if the company ever takes that work, add it before signing.
 
+### Payment schedule for every other contract (2026-09-14)
+
+When *Home improvement contract* is off, the estimator can tick **Payment
+schedule** instead (`contract.payment_schedule`). The same deposit and
+progress-payment rows then render as their own numbered section, "Payment
+schedule" (`src/components/proposal/PaymentSchedule.tsx`), without the
+statutory sentences and without the $1,000 down payment cap, which §7159
+applies only to home improvement. The editor still shows whether the rows
+add up to the contract price.
+
 ## What is ours (Settings → Proposal profile → Terms & conditions)
 
 Nineteen plain-language clauses, defaults in `src/lib/proposal/profile.ts`:
