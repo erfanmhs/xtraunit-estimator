@@ -440,7 +440,7 @@ function ProposalProfileSection({
         {/* Excluded / by others — the standard list every proposal carries */}
         <div>
           <span className="text-[11px] uppercase tracking-wider text-muted">
-            Standard &ldquo;Excluded / by others&rdquo; list (one per line)
+            Standard &ldquo;Not included in this price&rdquo; list — prints on every proposal (one per line)
           </span>
           <p className="text-xs text-muted/70">
             Permits, utility work, third-party inspections… Ambiguity here is the #1 source of disputes, so

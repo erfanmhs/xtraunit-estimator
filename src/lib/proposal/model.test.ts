@@ -225,7 +225,8 @@ describe("excluded lines reach the proposal", () => {
       line({ id: "a", description: "Paint", cost_total: 1000, price_mode: "total" }),
       line({ id: "b", description: "Landscaping", status: "excluded" }),
     ]);
-    expect(d.scope.excluded).toContain("Landscaping");
+    expect(d.scope.excluded.some((s) => s.endsWith("Landscaping"))).toBe(true); // "Trade — Landscaping"
+    expect(d.scope.exclusion_groups?.flatMap((g) => g.items)).toContain("Landscaping");
   });
 
   it("keeps it out of the priced scope and out of the total", () => {
@@ -245,8 +246,13 @@ describe("excluded lines reach the proposal", () => {
       [{ kind: "exclusion", text: "Permit fees by owner" }],
     );
     expect(d.scope.excluded).toEqual(
-      expect.arrayContaining(["Landscaping", "Permit fees by owner"]),
+      expect.arrayContaining(["Drywall, Plaster & Ceilings — Landscaping", "Permit fees by owner"]),
     );
+    expect(d.scope.exclusion_groups?.map((g) => g.title)).toEqual([
+      "Drywall, Plaster & Ceilings",
+      "Noted while reading the plans",
+      "Standard on every proposal",
+    ]);
   });
 });
 

@@ -13,7 +13,7 @@
  */
 import type { ProposalProfile } from "./profile";
 import { resolveContract, type ProposalContract } from "./contract";
-import { exclusionItems, shownExclusions } from "./exclusions";
+import { exclusionItems, printedExclusionGroups, shownExclusions } from "./exclusions";
 // Relative on purpose: this file also runs under vitest, which has no "@/" alias.
 import { groupByTrade } from "../scope/trades";
 
@@ -118,7 +118,9 @@ export type ProposalDoc = {
   understanding: string; // legacy "Our understanding" paragraph (optional)
   scope: {
     divisions: ScopeDivision[];
-    excluded: string[]; // scope lines marked Excluded + exclusion findings
+    excluded: string[]; // scope lines marked Excluded + exclusion findings (flat, older snapshots)
+    /** The same, gathered by trade / plan review / standard list — how it prints. */
+    exclusion_groups?: { title: string; items: string[] }[];
     assumptions: string[]; // assumption findings
   };
   pricing: {
@@ -375,14 +377,14 @@ export function buildProposalDoc(input: {
   // from the profile above.
   const tradeOfLine = new Map<string, string>();
   for (const g of groupByTrade(lines)) for (const li of g.rows) tradeOfLine.set(li.id, g.trade);
-  const excluded = shownExclusions(
-    exclusionItems({
-      lines: lines.map((li) => ({ ...li, trade: tradeOfLine.get(li.id) ?? "" })),
-      findings,
-      standard: [],
-      hidden,
-    }),
-  );
+  const exclusionList = exclusionItems({
+    lines: lines.map((li) => ({ ...li, trade: tradeOfLine.get(li.id) ?? "" })),
+    findings,
+    standard: profile.standard_exclusions,
+    hidden,
+  });
+  const excluded = shownExclusions(exclusionList.filter((i) => i.source !== "standard"));
+  const exclusion_groups = printedExclusionGroups(exclusionList);
   const assumptions = findings.filter((f) => f.kind === "assumption").map((f) => f.text);
 
   const proposalDate =
@@ -399,7 +401,7 @@ export function buildProposalDoc(input: {
     executive_summary: fields.executive_summary ?? "",
     project_description: fields.project_description ?? "",
     understanding: fields.understanding ?? "",
-    scope: { divisions, excluded, assumptions },
+    scope: { divisions, excluded, exclusion_groups, assumptions },
     pricing: {
       direct,
       buckets,

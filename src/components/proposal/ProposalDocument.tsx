@@ -197,7 +197,7 @@ export default function ProposalDocument({
         <Section id="scope" n="02" title="Scope of work">
           <p className="text-sm text-neutral-600">
             Organized by trade, the way the work is bought and built. Everything listed is included in the
-            price; anything not listed, or listed under &ldquo;Excluded / by others,&rdquo; is outside this
+            price; anything not listed, or listed under &ldquo;Not included in this price,&rdquo; is outside this
             proposal.
           </p>
           <div className="mt-4 space-y-4">
@@ -239,8 +239,26 @@ export default function ProposalDocument({
             </SubSection>
           ) : null}
 
-          <SubSection title="Excluded / by others">
-            <Bullets items={[...doc.scope.excluded, ...doc.profile.standard_exclusions]} />
+          <SubSection title="Not included in this price">
+            <p className="text-xs text-neutral-500">
+              These are handled by the owner or by someone else, or are simply not part of this job.
+            </p>
+            {doc.scope.exclusion_groups ? (
+              // Gathered by trade so the list reads in a glance instead of a
+              // page of bullets: "Plumbing: gas piping; sewer lateral; …"
+              <div className="mt-2 columns-1 gap-8 text-sm sm:columns-2">
+                {doc.scope.exclusion_groups.map((g) => (
+                  <p key={g.title} className="mb-1.5 break-inside-avoid">
+                    <span className="font-medium text-neutral-900">{g.title}: </span>
+                    <span className="text-neutral-700">{g.items.join("; ")}.</span>
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2">
+                <Bullets items={[...doc.scope.excluded, ...doc.profile.standard_exclusions]} />
+              </div>
+            )}
             {doc.profile.license_note ? (
               <p className="mt-2 text-sm text-neutral-600">{doc.profile.license_note}</p>
             ) : null}
