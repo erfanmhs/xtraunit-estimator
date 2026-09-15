@@ -38,7 +38,7 @@ export default function LayerNameField({
   renames?: number;
   /** Set by the parent when a layer was picked from the list instead. */
   skipCommitRef: { current: boolean };
-  onCommit: (name: string) => void;
+  onCommit: (name: string, via?: "blur") => void;
   onDone: () => void;
 }) {
   const [text, setText] = useState(initial);
@@ -56,6 +56,7 @@ export default function LayerNameField({
   useEffect(() => {
     if (selectOnMount) inputRef.current?.select();
   }, [selectOnMount]);
+
   // The picker can close without a blur (tap on the drawing) — commit then too,
   // unless the close came from picking an existing layer, or the name is refused.
   useEffect(
@@ -93,7 +94,9 @@ export default function LayerNameField({
             }
           }}
           onBlur={() => {
-            if (ok) onCommit(trimmed);
+            // The phone keyboard's Done / ✓ only blurs the field, no Enter:
+            // the parent decides whether that finished the job.
+            if (ok) onCommit(trimmed, "blur");
           }}
           autoFocus={selectOnMount || !initial.trim()}
           spellCheck

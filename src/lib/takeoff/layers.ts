@@ -1,7 +1,8 @@
 /**
  * The layer rule: a layer holds ONE kind of measurement. Areas live with
- * areas, counts with counts. Switching tools starts a new layer, named
- * "Layer 1", "Layer 2", … until the user gives it a real name.
+ * areas, counts with counts. Switching tools goes back to the last layer of
+ * that kind on the sheet; the first time a kind is drawn a layer named
+ * "Layer 1", "Layer 2", … is started, until the user gives it a real name.
  *
  * Pure helpers, so the viewer's decisions ("does this name fit this tool?",
  * "what is the next free name?") are testable without a browser.
