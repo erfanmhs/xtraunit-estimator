@@ -9,6 +9,8 @@ import NextStep from "@/components/NextStep";
 import { groupByTrade } from "@/lib/scope/trades";
 import AiBudgetNote from "@/components/AiBudgetNote";
 import { getAiSpendThisMonth } from "@/lib/ai-usage";
+import { resolveProfile } from "@/lib/proposal/profile";
+import { resolveHidden } from "@/lib/proposal/exclusions";
 
 export default async function ScopePage({
   params,
@@ -22,11 +24,15 @@ export default async function ScopePage({
   const supabase = await createClient();
 
   // Resilient to migration 0030 (gen_trades) not being run yet.
-  const projRes = await supabase
+  // Tiered: with hidden_exclusions (0045) → with gen_trades → minimal.
+  const projWide = await supabase
     .from("projects")
-    .select("id,name,gen_trades")
+    .select("id,name,gen_trades,hidden_exclusions")
     .eq("id", id)
     .maybeSingle();
+  const projRes = projWide.error
+    ? await supabase.from("projects").select("id,name,gen_trades").eq("id", id).maybeSingle()
+    : projWide;
   const project = (
     projRes.error
       ? (
@@ -37,8 +43,13 @@ export default async function ScopePage({
             .maybeSingle()
         ).data
       : projRes.data
-  ) as { id: string; name: string | null; gen_trades?: string[] | null } | null;
+  ) as { id: string; name: string | null; gen_trades?: string[] | null; hidden_exclusions?: unknown } | null;
   const genTrades = Array.isArray(project?.gen_trades) ? project.gen_trades : [];
+  const hiddenExclusions = resolveHidden(project?.hidden_exclusions);
+  // The company's standard exclusions print on every proposal — show them
+  // with the rest so the estimator sees the whole list the client reads.
+  const { data: cs } = await supabase.from("company_settings").select("proposal_profile").maybeSingle();
+  const standardExclusions = resolveProfile(cs?.proposal_profile).standard_exclusions;
 
   // Resilient to migration 0041 (trade packages) not being run yet: the
   // canvas files lines by CSI section when the columns are missing.
@@ -251,7 +262,13 @@ export default async function ScopePage({
             </p>
           </div>
         ) : (
-          <ScopeCanvas projectId={id} initialItems={lineItems} />
+          <ScopeCanvas
+            projectId={id}
+            initialItems={lineItems}
+            initialFindings={findingRows.filter((f) => f.kind === "exclusion")}
+            standardExclusions={standardExclusions}
+            initialHidden={hiddenExclusions}
+          />
         )}
 
         <FindingsReview projectId={id} initialFindings={findingRows} />

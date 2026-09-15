@@ -13,6 +13,7 @@
  */
 import type { ProposalProfile } from "./profile";
 import { resolveContract, type ProposalContract } from "./contract";
+import { exclusionItems, shownExclusions } from "./exclusions";
 // Relative on purpose: this file also runs under vitest, which has no "@/" alias.
 import { groupByTrade } from "../scope/trades";
 
@@ -296,10 +297,18 @@ export function buildProposalDoc(input: {
   project: ProposalDoc["project"];
   lines: LineInput[];
   markups: MarkupInput;
-  findings: { kind: string; text: string }[];
+  findings: { id?: string; kind: string; text: string; status?: string | null; resolved?: boolean | null }[];
   fields: ProposalFields;
+  /** Standard exclusions hidden on this project (projects.hidden_exclusions, 0045). */
+  hidden_exclusions?: string[];
 }): ProposalDoc {
-  const { company, profile, project, lines, markups, findings, fields } = input;
+  const { company, project, lines, markups, findings, fields } = input;
+  const hidden = input.hidden_exclusions ?? [];
+  // The company's standard exclusions, minus the ones hidden on this project.
+  const profile = {
+    ...input.profile,
+    standard_exclusions: input.profile.standard_exclusions.filter((s) => !hidden.includes(s.trim())),
+  };
 
   const active = lines.filter((li) => li.status !== "excluded");
   const priced = active.filter(isPriced);
@@ -360,18 +369,20 @@ export function buildProposalDoc(input: {
   const sf = project.building_sf;
 
   // Excluded: whole lines the user excluded, what each active line says it
-  // leaves out ("Plumbing — fixture supply by owner"), and exclusion findings.
-  const excluded = [
-    ...lines
-      .filter((li) => li.status === "excluded")
-      .map((li) => li.deliverable?.trim() || li.description),
-    ...groupByTrade(active).flatMap((g) =>
-      g.rows
-        .filter((li) => li.excludes?.trim())
-        .map((li) => `${g.trade} — ${li.excludes!.trim()}`),
-    ),
-    ...findings.filter((f) => f.kind === "exclusion").map((f) => f.text),
-  ];
+  // leaves out ("Plumbing — fixture supply by owner"), and exclusion findings
+  // the user has not dismissed — the same list the Scope page edits
+  // (src/lib/proposal/exclusions.ts). Standard exclusions print after these
+  // from the profile above.
+  const tradeOfLine = new Map<string, string>();
+  for (const g of groupByTrade(lines)) for (const li of g.rows) tradeOfLine.set(li.id, g.trade);
+  const excluded = shownExclusions(
+    exclusionItems({
+      lines: lines.map((li) => ({ ...li, trade: tradeOfLine.get(li.id) ?? "" })),
+      findings,
+      standard: [],
+      hidden,
+    }),
+  );
   const assumptions = findings.filter((f) => f.kind === "assumption").map((f) => f.text);
 
   const proposalDate =

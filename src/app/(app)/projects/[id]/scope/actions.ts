@@ -433,6 +433,54 @@ export async function setFindingStatus(
   return { ok: true };
 }
 
+// Reword a finding — an exclusion the client will read, in the estimator's
+// own words (the Scope page's exclusions list).
+export async function updateFindingText(findingId: string, text: string): Promise<ActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(findingId).success) return { ok: false, error: "That finding id isn't valid." };
+  const t = text.trim();
+  if (!t) return { ok: false, error: "The wording can't be empty." };
+  if (t.length > 600) return { ok: false, error: "Keep it under 600 characters." };
+  const { error } = await supabase.from("scope_findings").update({ text: t }).eq("id", findingId);
+  if (error) return { ok: false, error: "Could not save the wording." };
+  return { ok: true };
+}
+
+// Delete a finding for good (the exclusions list's "Delete"). Hiding is
+// setFindingStatus(id, "dismissed"); this is the one that can't be undone.
+export async function deleteFinding(findingId: string): Promise<ActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(findingId).success) return { ok: false, error: "That finding id isn't valid." };
+  const { error } = await supabase.from("scope_findings").delete().eq("id", findingId);
+  if (error) return { ok: false, error: "Could not delete the finding." };
+  return { ok: true };
+}
+
+// Which of the company's standard exclusions stay OFF this project's
+// proposal (projects.hidden_exclusions, migration 0045). The wording itself
+// lives in Settings → Proposal profile.
+export async function setHiddenExclusions(projectId: string, hidden: string[]): Promise<ActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (!uuid.safeParse(projectId).success) return { ok: false, error: "That project id isn't valid." };
+  const clean = Array.from(new Set(hidden.map((s) => String(s ?? "").trim()).filter(Boolean))).slice(0, 200);
+  const { error } = await supabase.from("projects").update({ hidden_exclusions: clean }).eq("id", projectId);
+  if (error)
+    return { ok: false, error: "Could not save. (Has migration 0045 been run in Supabase?)" };
+  return { ok: true };
+}
+
 // Correct a sheet's discipline (drives which sheets each CSI-division draft
 // pass reads). Persisted so the fix sticks across regenerates.
 export async function setSheetDiscipline(

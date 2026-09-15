@@ -123,6 +123,7 @@ export const GUIDE: Record<GuideKey, GuideEntry> = {
       { do: "Click “Generate Scope of Work”.", note: "Two to five minutes; the progress line tells you what it's doing. You can leave the page — it keeps working." },
       { do: "Open each trade and read the lines. Confirm what's right, delete what doesn't apply, add what's missing.", note: "Every line says where it came from (measurement, plan note, assumption)." },
       { do: "Answer the questions under “What to review”.", note: "Each answer tightens the scope. “Regenerate Scope” if you changed a lot." },
+      { do: "Under the trades, “Exclusions on the proposal” is the exact list the client reads as Excluded / by others: excluded lines, what a line leaves out, the AI’s exclusion findings, and your standard exclusions from Settings. Edit the wording, restore a line to the scope, hide an item, or delete it for good.", note: "Hiding a standard exclusion changes this project only — the wording stays in Settings." },
     ],
     done: "A scope by trade with most lines confirmed and no open gaps that matter.",
     tip: "The AI cost line under the button shows what this month's runs cost. A full-building scope is about a dollar.",
